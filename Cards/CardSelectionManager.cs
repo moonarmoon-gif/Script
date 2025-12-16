@@ -2260,115 +2260,106 @@ public class CardSelectionManager : MonoBehaviour
         DisplayCombinedCards(combinedCards);
     }
 
+    // Replace your existing GetRarityForSoulLevel(int soulLevel) with this entire method.
+
+    private static readonly int[][] SoulLevelFavourOdds = new int[][]
+    {
+    // SoulLevel 1..5
+    new[] {100, 0, 0, 0, 0, 0},
+    new[] {100, 0, 0, 0, 0, 0},
+    new[] {100, 0, 0, 0, 0, 0},
+    new[] {100, 0, 0, 0, 0, 0},
+    new[] {100, 0, 0, 0, 0, 0},
+
+    // 6..15
+    new[] {95, 5, 0, 0, 0, 0},
+    new[] {90, 10, 0, 0, 0, 0},
+    new[] {85, 15, 0, 0, 0, 0},
+    new[] {80, 20, 0, 0, 0, 0},
+    new[] {75, 25, 0, 0, 0, 0},
+    new[] {65, 35, 0, 0, 0, 0},
+    new[] {55, 45, 0, 0, 0, 0},
+    new[] {45, 55, 0, 0, 0, 0},
+    new[] {35, 65, 0, 0, 0, 0},
+    new[] {25, 75, 0, 0, 0, 0},
+
+    // 16..23
+    new[] {15, 80, 5, 0, 0, 0},
+    new[] {5, 85, 10, 0, 0, 0},
+    new[] {5, 80, 15, 0, 0, 0},
+    new[] {5, 75, 20, 0, 0, 0},
+    new[] {5, 70, 25, 0, 0, 0},
+    new[] {5, 65, 30, 0, 0, 0},
+    new[] {5, 60, 35, 0, 0, 0},
+    new[] {5, 55, 40, 0, 0, 0},
+
+    // 24..27
+    new[] {0, 50, 50, 0, 0, 0},
+    new[] {0, 40, 60, 0, 0, 0},
+    new[] {0, 30, 70, 0, 0, 0},
+    new[] {0, 20, 80, 0, 0, 0},
+
+    // 28..35
+    new[] {0, 10, 80, 5, 0, 0},
+    new[] {0, 5, 80, 10, 0, 0},
+    new[] {0, 5, 75, 15, 0, 0},
+    new[] {0, 5, 70, 20, 0, 0},
+    new[] {0, 5, 65, 25, 0, 0},
+    new[] {0, 5, 60, 30, 0, 0},
+    new[] {0, 5, 55, 35, 0, 0},
+    new[] {0, 5, 50, 40, 0, 0},
+
+    // 36..39
+    new[] {0, 0, 45, 50, 0, 0},
+    new[] {0, 0, 40, 60, 0, 0},
+    new[] {0, 0, 30, 70, 0, 0},
+    };
+
     private CardRarity GetRarityForSoulLevel(int soulLevel)
     {
-        // Clamp soul level. Soul level itself can keep increasing for UI /
-        // progression, but odds are capped once Mythic reaches 100%.
-        if (soulLevel < 1)
+        // SoulLevel is 1-based.
+        if (soulLevel < 1) soulLevel = 1;
+
+        int index = soulLevel - 1;
+
+        // Clamp to last row for testing, as requested.
+        if (index >= SoulLevelFavourOdds.Length)
         {
-            soulLevel = 1;
+            index = SoulLevelFavourOdds.Length - 1;
         }
 
-        const int stepSize = 5;              // 5% shifted per level
-        const int levelsPerStage = 100 / stepSize; // 20 levels to move 100% from one rarity to the next
-        const int stages = 5;                // Common→Uncommon→Rare→Epic→Legendary→Mythic
-        int maxSteps = levelsPerStage * stages;     // 100 total 5% steps
-        int maxSoulLevel = 5 + maxSteps;            // 5 full-common levels, then 100 shifting levels
+        int[] row = SoulLevelFavourOdds[index];
 
-        if (soulLevel > maxSoulLevel)
-        {
-            soulLevel = maxSoulLevel;
-        }
+        int common = Mathf.Max(0, row.Length > 0 ? row[0] : 0);
+        int uncommon = Mathf.Max(0, row.Length > 1 ? row[1] : 0);
+        int rare = Mathf.Max(0, row.Length > 2 ? row[2] : 0);
+        int epic = Mathf.Max(0, row.Length > 3 ? row[3] : 0);
+        int legendary = Mathf.Max(0, row.Length > 4 ? row[4] : 0);
+        int mythic = Mathf.Max(0, row.Length > 5 ? row[5] : 0);
 
-        // Rarity order: Common, Uncommon, Rare, Epic, Legendary, Mythic
-        float common = 0f;
-        float uncommon = 0f;
-        float rare = 0f;
-        float epic = 0f;
-        float legendary = 0f;
-        float mythic = 0f;
-
-        if (soulLevel <= 5)
-        {
-            // First 5 soul levels: 100% Common
-            common = 100f;
-        }
-        else
-        {
-            // Start with 100% Common, then shift 5% per level along the
-            // rarity ladder: Common→Uncommon→Rare→Epic→Legendary→Mythic.
-            float[] weights = new float[6];
-            weights[0] = 100f; // Common
-
-            int stepsToApply = Mathf.Min(maxSteps, soulLevel - 5);
-
-            for (int step = 0; step < stepsToApply; step++)
-            {
-                int stage = step / levelsPerStage;   // 0..4
-                int fromIndex = stage;               // Common, Uncommon, Rare, Epic, Legendary
-                int toIndex = stage + 1;             // next higher rarity
-
-                if (fromIndex < 0 || toIndex >= weights.Length)
-                {
-                    break;
-                }
-
-                float amountToShift = stepSize;
-                if (weights[fromIndex] < amountToShift)
-                {
-                    amountToShift = weights[fromIndex];
-                }
-
-                weights[fromIndex] -= amountToShift;
-                weights[toIndex] += amountToShift;
-            }
-
-            common = weights[0];
-            uncommon = weights[1];
-            rare = weights[2];
-            epic = weights[3];
-            legendary = weights[4];
-            mythic = weights[5];
-        }
-
-        float total = common + uncommon + rare + epic + legendary + mythic;
-        if (total <= 0f)
+        int total = common + uncommon + rare + epic + legendary + mythic;
+        if (total <= 0)
         {
             return CardRarity.Common;
         }
 
-        float roll = Random.Range(0f, total);
-        float cumulative = 0f;
+        int roll = Random.Range(0, total);
+        int cumulative = 0;
 
         cumulative += common;
-        if (roll < cumulative)
-        {
-            return CardRarity.Common;
-        }
+        if (roll < cumulative) return CardRarity.Common;
 
         cumulative += uncommon;
-        if (roll < cumulative)
-        {
-            return CardRarity.Uncommon;
-        }
+        if (roll < cumulative) return CardRarity.Uncommon;
 
         cumulative += rare;
-        if (roll < cumulative)
-        {
-            return CardRarity.Rare;
-        }
+        if (roll < cumulative) return CardRarity.Rare;
 
         cumulative += epic;
-        if (roll < cumulative)
-        {
-            return CardRarity.Epic;
-        }
+        if (roll < cumulative) return CardRarity.Epic;
 
         cumulative += legendary;
-        if (roll < cumulative)
-        {
-            return CardRarity.Legendary;
-        }
+        if (roll < cumulative) return CardRarity.Legendary;
 
         return CardRarity.Mythic;
     }
