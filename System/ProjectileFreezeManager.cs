@@ -70,6 +70,7 @@ public class ProjectileFreezeManager : MonoBehaviour
         FreezeProjectileType<NuclearStrike>();
         FreezeProjectileType<CinderCryoBloom>();
         FreezeProjectileType<TornadoController>();
+        FreezeProjectileType<ClawProjectile>();
         
         // Freeze all enemies
         FreezeAllEnemies();

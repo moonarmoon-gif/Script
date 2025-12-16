@@ -901,6 +901,7 @@ public class AdvancedPlayerController : MonoBehaviour
         ProjectileIceTalon iceTalon = projectileObj.GetComponent<ProjectileIceTalon>();
         IceLancer iceLancer = projectileObj.GetComponent<IceLancer>();
         FireBomb fireBomb = projectileObj.GetComponent<FireBomb>();
+        ClawProjectile clawProjectile = projectileObj.GetComponent<ClawProjectile>();
         
         if (iceLancer != null)
         {
@@ -912,6 +913,15 @@ public class AdvancedPlayerController : MonoBehaviour
         {
             // FireBomb needs target
             fireBomb.Launch(direction, target, playerCollider, playerMana);
+            RegisterGuaranteedDamage(target, projectileObj, isFire);
+        }
+        else if (clawProjectile != null)
+        {
+            // ClawProjectile is an active, targeted projectile: it spawns
+            // directly on the enemy's collider center and deals damage after
+            // a short delay, but otherwise participates in the same
+            // doom/guaranteed-damage system as other active projectiles.
+            clawProjectile.Launch(direction, target, playerCollider, playerMana);
             RegisterGuaranteedDamage(target, projectileObj, isFire);
         }
         else if (projectile != null)
@@ -996,6 +1006,15 @@ public class AdvancedPlayerController : MonoBehaviour
                 {
                     rawProjectileDamage = il.GetCurrentDamage();
                     damageAlreadyIncludesStats = false;
+                }
+                else
+                {
+                    ClawProjectile cp = projectileObj.GetComponent<ClawProjectile>();
+                    if (cp != null)
+                    {
+                        rawProjectileDamage = cp.GetCurrentDamage();
+                        damageAlreadyIncludesStats = false;
+                    }
                 }
             }
         }

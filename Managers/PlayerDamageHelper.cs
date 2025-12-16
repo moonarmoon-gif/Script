@@ -225,6 +225,13 @@ public static class PlayerDamageHelper
             return true;
         }
 
+        ClawProjectile claw = projectile.GetComponent<ClawProjectile>();
+        if (claw != null)
+        {
+            element = claw.ProjectileElement;
+            return true;
+        }
+
         element = default;
         return false;
     }
