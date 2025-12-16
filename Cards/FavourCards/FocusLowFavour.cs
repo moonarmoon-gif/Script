@@ -1,6 +1,6 @@
 using UnityEngine;
 
-[CreateAssetMenu(fileName = "FocusLowFavour", menuName = "Favour Effects/Focus Low")] 
+[CreateAssetMenu(fileName = "FocusLowFavour", menuName = "Favour Effects/Focus Low")]
 public class FocusLowFavour : FavourEffect
 {
     [Header("Focus Low Settings")]
@@ -10,14 +10,15 @@ public class FocusLowFavour : FavourEffect
     [Tooltip("Maximum Focus stacks this favour can push the player to.")]
     public int MaxStacks = 2;
 
+    [Tooltip("Seconds without taking HP damage required before Focus can be granted again.")]
+    public float NoHpDamageWindowSeconds = 5f;
+
     [Header("Enhanced")]
     [Tooltip("Additional Focus stacks granted per enhancement.")]
     public int BonusFocusGain = 1;
 
     [Tooltip("Additional maximum Focus stacks allowed per enhancement.")]
     public int BonusMaxStacks = 2;
-
-    private const float NoHpDamageWindowSeconds = 5f;
 
     private PlayerHealth playerHealth;
     private StatusController statusController;
@@ -26,6 +27,7 @@ public class FocusLowFavour : FavourEffect
     private int currentFocusGain;
     private int currentMaxStacks;
     private bool subscribedToHealth;
+
     // Tracks how many Focus stacks this favour has granted so we can
     // remove exactly our own contribution when HP damage is taken or the
     // favour is removed, without touching Focus stacks from other sources.
@@ -92,7 +94,8 @@ public class FocusLowFavour : FavourEffect
             return;
         }
 
-        if (Time.time < lastHpDamageTime + NoHpDamageWindowSeconds)
+        float window = Mathf.Max(0f, NoHpDamageWindowSeconds);
+        if (Time.time < lastHpDamageTime + window)
         {
             return;
         }
