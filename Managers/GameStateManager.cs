@@ -8,13 +8,13 @@ using System.Collections.Generic;
 public class GameStateManager : MonoBehaviour
 {
     public static GameStateManager Instance { get; private set; }
-    
+
     private bool playerIsDead = false;
     public bool PlayerIsDead => playerIsDead;
-    
+
     // Track all active projectiles
     private List<GameObject> activeProjectiles = new List<GameObject>();
-    
+
     private void Awake()
     {
         if (Instance == null)
@@ -27,7 +27,7 @@ public class GameStateManager : MonoBehaviour
             Destroy(gameObject);
         }
     }
-    
+
     private void Start()
     {
         // Subscribe to player death
@@ -40,7 +40,7 @@ public class GameStateManager : MonoBehaviour
             }
         }
     }
-    
+
     private void OnDestroy()
     {
         // Unsubscribe from player death
@@ -53,7 +53,7 @@ public class GameStateManager : MonoBehaviour
             }
         }
     }
-    
+
     /// <summary>
     /// Register a projectile so it can be frozen on player death
     /// </summary>
@@ -64,7 +64,7 @@ public class GameStateManager : MonoBehaviour
             activeProjectiles.Add(projectile);
         }
     }
-    
+
     /// <summary>
     /// Unregister a projectile (when it's destroyed)
     /// </summary>
@@ -75,7 +75,7 @@ public class GameStateManager : MonoBehaviour
             activeProjectiles.Remove(projectile);
         }
     }
-    
+
     /// <summary>
     /// Handle player death - force all enemies to idle, make them immune, disable exp
     /// </summary>
@@ -83,30 +83,31 @@ public class GameStateManager : MonoBehaviour
     {
         playerIsDead = true;
         Debug.Log("<color=red>GameStateManager: Player died! Forcing enemies to idle and making them immune</color>");
-        
+
         // DON'T freeze projectiles - let them continue
-        // Instead, force all enemies to idle state
+        // Instead, force all enemies to idle state (after they finish current anim)
         ForceAllEnemiesToIdle();
-        
+
         // Make all enemies immune to damage
         MakeAllEnemiesImmune();
-        
+
         // Disable EXP gain (handled by EnemyHealth checking PlayerIsDead)
     }
 
     private static bool IsDeathStateName(AnimatorStateInfo stateInfo)
     {
-        // Keep original names + include deathflip variants
+        // Keep your original names + add deathflip variants
         return stateInfo.IsName("dead")
-               || stateInfo.IsName("death")
-               || stateInfo.IsName("Death")
-               || stateInfo.IsName("deathflip")
-               || stateInfo.IsName("DeathFlip")
-               || stateInfo.IsName("DEATHFLIP");
+            || stateInfo.IsName("death")
+            || stateInfo.IsName("Death")
+            || stateInfo.IsName("deathflip")
+            || stateInfo.IsName("DeathFlip")
+            || stateInfo.IsName("DEATHFLIP");
     }
-    
+
     /// <summary>
-    /// Force all enemies to idle state (unless they're dying)
+    /// Force all enemies to idle state (unless they're dying).
+    /// Change: wait for current animation to finish before snapping to idle.
     /// </summary>
     private void ForceAllEnemiesToIdle()
     {
@@ -114,6 +115,7 @@ public class GameStateManager : MonoBehaviour
         MonoBehaviour[] allEnemies = FindObjectsOfType<MonoBehaviour>();
 
         int scheduledCount = 0;
+
         foreach (MonoBehaviour enemy in allEnemies)
         {
             // Check if this is an enemy script (has "Enemy" in the type name)
@@ -126,12 +128,10 @@ public class GameStateManager : MonoBehaviour
             {
                 continue;
             }
-            
-            // Get animator
+
             Animator animator = enemy.GetComponent<Animator>();
             if (animator == null) continue;
-            
-            // Check if enemy is dying (death/deathflip animation playing)
+
             AnimatorStateInfo stateInfo = animator.GetCurrentAnimatorStateInfo(0);
             if (IsDeathStateName(stateInfo))
             {
@@ -139,7 +139,7 @@ public class GameStateManager : MonoBehaviour
                 continue;
             }
 
-            // Wait for current animation to finish, then force idle + freeze
+            // NEW: let current animation finish, then force idle + freeze
             StartCoroutine(ForceEnemyToIdleAfterCurrentAnim(enemy, animator));
             scheduledCount++;
         }
@@ -154,12 +154,12 @@ public class GameStateManager : MonoBehaviour
             yield break;
         }
 
-        const int layer = 0;
+        // Capture current state at the moment of death.
+        int layer = 0;
+        int startingStateHash = animator.GetCurrentAnimatorStateInfo(layer).shortNameHash;
 
-        // Track the current state so if it changes naturally we still wait for that
-        // new state's first full cycle to complete.
-        int currentStateHash = animator.GetCurrentAnimatorStateInfo(layer).shortNameHash;
-
+        // Wait until the current animation finishes (or the animator transitions elsewhere).
+        // We avoid forcing idle during transitions; we also bail if the enemy enters a death state.
         while (enemy != null && animator != null)
         {
             AnimatorStateInfo stateInfo = animator.GetCurrentAnimatorStateInfo(layer);
@@ -170,13 +170,16 @@ public class GameStateManager : MonoBehaviour
                 yield break;
             }
 
-            // If the state changed, start waiting for the new state.
-            if (stateInfo.shortNameHash != currentStateHash)
+            // If the animator has already changed to a different state naturally, update what we consider "current".
+            // This prevents getting stuck if the enemy loops between states.
+            if (stateInfo.shortNameHash != startingStateHash)
             {
-                currentStateHash = stateInfo.shortNameHash;
+                startingStateHash = stateInfo.shortNameHash;
             }
 
-            // Wait for animation to finish (or one full loop).
+            // Only consider "finished" when not transitioning and normalizedTime has reached the end.
+            // normalizedTime can exceed 1 for non-looping clips; for looping clips it keeps increasing.
+            // This will wait for the first full cycle to complete.
             if (!animator.IsInTransition(layer) && stateInfo.normalizedTime >= 1f)
             {
                 break;
@@ -190,6 +193,7 @@ public class GameStateManager : MonoBehaviour
             yield break;
         }
 
+        // Now apply your existing "freeze and force idle" behavior.
         FreezeEnemyAndForceIdle(enemy, animator);
     }
 
@@ -197,7 +201,7 @@ public class GameStateManager : MonoBehaviour
     {
         if (enemy == null || animator == null) return;
 
-        // FORCE STOP ALL COROUTINES
+        // FORCE STOP ALL COROUTINES (enemy-specific coroutines)
         enemy.StopAllCoroutines();
 
         // DISABLE enemy script to stop Update() from running
@@ -230,28 +234,22 @@ public class GameStateManager : MonoBehaviour
         animator.ResetTrigger("attack");
         animator.ResetTrigger("Attack");
 
-        // FORCE play idle animation after current anim finishes
-        // Try multiple possible idle state names
+        // FORCE play idle animation (use your state fallbacks). Keep CrossFade time at 0f for instant switch *after* anim finished.
         if (animator.HasState(0, Animator.StringToHash("idle")))
         {
             animator.CrossFade("idle", 0f, 0, 0f);
-            Debug.Log($"<color=green>  → Forced 'idle' animation</color>");
         }
         else if (animator.HasState(0, Animator.StringToHash("Idle")))
         {
             animator.CrossFade("Idle", 0f, 0, 0f);
-            Debug.Log($"<color=green>  → Forced 'Idle' animation</color>");
         }
         else if (animator.HasState(0, Animator.StringToHash("IDLE")))
         {
             animator.CrossFade("IDLE", 0f, 0, 0f);
-            Debug.Log($"<color=green>  → Forced 'IDLE' animation</color>");
         }
         else
         {
-            // Fallback: just play whatever is at index 0
             animator.Play(0, 0, 0f);
-            Debug.Log($"<color=yellow>  → No idle state found, playing default state</color>");
         }
 
         // Stop movement COMPLETELY
@@ -269,19 +267,18 @@ public class GameStateManager : MonoBehaviour
         {
             spriteFlipOffset.SetColliderOffsetEnabled(true);
             spriteFlipOffset.SetShadowOffsetEnabled(true);
-            Debug.Log($"<color=cyan>  → Enabled SpriteFlipOffset collider and shadow offsets for {enemy.name}</color>");
         }
 
-        Debug.Log($"<color=yellow>Forced {enemy.name} to idle after finishing current animation</color>");
+        Debug.Log($"<color=yellow>Forced {enemy.name} to idle AFTER finishing current animation</color>");
     }
-    
+
     /// <summary>
     /// Make all enemies immune to damage
     /// </summary>
     private void MakeAllEnemiesImmune()
     {
         EnemyHealth[] allEnemies = FindObjectsOfType<EnemyHealth>();
-        
+
         foreach (EnemyHealth enemy in allEnemies)
         {
             if (enemy != null)
@@ -289,7 +286,7 @@ public class GameStateManager : MonoBehaviour
                 enemy.SetImmuneToPlayerDeath(true);
             }
         }
-        
+
         Debug.Log($"<color=yellow>Made {allEnemies.Length} enemies immune to damage</color>");
     }
 }

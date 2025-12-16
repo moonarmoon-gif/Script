@@ -7,10 +7,10 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     [SerializeField] private float maxHealth = 30f;
     [SerializeField] private float currentHealth = 30f;
     [SerializeField] public bool ignoreScalingFromEnemyScalingSystem = false;
-    
+
     private bool hasStarted = false;
     private float pendingPostScalingHealthMultiplier = 1f;
-    
+
     [Header("Damage Settings")]
     [Tooltip("If true, enemy can only take damage when visible on camera")]
     [SerializeField] private bool requireOnCameraForDamage = true;
@@ -22,7 +22,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     public float MaxHealth => Mathf.Max(1f, maxHealth);
     public float CurrentHealth => Mathf.Clamp(currentHealth, 0f, MaxHealth);
     public bool IsAlive => CurrentHealth > 0f;
-    
+
     /// <summary>
     /// Multiply max health by a value (used by EnemySpawner)
     /// </summary>
@@ -45,7 +45,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             pendingPostScalingHealthMultiplier *= multiplier;
         }
     }
-    
+
     private Camera mainCamera;
     private bool immuneToPlayerDeath = false;
     private bool immuneToBossMenace = false;
@@ -65,7 +65,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     {
         mainCamera = Camera.main;
     }
-    
+
     private void Start()
     {
         // Initialize current health to max health if not already set
@@ -73,14 +73,14 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         {
             currentHealth = maxHealth;
         }
-        
+
         // Apply enemy scaling system
         if (EnemyScalingSystem.Instance != null && !ignoreScalingFromEnemyScalingSystem)
         {
             float originalMax = maxHealth;
             float originalCurrent = currentHealth;
             float multiplier = EnemyScalingSystem.Instance.GetHealthMultiplier();
-            
+
             // Scale both max and current health proportionally
             maxHealth *= multiplier;
             currentHealth *= multiplier;
@@ -94,7 +94,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             pendingPostScalingHealthMultiplier = 1f;
         }
     }
-    
+
     private void OnValidate()
     {
         currentHealth = Mathf.Clamp(currentHealth, 0f, MaxHealth);
@@ -104,13 +104,13 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             RaiseChanged();
         }
     }
-    
+
     private bool IsOnCamera()
     {
         if (mainCamera == null) return true; // If no camera, allow damage
-        
+
         Vector3 viewportPos = mainCamera.WorldToViewportPoint(transform.position);
-        
+
         // Check if within camera bounds (with small buffer)
         return viewportPos.x >= -0.1f && viewportPos.x <= 1.1f &&
                viewportPos.y >= -0.1f && viewportPos.y <= 1.1f &&
@@ -120,24 +120,24 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     public void TakeDamage(float amount, Vector3 hitPoint, Vector3 hitNormal)
     {
         if (amount < 0f || !IsAlive) return;
-        
+
         // Check if player is dead - enemies are immune
         if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
         {
             return; // Immune to damage when player is dead
         }
-        
+
         // Check if this enemy was made immune due to player death
         if (immuneToPlayerDeath)
         {
             return; // Immune to damage
         }
-        
+
         if (immuneToBossMenace)
         {
             return;
         }
-        
+
         // Check if enemy is on camera (if required)
         if (requireOnCameraForDamage && !IsOnCamera())
         {
@@ -148,14 +148,15 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         float woundBonusDamage = 0f;
 
         StatusController statusController = GetComponent<StatusController>();
+
+        bool isStatusTickLocal = StatusDamageScope.IsStatusTick;
+        bool isPlayerProjectile = !isStatusTickLocal;
+
         if (statusController != null)
         {
             // Cache NULLIFY stacks so we can detect when a projectile hit was
             // fully cancelled by this status and show the appropriate popup.
             int nullifyStacksBefore = statusController.GetStacks(StatusId.Nullify);
-
-            bool isStatusTickLocal = StatusDamageScope.IsStatusTick;
-            bool isPlayerProjectile = !isStatusTickLocal;
 
             // EnemyHealth.TakeDamage is called primarily by player projectiles
             // and status effects. When not in a status tick, treat as
@@ -168,6 +169,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                 isPlayerProjectile = isPlayerProjectile,
                 wasWoundApplied = false
             };
+
             float beforeStatuses = finalAmount;
             statusController.ModifyIncomingDamage(ref finalAmount, ref ctx);
 
@@ -219,6 +221,13 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             if (isStatusTickLocal && finalAmount > 0f && finalAmount < 1f)
             {
                 finalAmount = 1f;
+            }
+
+            // Shield absorbs AFTER status mitigation + absorption (+ DoT min-1),
+            // but BEFORE health is reduced.
+            if (finalAmount > 0f)
+            {
+                statusController.ApplyFinalIncomingDamageMitigation(ref finalAmount, isStatusTickLocal);
             }
         }
 
@@ -286,15 +295,8 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         }
 
         // At this point, finalAmount is the fully resolved damage after all
-        // mitigation (Defense, Armor, Vulnerable, Condemn, DeathMark, etc.).
-        // For normal hits (no Immune/Nullify/Reflect text), show TWO separate
-        // damage numbers when WOUND is active:
-        //
-        //   1) A base-hit number in the elemental color implied by
-        //      lastIncomingDamageType that represents ONLY the non-Wound
-        //      portion of the damage.
-        //   2) A smaller Wound-colored number that represents ONLY the extra
-        //      flat damage contributed by WOUND stacks.
+        // mitigation (Defense, Armor, Vulnerable, Condemn, DeathMark, etc.)
+        // AND after shield absorption.
         if (DamageNumberManager.Instance != null && !StatusDamageScope.IsStatusTick)
         {
             float baseDamageForPopup = finalAmount;
@@ -304,13 +306,9 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                 baseDamageForPopup = Mathf.Max(0f, finalAmount - woundBonusDamage);
             }
 
-            // Show the base (non-Wound) portion using the last incoming
-            // elemental damage type.
             Vector3 popupAnchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, hitPoint);
             DamageNumberManager.Instance.ShowDamage(baseDamageForPopup, popupAnchor, lastIncomingDamageType);
 
-            // If Wound contributed bonus damage, show that portion separately
-            // using the dedicated Wound color.
             if (woundBonusDamage > 0f)
             {
                 DamageNumberManager.Instance.ShowDamage(woundBonusDamage, popupAnchor, DamageNumberManager.DamageType.Wound);
@@ -325,17 +323,15 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         currentHealth = Mathf.Clamp(currentHealth - finalAmount, 0f, MaxHealth);
         OnDamageTaken?.Invoke(finalAmount, hitPoint, hitNormal);
         RaiseChanged();
-        
+
         if (currentHealth <= 0f)
         {
-            // Only grant EXP if player is alive
             bool grantExp = GameStateManager.Instance == null || !GameStateManager.Instance.PlayerIsDead;
             if (!grantExp)
             {
                 Debug.Log($"<color=yellow>{gameObject.name} died but no EXP granted (player is dead)</color>");
             }
 
-            // Notify favour effects that an enemy has been killed
             GameObject player = GameObject.FindGameObjectWithTag("Player");
             if (player != null)
             {
@@ -353,7 +349,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     public void Heal(float amount)
     {
         if (amount <= 0f || !IsAlive) return;
-        
+
         float healAmount = amount;
         StatusController statusController = GetComponent<StatusController>();
         if (statusController != null && StatusControllerManager.Instance != null)
@@ -374,17 +370,13 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                 healAmount *= 1f + blessPercent / 100f;
             }
         }
-        
+
         currentHealth = Mathf.Clamp(currentHealth + healAmount, 0f, MaxHealth);
         RaiseChanged();
     }
 
     private void RaiseChanged() => OnHealthChanged?.Invoke(CurrentHealth, MaxHealth);
 
-    /// <summary>
-    /// Returns true when this enemy should currently ignore incoming damage
-    /// (e.g., during boss menace or after the player has died).
-    /// </summary>
     public bool IsCurrentlyImmune()
     {
         if (!IsAlive)
@@ -404,10 +396,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
 
         return false;
     }
-    
-    /// <summary>
-    /// Set immunity status when player dies
-    /// </summary>
+
     public void SetImmuneToPlayerDeath(bool immune)
     {
         immuneToPlayerDeath = immune;
