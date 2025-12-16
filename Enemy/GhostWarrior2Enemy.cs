@@ -75,6 +75,12 @@ public class GhostWarrior2Enemy : MonoBehaviour
     private float speedIncreaseTimer;
     private bool isRunningPhase;
 
+    private void ResetRunSpeedBonus()
+    {
+        currentMoveSpeed = moveSpeed;
+        speedIncreaseTimer = 0f;
+    }
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -95,16 +101,9 @@ public class GhostWarrior2Enemy : MonoBehaviour
             AdvancedPlayerController.Instance.GetComponent<PlayerHealth>().OnDeath += OnPlayerDeath;
         }
 
-        if (attackDamageV2 < 0f)
-        {
-            attackDamageV2 = attackDamage;
-        }
-        if (attackDamageDelayV2 < 0f)
-        {
-            attackDamageDelayV2 = attackDamageDelay;
-        }
+        if (attackDamageV2 < 0f) attackDamageV2 = attackDamage;
+        if (attackDamageDelayV2 < 0f) attackDamageDelayV2 = attackDamageDelay;
 
-        // Initialize run-up phase
         if (MaxInitialWalkDuration < MinInitialWalkDuration)
         {
             float tmp = MinInitialWalkDuration;
@@ -113,10 +112,7 @@ public class GhostWarrior2Enemy : MonoBehaviour
         }
 
         initialWalkDuration = Random.Range(MinInitialWalkDuration, MaxInitialWalkDuration);
-        if (initialWalkDuration < 0f)
-        {
-            initialWalkDuration = 0f;
-        }
+        if (initialWalkDuration < 0f) initialWalkDuration = 0f;
 
         initialWalkElapsed = 0f;
         currentMoveSpeed = moveSpeed;
@@ -137,22 +133,13 @@ public class GhostWarrior2Enemy : MonoBehaviour
 
     void OnEnable()
     {
-        if (health == null)
-        {
-            health = GetComponent<EnemyHealth>();
-        }
-        if (health != null)
-        {
-            health.OnDeath += HandleDeath;
-        }
+        if (health == null) health = GetComponent<EnemyHealth>();
+        if (health != null) health.OnDeath += HandleDeath;
     }
 
     void OnDisable()
     {
-        if (health != null)
-        {
-            health.OnDeath -= HandleDeath;
-        }
+        if (health != null) health.OnDeath -= HandleDeath;
 
         if (AdvancedPlayerController.Instance != null)
         {
@@ -191,10 +178,7 @@ public class GhostWarrior2Enemy : MonoBehaviour
         if (isDead) return;
 
         float dt = Time.deltaTime;
-        if (dt < 0f)
-        {
-            dt = 0f;
-        }
+        if (dt < 0f) dt = 0f;
 
         // Update run-up timers
         if (!isRunningPhase)
@@ -208,6 +192,18 @@ public class GhostWarrior2Enemy : MonoBehaviour
 
         bool ismoving = rb.velocity.sqrMagnitude > 0.0001f && !isAttacking;
         bool isFlipped = spriteRenderer.flipX;
+
+        // IMPORTANT: Running bonus only builds while we are actually playing running/runningflip.
+        // Determine what our animator state SHOULD be this frame:
+        bool shouldBeRunningAnim = ismoving && isRunningPhase;
+        bool playingRunningAnim = animator.GetBool("running") || animator.GetBool("runningflip");
+
+        // If running got interrupted (idle, stunned/knockback, attacking, pre-attack stop, etc.)
+        // reset the run speed bonus immediately.
+        if (!shouldBeRunningAnim || isAttacking || Time.time < knockbackEndTime || preAttackDelayRoutine != null || preAttackDelayReady)
+        {
+            ResetRunSpeedBonus();
+        }
 
         if (ismoving)
         {
@@ -245,9 +241,11 @@ public class GhostWarrior2Enemy : MonoBehaviour
         animator.SetBool("idle", shouldIdle);
 
         bool inRange = false;
+        float distance = 999999f;
+
         if (AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
-            float distance = Vector2.Distance(transform.position, AdvancedPlayerController.Instance.transform.position);
+            distance = Vector2.Distance(transform.position, AdvancedPlayerController.Instance.transform.position);
             inRange = distance <= attackRange;
 
             if (!inRange)
@@ -260,7 +258,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
                     preAttackDelayRoutine = null;
                 }
 
-                // If the player left attack range mid-attack, cancel the current attack
                 if (isAttacking)
                 {
                     CancelAttackAction();
@@ -293,18 +290,28 @@ public class GhostWarrior2Enemy : MonoBehaviour
                 }
             }
 
-            // During the running phase, gradually increase move speed while
-            // closing the distance to the player, until we reach attack range.
-            if (isRunningPhase && !isAttacking && Time.time >= knockbackEndTime && distance > attackRange)
+            // Only build bonus when:
+            // - running phase
+            // - not attacking
+            // - not in knockback
+            // - not in pre-attack stop
+            // - AND we are actually playing running anim (running or runningflip)
+            bool canBuildRunningBonus =
+                isRunningPhase &&
+                !isAttacking &&
+                Time.time >= knockbackEndTime &&
+                distance > attackRange &&
+                preAttackDelayRoutine == null &&
+                !preAttackDelayReady &&
+                (animator.GetBool("running") || animator.GetBool("runningflip"));
+
+            if (canBuildRunningBonus && SpeedIncreaseInterval > 0f)
             {
-                if (SpeedIncreaseInterval > 0f)
+                speedIncreaseTimer += dt;
+                while (speedIncreaseTimer >= SpeedIncreaseInterval)
                 {
-                    speedIncreaseTimer += dt;
-                    while (speedIncreaseTimer >= SpeedIncreaseInterval)
-                    {
-                        currentMoveSpeed += SpeedIncrementEveryInterval;
-                        speedIncreaseTimer -= SpeedIncreaseInterval;
-                    }
+                    currentMoveSpeed += SpeedIncrementEveryInterval;
+                    speedIncreaseTimer -= SpeedIncreaseInterval;
                 }
             }
         }
@@ -317,6 +324,8 @@ public class GhostWarrior2Enemy : MonoBehaviour
                 StopCoroutine(preAttackDelayRoutine);
                 preAttackDelayRoutine = null;
             }
+
+            ResetRunSpeedBonus();
         }
 
         if (!isAttacking && !attackOnCooldown && inRange && preAttackDelayReady && Time.time >= knockbackEndTime)
@@ -382,6 +391,8 @@ public class GhostWarrior2Enemy : MonoBehaviour
         animator.SetBool("running", false);
         animator.SetBool("runningflip", false);
         animator.SetBool("idle", true);
+
+        ResetRunSpeedBonus();
         CancelAttackAction();
     }
 
@@ -410,6 +421,8 @@ public class GhostWarrior2Enemy : MonoBehaviour
         animator.SetBool("attackflip", false);
 
         attackOnCooldown = false;
+
+        ResetRunSpeedBonus();
         CancelAttackAction();
     }
 
@@ -444,12 +457,18 @@ public class GhostWarrior2Enemy : MonoBehaviour
         if ((preAttackDelayRoutine != null || preAttackDelayReady) && distance <= attackRange)
         {
             rb.velocity = Vector2.zero;
+
+            // stopping movement interrupts running bonus
+            ResetRunSpeedBonus();
             return;
         }
 
         if (distance <= stopDistance)
         {
             rb.velocity = Vector2.zero;
+
+            // stopping movement interrupts running bonus
+            ResetRunSpeedBonus();
             return;
         }
 
@@ -468,8 +487,21 @@ public class GhostWarrior2Enemy : MonoBehaviour
         int myToken = BeginAttackAction();
         isAttacking = true;
 
+        // Attacking interrupts running bonus
+        ResetRunSpeedBonus();
+
         float originalSpeed = animator.speed;
         animator.speed = attackAnimSpeed;
+
+        // Fix: always clear BOTH attack bools first so transitions are reliable from runningflip/idle/etc.
+        animator.SetBool("attack", false);
+        animator.SetBool("attackflip", false);
+
+        // Fix: also clear movement bools so we don't get stuck in runningflip when flipped
+        animator.SetBool("moving", false);
+        animator.SetBool("movingflip", false);
+        animator.SetBool("running", false);
+        animator.SetBool("runningflip", false);
 
         bool isFlipped = spriteRenderer.flipX;
         animator.SetBool("attack", !isFlipped);
