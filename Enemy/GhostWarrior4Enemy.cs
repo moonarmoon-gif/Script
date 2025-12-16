@@ -26,14 +26,8 @@ public class GhostWarrior4Enemy : MonoBehaviour
     [Tooltip("Delay before FIRST attack damage")]
     [SerializeField] private float firstAttackDamageDelay = 0.2f;
 
-    [SerializeField] private float AfterFirstAttackDamage = -1f;
-    [SerializeField] private float AfterFirstAttackDamageDelay = -1f;
-
     [SerializeField] private float firstAttackDamageV2 = -1f;
     [SerializeField] private float firstAttackDamageDelayV2 = -1f;
-
-    [SerializeField] private float AfterFirstAttackDamageV2 = -1f;
-    [SerializeField] private float AfterFirstAttackDamageDelayV2 = -1f;
 
     [Header("Second Attack Settings")]
     [SerializeField] private float secondAttackDuration = 0.6f;
@@ -92,7 +86,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
     private bool isDead;
     private bool isAttacking;
     private bool attackOnCooldown;
-    private bool hasDealtDamageThisAttack = false;
     private Coroutine attackRoutine;
     private Coroutine preAttackDelayRoutine;
     private bool preAttackDelayReady = false;
@@ -131,9 +124,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         if (firstAttackDamageV2 < 0f) firstAttackDamageV2 = firstAttackDamage;
         if (firstAttackDamageDelayV2 < 0f) firstAttackDamageDelayV2 = firstAttackDamageDelay;
-
-        if (AfterFirstAttackDamageV2 < 0f) AfterFirstAttackDamageV2 = AfterFirstAttackDamage;
-        if (AfterFirstAttackDamageDelayV2 < 0f) AfterFirstAttackDamageDelayV2 = AfterFirstAttackDamageDelay;
 
         if (secondAttackDamageV2 < 0f) secondAttackDamageV2 = secondAttackDamage;
         if (secondAttackDamageDelayV2 < 0f) secondAttackDamageDelayV2 = secondAttackDamageDelay;
@@ -196,10 +186,8 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         if (isDead) return;
 
-        // Trigger the one-time shield channel when below threshold
         TryStartShieldChannel();
 
-        // If channeling shield, force idle and stop normal AI
         if (isChannelingShield)
         {
             ForceIdleState();
@@ -251,7 +239,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
                     preAttackDelayRoutine = null;
                 }
 
-                // If the player left attack range mid-combo, cancel the current attack sequence
                 if (isAttacking)
                 {
                     CancelAttackAction();
@@ -320,7 +307,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
     {
         rb.velocity = Vector2.zero;
 
-        // cancel attack/pre-attack
         if (attackRoutine != null)
         {
             StopCoroutine(attackRoutine);
@@ -343,7 +329,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
         animator.SetBool("movingflip", false);
         animator.SetBool("idle", true);
 
-        // ensure attacks are off
         ClearAllAttackAnims();
     }
 
@@ -353,7 +338,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         ForceIdleState();
 
-        // sword in
         animator.SetBool("swordin", true);
         animator.SetBool("swordout", false);
         if (SwordInAnimationDuration > 0f)
@@ -362,7 +346,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
         }
         animator.SetBool("swordin", false);
 
-        // channel idle + gain shield ticks
         ForceIdleState();
 
         float duration = Mathf.Max(0f, ShieldChannelDuration);
@@ -386,7 +369,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
             elapsed += interval;
         }
 
-        // sword out
         ForceIdleState();
         animator.SetBool("swordout", true);
         animator.SetBool("swordin", false);
@@ -474,7 +456,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
     {
         if (isDead) return;
 
-        // If knocked back while channeling, still remain forced idle until routine finishes.
         knockbackVelocity = direction.normalized * force * knockbackIntensity;
         knockbackEndTime = Time.time + knockbackDuration;
 
@@ -509,7 +490,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
             return;
         }
 
-        // During shield channel, always force idle and don't move.
         if (isChannelingShield)
         {
             rb.velocity = Vector2.zero;
@@ -535,7 +515,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
         Vector3 toPlayer = AdvancedPlayerController.Instance.transform.position - transform.position;
         float distance = toPlayer.magnitude;
 
-        // Once in attack range and preparing to attack, stop moving so pre-attack uses idle instead of moving
         if ((preAttackDelayRoutine != null || preAttackDelayReady) && distance <= attackRange)
         {
             rb.velocity = Vector2.zero;
@@ -567,8 +546,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
         switch (attackIndex)
         {
             case 1:
-                // GHOST4: only uses attack1 (no attack1flip) and it must play even when flipped.
-                normal = "attack1";
+                normal = "attack1"; // Ghost4: no attack1flip
                 flipped = null;
                 break;
             case 2:
@@ -593,7 +571,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         if (attackIndex == 1)
         {
-            animator.SetBool(normal, true);
+            animator.SetBool(normal, true); // always play attack1 regardless of flip
             return;
         }
 
@@ -603,7 +581,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
     private void ClearAllAttackAnims()
     {
-        animator.SetBool("attack1", false); // no attack1flip on Ghost4
+        animator.SetBool("attack1", false);
 
         animator.SetBool("attack2", false);
         animator.SetBool("attack2flip", false);
@@ -615,12 +593,11 @@ public class GhostWarrior4Enemy : MonoBehaviour
     {
         int myToken = BeginAttackAction();
         isAttacking = true;
-        hasDealtDamageThisAttack = false;
 
         float originalSpeed = animator.speed;
         animator.speed = attackAnimSpeed;
 
-        // FIRST ATTACK
+        // FIRST ATTACK (no AfterAttack logic in Ghost4)
         SetAttackAnim(1, true);
 
         if (firstAttackDamageDelayV2 > 0f)
@@ -655,47 +632,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
         }
 
         float elapsedAttackTime = Mathf.Max(0f, firstAttackDamageDelayV2);
-
-        bool doAfterFirstDamage = AfterFirstAttackDamageV2 > 0f;
-        float afterDelay = Mathf.Max(0f, AfterFirstAttackDamageDelayV2);
-        if (doAfterFirstDamage)
-        {
-            float remainingWindow = firstAttackDuration - elapsedAttackTime;
-            if (remainingWindow < 0f)
-            {
-                remainingWindow = 0f;
-            }
-            if (afterDelay > remainingWindow)
-            {
-                afterDelay = remainingWindow;
-            }
-
-            if (afterDelay > 0f)
-            {
-                yield return new WaitForSeconds(afterDelay);
-            }
-
-            elapsedAttackTime += afterDelay;
-
-            if (isDead || isChannelingShield || myToken != attackActionToken)
-            {
-                ClearAllAttackAnims();
-                animator.speed = originalSpeed;
-                isAttacking = false;
-                attackRoutine = null;
-                yield break;
-            }
-
-            if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive &&
-                AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
-            {
-                Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
-                Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
-                PlayerHealth.RegisterPendingAttacker(gameObject);
-                playerDamageable.TakeDamage(AfterFirstAttackDamageV2, hitPoint, hitNormal);
-            }
-        }
-
         float remainingTime = firstAttackDuration - elapsedAttackTime;
         if (remainingTime > 0)
         {
