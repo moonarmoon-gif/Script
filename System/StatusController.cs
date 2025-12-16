@@ -49,7 +49,6 @@ public enum StatusId
 public struct IncomingDamageContext
 {
     public bool isStatusTick;
-
     public bool isAoeDamage;
 
     // True when the source of this damage is a player projectile. This is
@@ -67,30 +66,16 @@ public static class StatusDamageScope
 {
     public static bool IsStatusTick { get; private set; }
 
-    public static void BeginStatusTick()
-    {
-        IsStatusTick = true;
-    }
-
-    public static void EndStatusTick()
-    {
-        IsStatusTick = false;
-    }
+    public static void BeginStatusTick() => IsStatusTick = true;
+    public static void EndStatusTick() => IsStatusTick = false;
 }
 
 public static class DamageAoeScope
 {
     public static bool IsAoeDamage { get; private set; }
 
-    public static void BeginAoeDamage()
-    {
-        IsAoeDamage = true;
-    }
-
-    public static void EndAoeDamage()
-    {
-        IsAoeDamage = false;
-    }
+    public static void BeginAoeDamage() => IsAoeDamage = true;
+    public static void EndAoeDamage() => IsAoeDamage = false;
 }
 
 [System.Serializable]
@@ -107,15 +92,76 @@ public class StatusController : MonoBehaviour
     [SerializeField]
     private List<ActiveStatus> activeStatuses = new List<ActiveStatus>();
 
-    // Tracks the end time of the current WEAK "continuous" window for this
-    // unit. While Time.time is less than this value, continuous damage
-    // sources (beam/orbital style projectiles) will continue to have their
-    // damage reduced by WEAK without consuming additional stacks.
+    // -------------------------------
+    // NEW: Persistent shield pool
+    // -------------------------------
+    [Header("Shield (persistent pool)")]
+    [SerializeField, Tooltip("Current shield amount. Absorbs incoming damage before health. Persists until broken.")]
+    private float shieldAmount = 0f;
+
+    /// <summary>Adds persistent shield amount (clamped to >= 0).</summary>
+    public void AddShield(float amount)
+    {
+        if (amount <= 0f) return;
+        shieldAmount += amount;
+    }
+
+    /// <summary>Returns current shield amount.</summary>
+    public float GetShieldAmount()
+    {
+        return shieldAmount;
+    }
+
+    /// <summary>Clears all shield immediately.</summary>
+    public void ClearShield()
+    {
+        shieldAmount = 0f;
+    }
+
+    /// <summary>
+    /// Consume shield against incoming damage. Returns remaining damage after shield absorption.
+    /// </summary>
+    public float ApplyShield(float damage)
+    {
+        if (damage <= 0f) return damage;
+        if (shieldAmount <= 0f) return damage;
+
+        float absorbed = Mathf.Min(shieldAmount, damage);
+        shieldAmount -= absorbed;
+        damage -= absorbed;
+
+        return damage;
+    }
+
+    /// <summary>
+    /// Call this near the end of the damage pipeline (after ModifyIncomingDamage + Absorption),
+    /// right before HP is actually reduced, so shield behaves like a true pre-health buffer.
+    ///
+    /// IMPORTANT: This is NOT called automatically by StatusController; you must call it from
+    /// EnemyHealth.TakeDamage (and PlayerHealth if you want the player to have the same shield mechanic).
+    /// </summary>
+    public void ApplyFinalIncomingDamageMitigation(ref float damage, bool isStatusTick)
+    {
+        if (damage <= 0f) return;
+
+        // Shield absorbs first. (Persists until broken; no decay.)
+        float before = damage;
+        damage = ApplyShield(damage);
+
+        if (damage <= 0f)
+        {
+            // Optional: if you want to show a shield-block popup later, you can detect:
+            // float absorbed = before - damage;
+            return;
+        }
+
+        // Keep place for any future final-pass mitigation.
+    }
+
+    // Tracks the end time of the current WEAK "continuous" window for this unit.
     private float weakContinuousWindowEndTime = -1f;
 
-    // Tracks which debuff types have already granted HATRED stacks for this
-    // unit so each debuff id only contributes once for the lifetime of the
-    // enemy.
+    // Tracks which debuff types have already granted HATRED stacks for this unit.
     private HashSet<StatusId> hatredDebuffSources;
 
     private EnemyHealth cachedEnemyHealth;
@@ -149,13 +195,6 @@ public class StatusController : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Applies Absorption capping to the given damage value based on any
-    /// active ABSORPTION stacks on this unit. If the cap is actually hit,
-    /// one stack is consumed. This is intentionally separate from
-    /// ModifyIncomingDamage so callers can opt out (e.g. fully-reflected
-    /// melee hits where the defender takes 0 damage).
-    /// </summary>
     public float ApplyAbsorption(float damage)
     {
         if (damage <= 0f || activeStatuses.Count == 0)
@@ -206,8 +245,6 @@ public class StatusController : MonoBehaviour
         {
             damage = cap;
 
-            // Each time Absorption actually caps a hit, consume exactly one
-            // stack.
             status.stacks -= 1;
             if (status.stacks <= 0 && status.remainingDuration <= 0f)
             {
@@ -234,10 +271,7 @@ public class StatusController : MonoBehaviour
         return 0;
     }
 
-    public bool HasStatus(StatusId id)
-    {
-        return GetStacks(id) > 0;
-    }
+    public bool HasStatus(StatusId id) => GetStacks(id) > 0;
 
     public bool ConsumeStacks(StatusId id, int count)
     {
@@ -324,27 +358,13 @@ public class StatusController : MonoBehaviour
         return Mathf.Max(0f, per * stacks);
     }
 
-    // Tracks which enemies have already received their FIRST STRIKE bonus from
-    // this attacker. Keyed by target instanceID so it works for both player
-    // and enemies. This dictionary is intentionally private to the
-    // StatusController; callers only ever pass us a target GameObject.
     private System.Collections.Generic.Dictionary<int, bool> firstStrikeConsumedByTarget;
 
-    /// <summary>
-    /// Apply outgoing-damage bonuses that depend only on the attacker (FOCUS,
-    /// FURY, global FIRST STRIKE when no target is known). This preserves the
-    /// original signature used in many call sites.
-    /// </summary>
     public void ModifyOutgoingDamage(ref float damage, bool isStatusTick)
     {
         ApplyOutgoingDamageBonuses(ref damage, isStatusTick, null);
     }
 
-    /// <summary>
-    /// Extended outgoing-damage hook that also knows the TARGET. This allows
-    /// FIRST STRIKE to behave as "first hit per enemy" and HATRED to scale
-    /// with the number of debuffs on the TARGET instead of on the attacker.
-    /// </summary>
     public void ModifyOutgoingDamageAgainstTarget(ref float damage, bool isStatusTick, GameObject target)
     {
         ApplyOutgoingDamageBonuses(ref damage, isStatusTick, target);
@@ -394,19 +414,12 @@ public class StatusController : MonoBehaviour
 
         float totalBonusPercent = 0f;
 
-        // FIRST STRIKE: first damage dealt to EACH enemy is increased by a
-        // fixed percent per stack. Once an enemy has received its first-hit
-        // bonus from this attacker, further hits against that enemy are not
-        // boosted (but other enemies can still receive their own first hits).
         if (firstStrikeStacks > 0)
         {
             bool shouldApplyFirstStrike = false;
 
             if (target == null)
             {
-                // When we don't know the target (legacy callers), fall back to
-                // treating FIRST STRIKE as a global permanent bonus so the
-                // status still provides value.
                 shouldApplyFirstStrike = true;
             }
             else
@@ -436,9 +449,6 @@ public class StatusController : MonoBehaviour
             }
         }
 
-        // HATRED: permanent outgoing-damage buff on ENEMIES. Each HATRED
-        // stack increases this unit's damage by a fixed percent. Does not
-        // apply when this StatusController belongs to the player.
         if (hatredStacks > 0 && GetComponent<PlayerHealth>() == null)
         {
             float per = 1f;
@@ -451,7 +461,6 @@ public class StatusController : MonoBehaviour
             totalBonusPercent += hatredBonus;
         }
 
-        // FOCUS and FURY depend on the unit's own health.
         float normalizedHealth = -1f;
         bool hasHealth = false;
 
@@ -483,7 +492,6 @@ public class StatusController : MonoBehaviour
             }
         }
 
-        // FOCUS: bonus damage while at FULL health.
         if (focusStacks > 0 && hasHealth && Mathf.Approximately(normalizedHealth, 1f))
         {
             float per = 10f;
@@ -496,10 +504,9 @@ public class StatusController : MonoBehaviour
             totalBonusPercent += focusBonus;
         }
 
-        // FURY: bonus damage while at or below the low-health threshold.
         if (furyStacks > 0 && hasHealth)
         {
-            float thresholdFraction = 0.5f; // 50% default
+            float thresholdFraction = 0.5f;
             float per = 10f;
             if (StatusControllerManager.Instance != null)
             {
@@ -520,14 +527,6 @@ public class StatusController : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Applies WEAK outgoing-damage reduction for this unit. For normal
-    /// non-DoT hits, each damaging instance consumes exactly one WEAK stack
-    /// and reduces that hit by a fixed percent. For continuous player
-    /// projectiles (beams/orbitals), WEAK is consumed at most once per
-    /// second, but the reduction applies to all damage during that one-second
-    /// window.
-    /// </summary>
     public void ApplyWeakOutgoing(ref float damage, bool isStatusTick, bool isContinuousProjectile)
     {
         if (damage <= 0f || isStatusTick)
@@ -548,24 +547,16 @@ public class StatusController : MonoBehaviour
 
         float multiplier = Mathf.Max(0f, 1f - reductionPercent / 100f);
 
-        // Continuous projectiles (ElementalBeam, Thunderbird, NovaStar,
-        // DwarfStar) should consume at most one WEAK stack per second for the
-        // owning unit, but apply the reduction to all damage dealt during
-        // that one-second window.
         if (isContinuousProjectile)
         {
             float now = Time.time;
 
-            // If a window is already active, continue to apply the reduction
-            // without consuming more stacks.
             if (weakContinuousWindowEndTime > 0f && now < weakContinuousWindowEndTime)
             {
                 damage *= multiplier;
                 return;
             }
 
-            // No active window – attempt to consume a WEAK stack to start a
-            // new one-second reduction window.
             if (activeStatuses.Count == 0)
             {
                 return;
@@ -598,8 +589,6 @@ public class StatusController : MonoBehaviour
             return;
         }
 
-        // Normal (non-continuous) hits: consume one WEAK stack per damaging
-        // instance.
         if (activeStatuses.Count == 0)
         {
             return;
@@ -645,10 +634,6 @@ public class StatusController : MonoBehaviour
             switch (status.id)
             {
                 case StatusId.Vulnerable:
-                    // Vulnerable should apply a FIXED damage multiplier per
-                    // triggering hit (independent of current stack count) and
-                    // then consume exactly ONE stack when it actually
-                    // contributes to a non-status hit.
                     if (!ctx.isStatusTick && status.stacks > 0 && damage > 0f && StatusControllerManager.Instance != null)
                     {
                         float baseMul = StatusControllerManager.Instance.VulnerableDamageMultiplier;
@@ -663,11 +648,8 @@ public class StatusController : MonoBehaviour
                         }
                     }
                     break;
+
                 case StatusId.Defense:
-                    // DEFENSE should not be consumed by status-tick damage
-                    // (DoTs). It only applies to real hits, including Thorn and
-                    // Reflect damage, which are always invoked with
-                    // isStatusTick = false.
                     if (!ctx.isStatusTick && status.stacks > 0)
                     {
                         float multiplier = 0.5f;
@@ -684,6 +666,7 @@ public class StatusController : MonoBehaviour
                         }
                     }
                     break;
+
                 case StatusId.Curse:
                     if (!ctx.isStatusTick && status.stacks > 0 && damage > 0f)
                     {
@@ -706,9 +689,8 @@ public class StatusController : MonoBehaviour
                         }
                     }
                     break;
+
                 case StatusId.Nullify:
-                    // NULLIFY should only consume stacks for player PROJECTILE
-                    // hits, and not for melee or status-tick damage.
                     if (!ctx.isStatusTick && !ctx.isAoeDamage && ctx.isPlayerProjectile && status.stacks > 0)
                     {
                         damage = 0f;
@@ -720,12 +702,14 @@ public class StatusController : MonoBehaviour
                         }
                     }
                     break;
+
                 case StatusId.Immune:
                     if (!ctx.isStatusTick)
                     {
                         damage = 0f;
                     }
                     break;
+
                 case StatusId.Decay:
                     if (status.stacks > 0 && damage > 0f)
                     {
@@ -739,6 +723,7 @@ public class StatusController : MonoBehaviour
                         damage *= mul;
                     }
                     break;
+
                 case StatusId.Condemn:
                     if (!ctx.isStatusTick && status.stacks > 0 && damage > 0f)
                     {
@@ -751,6 +736,7 @@ public class StatusController : MonoBehaviour
                         damage *= 1f + total / 100f;
                     }
                     break;
+
                 case StatusId.DeathMark:
                     if (!ctx.isStatusTick && status.stacks > 0 && damage > 0f)
                     {
@@ -763,6 +749,7 @@ public class StatusController : MonoBehaviour
                         damage *= 1f + total / 100f;
                     }
                     break;
+
                 case StatusId.Wound:
                     if (!ctx.isStatusTick && status.stacks > 0 && damage > 0f)
                     {
@@ -779,10 +766,8 @@ public class StatusController : MonoBehaviour
                         }
                     }
                     break;
+
                 case StatusId.Armor:
-                    // ARMOR should reduce both direct and status-tick damage
-                    // (burn, poison, bleed). Apply for all incoming damage
-                    // types.
                     if (status.stacks > 0 && damage > 0f)
                     {
                         if (isPlayerOwner)
@@ -798,14 +783,10 @@ public class StatusController : MonoBehaviour
                         damage = Mathf.Max(0f, damage - reduction);
                     }
                     break;
+
                 case StatusId.Poison:
-                    // Handled in Update via periodic ticks, not here.
-                    break;
                 case StatusId.Acceleration:
-                    // Affects attack speed, not incoming damage.
-                    break;
                 case StatusId.Thorn:
-                    // Reflection will be handled when damage sources are wired.
                     break;
             }
         }
@@ -899,11 +880,7 @@ public class StatusController : MonoBehaviour
         }
 
         Vector3 pos = transform.position;
-
-        if (DamageNumberManager.Instance != null)
-        {
-            pos = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, pos);
-        }
+        pos = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, pos);
 
         switch (id)
         {
@@ -952,20 +929,11 @@ public class StatusController : MonoBehaviour
             }
             else
             {
-                // Fallback defaults when StatusControllerManager is not present.
-                // These mirror the serialized defaults in StatusControllerManager
-                // so Poison/Wound/etc do not accidentally become permanent.
                 switch (id)
                 {
                     case StatusId.Poison:
-                        resolvedDuration = 5f;
-                        break;
                     case StatusId.Bleed:
-                        resolvedDuration = 5f;
-                        break;
                     case StatusId.Blessing:
-                        resolvedDuration = 5f;
-                        break;
                     case StatusId.Wound:
                         resolvedDuration = 5f;
                         break;
@@ -990,9 +958,6 @@ public class StatusController : MonoBehaviour
             }
         }
 
-        // HATRED: enemies gain a permanent HATRED stack the FIRST time they
-        // are successfully afflicted with each unique debuff status. Each
-        // debuff id can only contribute once for the lifetime of the enemy.
         if (IsDebuff(id))
         {
             EnemyHealth enemy = GetComponent<EnemyHealth>() ?? GetComponentInParent<EnemyHealth>();
@@ -1068,8 +1033,6 @@ public class StatusController : MonoBehaviour
 
     private void NotifyStatusAppliedToFavours(StatusId id)
     {
-        // Only notify favour effects for enemies; statuses applied to the
-        // player or other entities should not trigger these hooks.
         EnemyHealth enemy = GetComponent<EnemyHealth>() ?? GetComponentInParent<EnemyHealth>();
         if (enemy == null)
         {
