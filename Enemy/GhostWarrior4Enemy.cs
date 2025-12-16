@@ -163,7 +163,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
         bool offsetDrivenByAnim =
             animator.GetBool("moving") || animator.GetBool("movingflip") ||
             animator.GetBool("dead") || animator.GetBool("deadflip") ||
-            animator.GetBool("attack1") ||            // NOTE: no attack1flip for Ghost4
+            animator.GetBool("attack1") ||
             animator.GetBool("attack2") || animator.GetBool("attack2flip") ||
             animator.GetBool("attack3") || animator.GetBool("attack3flip") ||
             animator.GetBool("swordin") || animator.GetBool("swordout");
@@ -188,9 +188,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         TryStartShieldChannel();
 
+        // While any part of the shield sequence is running, stop normal AI.
         if (isChannelingShield)
         {
-            ForceIdleState();
+            rb.velocity = Vector2.zero;
             return;
         }
 
@@ -221,7 +222,13 @@ public class GhostWarrior4Enemy : MonoBehaviour
              preAttackDelayReady ||
              AdvancedPlayerController.Instance == null ||
              (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled));
-        animator.SetBool("idle", shouldIdle);
+
+        // IMPORTANT: During the swordin/swordout animations, idle must be false.
+        // Idle should only be true during the actual channel window.
+        if (!isChannelingShield)
+        {
+            animator.SetBool("idle", shouldIdle);
+        }
 
         bool inRange = false;
         if (AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
@@ -303,7 +310,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
         }
     }
 
-    private void ForceIdleState()
+    private void CancelAttackAndPreAttack()
     {
         rb.velocity = Vector2.zero;
 
@@ -317,6 +324,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
             StopCoroutine(preAttackDelayRoutine);
             preAttackDelayRoutine = null;
         }
+
         preAttackDelayReady = false;
         wasInAttackRange = false;
         isAttacking = false;
@@ -327,6 +335,41 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         animator.SetBool("moving", false);
         animator.SetBool("movingflip", false);
+
+        // IMPORTANT: do NOT force idle here anymore; swordin/swordout must not have idle=true.
+        animator.SetBool("idle", false);
+
+        ClearAllAttackAnims();
+    }
+
+    private void ForceChannelIdleOnly()
+    {
+        rb.velocity = Vector2.zero;
+
+        // Cancel any attack/pre-attack so we stay fully idle while channeling
+        if (attackRoutine != null)
+        {
+            StopCoroutine(attackRoutine);
+            attackRoutine = null;
+        }
+        if (preAttackDelayRoutine != null)
+        {
+            StopCoroutine(preAttackDelayRoutine);
+            preAttackDelayRoutine = null;
+        }
+
+        preAttackDelayReady = false;
+        wasInAttackRange = false;
+        isAttacking = false;
+        attackOnCooldown = false;
+        CancelAttackAction();
+
+        animator.speed = 1f;
+
+        animator.SetBool("moving", false);
+        animator.SetBool("movingflip", false);
+
+        // Channel idle should be the only time idle is forced true:
         animator.SetBool("idle", true);
 
         ClearAllAttackAnims();
@@ -336,17 +379,18 @@ public class GhostWarrior4Enemy : MonoBehaviour
     {
         isChannelingShield = true;
 
-        ForceIdleState();
-
-        animator.SetBool("swordin", true);
+        // Sword-in phase: idle must be false
+        CancelAttackAndPreAttack();
         animator.SetBool("swordout", false);
+        animator.SetBool("swordin", true);
         if (SwordInAnimationDuration > 0f)
         {
             yield return new WaitForSeconds(SwordInAnimationDuration);
         }
         animator.SetBool("swordin", false);
 
-        ForceIdleState();
+        // Channel phase: idle must be true
+        ForceChannelIdleOnly();
 
         float duration = Mathf.Max(0f, ShieldChannelDuration);
         float interval = Mathf.Max(0.01f, ShieldGainInterval);
@@ -369,9 +413,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
             elapsed += interval;
         }
 
-        ForceIdleState();
-        animator.SetBool("swordout", true);
+        // Sword-out phase: idle must be false
+        CancelAttackAndPreAttack();
         animator.SetBool("swordin", false);
+        animator.SetBool("swordout", true);
 
         if (SwordOutAnimationDuration > 0f)
         {
@@ -380,6 +425,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         animator.SetBool("swordout", false);
 
+        // Return control to normal AI; idle will be set by normal Update() logic next frame.
         isChannelingShield = false;
         shieldChannelRoutine = null;
     }
@@ -490,6 +536,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
             return;
         }
 
+        // While any part of shield sequence is running, do not move.
         if (isChannelingShield)
         {
             rb.velocity = Vector2.zero;
@@ -597,7 +644,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
         float originalSpeed = animator.speed;
         animator.speed = attackAnimSpeed;
 
-        // FIRST ATTACK (no AfterAttack logic in Ghost4)
         SetAttackAnim(1, true);
 
         if (firstAttackDamageDelayV2 > 0f)
@@ -649,7 +695,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         SetAttackAnim(1, false);
 
-        // SECOND ATTACK
         SetAttackAnim(2, true);
 
         if (secondAttackDamageDelayV2 > 0f)
@@ -700,7 +745,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         SetAttackAnim(2, false);
 
-        // THIRD ATTACK
         SetAttackAnim(3, true);
 
         if (thirdAttackDamageDelayV2 > 0f)
