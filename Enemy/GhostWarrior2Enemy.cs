@@ -1,233 +1,633 @@
+using System.Collections;
 using UnityEngine;
 
+[RequireComponent(typeof(SpriteRenderer))]
+[RequireComponent(typeof(Rigidbody2D))]
+[RequireComponent(typeof(Animator))]
+[RequireComponent(typeof(CapsuleCollider2D))]
+[RequireComponent(typeof(EnemyHealth))]
 public class GhostWarrior2Enemy : MonoBehaviour
 {
-    public float speed = 2f;
-    public float runSpeedBonus = 1.5f;
-    public float runSpeedIncreaseRate = 0.5f;
-    public float runSpeedBonusMax = 3f;
+    [Header("Movement Settings")]
+    public float moveSpeed = 2f;
+    [SerializeField] private float attackRange = 1.5f;
+    [SerializeField] private float stopDistance = 1.4f;
+    public float PreAttackDelay = 1f;
+    [SerializeField] private float attackAnimSpeed = 1.0f;
+    [SerializeField] private float attackCooldown = 1.0f;
+    [SerializeField] private float deathCleanupDelay = 0.7f;
+    [Tooltip("Duration of fade out effect on death (seconds)")]
+    [SerializeField] private float deathFadeOutDuration = 0.5f;
 
-    public float detectionRange = 10f;
-    public float attackRange = 1.5f;
-    public float preAttackRange = 2f;
+    [Header("Attack Settings")]
+    [SerializeField] private float attackDuration = 0.5f;
+    [SerializeField] private float attackDamage = 15f;
+    [Tooltip("Delay before attack damage")]
+    [SerializeField] private float attackDamageDelay = 0.2f;
 
-    public float knockbackForce = 5f;
+    [SerializeField] private float attackDamageV2 = -1f;
+    [SerializeField] private float attackDamageDelayV2 = -1f;
 
-    public float attackDuration = 1f; // maximum fallback duration
+    [Header("Run-Up Settings")]
+    [Tooltip("Minimum time spent walking before transitioning to running.")]
+    public float MinInitialWalkDuration = 5f;
+    [Tooltip("Maximum time spent walking before transitioning to running.")]
+    public float MaxInitialWalkDuration = 10f;
+    [Tooltip("Interval between speed increases during the running phase.")]
+    public float SpeedIncreaseInterval = 0.2f;
+    [Tooltip("Amount added to moveSpeed every interval during the running phase.")]
+    public float SpeedIncrementEveryInterval = 0.1f;
 
-    public float minInitialWalkDuration = 0.5f;
-    public float maxInitialWalkDuration = 1.5f;
+    [Header("Knockback Settings")]
+    [Tooltip("Knockback force when hit by projectiles")]
+    public float knockbackIntensity = 5f;
+    [Tooltip("How long knockback lasts")]
+    public float knockbackDuration = 0.2f;
 
-    private Transform player;
-    private Rigidbody2D rb;
-    private Animator animator;
-    private SpriteRenderer spriteRenderer;
+    [Header("References")]
+    [SerializeField] private SpriteRenderer spriteRenderer;
+    [SerializeField] private Rigidbody2D rb;
+    [SerializeField] private Animator animator;
+    [SerializeField] private CapsuleCollider2D capsuleCollider;
 
+    private EnemyHealth health;
+    private StatusController statusController;
+    private IDamageable playerDamageable;
+    private SpriteFlipOffset spriteFlipOffset;
+
+    private bool isDead;
+    private bool isAttacking;
+    private bool attackOnCooldown;
+    private Coroutine attackRoutine;
+    private Coroutine preAttackDelayRoutine;
+    private bool preAttackDelayReady;
+    private bool wasInAttackRange;
+    private Vector2 knockbackVelocity = Vector2.zero;
+    private float knockbackEndTime = 0f;
+    private bool wasOffsetDrivenByAnim = false;
+
+    private int attackActionToken = 0;
+
+    // Run-up state
+    private float initialWalkDuration;
+    private float initialWalkElapsed;
     private float currentMoveSpeed;
     private float speedIncreaseTimer;
+    private bool isRunningPhase;
 
-    private bool isAttacking;
-    private bool isKnockedBack;
-
-    private float initialWalkTimer;
-    private float initialWalkDuration;
-    private bool isInitialWalking;
-    private bool initialWalkTimerStarted;
-
-    private Coroutine attackCoroutine;
-
-    void Start()
+    void Awake()
     {
-        player = GameObject.FindGameObjectWithTag("Player")?.transform;
-        rb = GetComponent<Rigidbody2D>();
-        animator = GetComponent<Animator>();
-        spriteRenderer = GetComponent<SpriteRenderer>();
+        if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
+        if (rb == null) rb = GetComponent<Rigidbody2D>();
+        if (animator == null) animator = GetComponent<Animator>();
+        if (capsuleCollider == null) capsuleCollider = GetComponent<CapsuleCollider2D>();
+        health = GetComponent<EnemyHealth>();
+        statusController = GetComponent<StatusController>();
+        spriteFlipOffset = GetComponent<SpriteFlipOffset>();
 
-        currentMoveSpeed = speed;
+        capsuleCollider.isTrigger = false;
+        Physics2D.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Default"), true);
+        Physics2D.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Enemy"), true);
+
+        if (AdvancedPlayerController.Instance != null)
+        {
+            playerDamageable = AdvancedPlayerController.Instance.GetComponent<IDamageable>();
+            AdvancedPlayerController.Instance.GetComponent<PlayerHealth>().OnDeath += OnPlayerDeath;
+        }
+
+        if (attackDamageV2 < 0f)
+        {
+            attackDamageV2 = attackDamage;
+        }
+        if (attackDamageDelayV2 < 0f)
+        {
+            attackDamageDelayV2 = attackDamageDelay;
+        }
+
+        // Initialize run-up phase
+        if (MaxInitialWalkDuration < MinInitialWalkDuration)
+        {
+            float tmp = MinInitialWalkDuration;
+            MinInitialWalkDuration = MaxInitialWalkDuration;
+            MaxInitialWalkDuration = tmp;
+        }
+
+        initialWalkDuration = Random.Range(MinInitialWalkDuration, MaxInitialWalkDuration);
+        if (initialWalkDuration < 0f)
+        {
+            initialWalkDuration = 0f;
+        }
+
+        initialWalkElapsed = 0f;
+        currentMoveSpeed = moveSpeed;
         speedIncreaseTimer = 0f;
+        isRunningPhase = false;
+    }
 
-        initialWalkDuration = Random.Range(minInitialWalkDuration, maxInitialWalkDuration);
-        initialWalkTimer = 0f;
-        isInitialWalking = true;
-        initialWalkTimerStarted = false;
+    private int BeginAttackAction()
+    {
+        attackActionToken++;
+        return attackActionToken;
+    }
+
+    private void CancelAttackAction()
+    {
+        attackActionToken++;
+    }
+
+    void OnEnable()
+    {
+        if (health == null)
+        {
+            health = GetComponent<EnemyHealth>();
+        }
+        if (health != null)
+        {
+            health.OnDeath += HandleDeath;
+        }
+    }
+
+    void OnDisable()
+    {
+        if (health != null)
+        {
+            health.OnDeath -= HandleDeath;
+        }
+
+        if (AdvancedPlayerController.Instance != null)
+        {
+            var playerHealth = AdvancedPlayerController.Instance.GetComponent<PlayerHealth>();
+            if (playerHealth != null)
+                playerHealth.OnDeath -= OnPlayerDeath;
+        }
     }
 
     void Update()
     {
-        if (player == null)
-        {
-            // Player died or missing: stop movement and reset running bonus
-            ResetRunningSpeedBonus();
-            rb.velocity = Vector2.zero;
-            animator.SetBool("isWalking", false);
-            animator.SetBool("isRunning", false);
-            return;
-        }
+        if (spriteFlipOffset == null || isDead) return;
 
-        if (isKnockedBack)
-        {
-            // Running interrupted by knockback
-            ResetRunningSpeedBonus();
-            return;
-        }
+        bool offsetDrivenByAnim =
+            animator.GetBool("moving") || animator.GetBool("movingflip") ||
+            animator.GetBool("running") || animator.GetBool("runningflip") ||
+            animator.GetBool("dead") || animator.GetBool("deadflip") ||
+            animator.GetBool("attack") || animator.GetBool("attackflip");
 
-        float distance = Vector2.Distance(transform.position, player.position);
-
-        // Only start counting initial walk timer when visible in camera
-        if (isInitialWalking)
+        if (offsetDrivenByAnim != wasOffsetDrivenByAnim)
         {
-            if (!initialWalkTimerStarted)
+            if (offsetDrivenByAnim)
             {
-                if (spriteRenderer != null && spriteRenderer.isVisible)
-                {
-                    initialWalkTimerStarted = true;
-                }
+                spriteFlipOffset.SetColliderOffsetEnabled(false);
+                spriteFlipOffset.SetShadowOffsetEnabled(false);
+            }
+            else
+            {
+                spriteFlipOffset.SetColliderOffsetEnabled(true);
+                spriteFlipOffset.SetShadowOffsetEnabled(true);
             }
 
-            if (initialWalkTimerStarted)
+            wasOffsetDrivenByAnim = offsetDrivenByAnim;
+        }
+
+        if (isDead) return;
+
+        float dt = Time.deltaTime;
+        if (dt < 0f)
+        {
+            dt = 0f;
+        }
+
+        // Update run-up timers
+        if (!isRunningPhase)
+        {
+            initialWalkElapsed += dt;
+            if (initialWalkElapsed >= initialWalkDuration)
             {
-                initialWalkTimer += Time.deltaTime;
-                if (initialWalkTimer >= initialWalkDuration)
-                {
-                    isInitialWalking = false;
-                }
+                isRunningPhase = true;
             }
-
-            MoveTowardsPlayer(distance, isRunning: false);
-            return;
         }
 
-        if (distance <= attackRange && !isAttacking)
+        bool ismoving = rb.velocity.sqrMagnitude > 0.0001f && !isAttacking;
+        bool isFlipped = spriteRenderer.flipX;
+
+        if (ismoving)
         {
-            // Entering attack interrupts running
-            ResetRunningSpeedBonus();
-            StartAttack();
-        }
-        else if (distance <= preAttackRange && !isAttacking)
-        {
-            // Stop to prepare attack interrupts running
-            ResetRunningSpeedBonus();
-            rb.velocity = Vector2.zero;
-            animator.SetBool("isWalking", false);
-            animator.SetBool("isRunning", false);
-        }
-        else if (distance <= detectionRange && !isAttacking)
-        {
-            MoveTowardsPlayer(distance, isRunning: true);
+            if (isRunningPhase)
+            {
+                animator.SetBool("running", !isFlipped);
+                animator.SetBool("runningflip", isFlipped);
+                animator.SetBool("moving", false);
+                animator.SetBool("movingflip", false);
+            }
+            else
+            {
+                animator.SetBool("moving", !isFlipped);
+                animator.SetBool("movingflip", isFlipped);
+                animator.SetBool("running", false);
+                animator.SetBool("runningflip", false);
+            }
         }
         else
         {
-            // Not chasing: reset running bonus
-            ResetRunningSpeedBonus();
-            rb.velocity = Vector2.zero;
-            animator.SetBool("isWalking", false);
-            animator.SetBool("isRunning", false);
-        }
-    }
-
-    private void MoveTowardsPlayer(float distance, bool isRunning)
-    {
-        Vector2 direction = (player.position - transform.position).normalized;
-
-        // Flip sprite
-        if (direction.x < 0)
-        {
-            transform.localScale = new Vector3(-1, 1, 1);
-        }
-        else if (direction.x > 0)
-        {
-            transform.localScale = new Vector3(1, 1, 1);
+            animator.SetBool("moving", false);
+            animator.SetBool("movingflip", false);
+            animator.SetBool("running", false);
+            animator.SetBool("runningflip", false);
         }
 
-        if (isRunning)
-        {
-            // Increase running speed bonus over time
-            speedIncreaseTimer += Time.deltaTime * runSpeedIncreaseRate;
-            float bonus = Mathf.Min(runSpeedBonus + speedIncreaseTimer, runSpeedBonusMax);
-            currentMoveSpeed = speed * bonus;
+        bool shouldIdle =
+            !ismoving &&
+            !isAttacking &&
+            (attackOnCooldown ||
+             preAttackDelayRoutine != null ||
+             preAttackDelayReady ||
+             AdvancedPlayerController.Instance == null ||
+             (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled));
+        animator.SetBool("idle", shouldIdle);
 
-            animator.SetBool("isRunning", true);
-            animator.SetBool("isWalking", false);
+        bool inRange = false;
+        if (AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
+        {
+            float distance = Vector2.Distance(transform.position, AdvancedPlayerController.Instance.transform.position);
+            inRange = distance <= attackRange;
+
+            if (!inRange)
+            {
+                wasInAttackRange = false;
+                preAttackDelayReady = false;
+                if (preAttackDelayRoutine != null)
+                {
+                    StopCoroutine(preAttackDelayRoutine);
+                    preAttackDelayRoutine = null;
+                }
+
+                // If the player left attack range mid-attack, cancel the current attack
+                if (isAttacking)
+                {
+                    CancelAttackAction();
+                    if (attackRoutine != null)
+                    {
+                        StopCoroutine(attackRoutine);
+                        attackRoutine = null;
+                    }
+
+                    isAttacking = false;
+                    attackOnCooldown = false;
+                    animator.speed = 1f;
+                    animator.SetBool("attack", false);
+                    animator.SetBool("attackflip", false);
+                }
+            }
+            else if (!wasInAttackRange)
+            {
+                wasInAttackRange = true;
+                preAttackDelayReady = PreAttackDelay <= 0f;
+
+                if (!preAttackDelayReady)
+                {
+                    if (preAttackDelayRoutine != null)
+                    {
+                        StopCoroutine(preAttackDelayRoutine);
+                        preAttackDelayRoutine = null;
+                    }
+                    preAttackDelayRoutine = StartCoroutine(PreAttackDelayRoutine());
+                }
+            }
+
+            // During the running phase, gradually increase move speed while
+            // closing the distance to the player, until we reach attack range.
+            if (isRunningPhase && !isAttacking && Time.time >= knockbackEndTime && distance > attackRange)
+            {
+                if (SpeedIncreaseInterval > 0f)
+                {
+                    speedIncreaseTimer += dt;
+                    while (speedIncreaseTimer >= SpeedIncreaseInterval)
+                    {
+                        currentMoveSpeed += SpeedIncrementEveryInterval;
+                        speedIncreaseTimer -= SpeedIncreaseInterval;
+                    }
+                }
+            }
         }
         else
         {
-            // Walking: reset running bonus
-            ResetRunningSpeedBonus();
-            currentMoveSpeed = speed;
-
-            animator.SetBool("isRunning", false);
-            animator.SetBool("isWalking", true);
+            wasInAttackRange = false;
+            preAttackDelayReady = false;
+            if (preAttackDelayRoutine != null)
+            {
+                StopCoroutine(preAttackDelayRoutine);
+                preAttackDelayRoutine = null;
+            }
         }
 
-        rb.velocity = direction * currentMoveSpeed;
+        if (!isAttacking && !attackOnCooldown && inRange && preAttackDelayReady && Time.time >= knockbackEndTime)
+        {
+            attackRoutine = StartCoroutine(AttackRoutine());
+        }
     }
 
-    private void StartAttack()
+    private IEnumerator PreAttackDelayRoutine()
     {
-        isAttacking = true;
+        float delay = Mathf.Max(0f, PreAttackDelay);
+        if (delay > 0f)
+        {
+            yield return new WaitForSeconds(delay);
+        }
+
+        preAttackDelayRoutine = null;
+
+        if (isDead || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
+        {
+            yield break;
+        }
+
+        if (Time.time < knockbackEndTime)
+        {
+            yield break;
+        }
+
+        float distance = Vector2.Distance(transform.position, AdvancedPlayerController.Instance.transform.position);
+        if (distance > attackRange)
+        {
+            wasInAttackRange = false;
+            preAttackDelayReady = false;
+            yield break;
+        }
+
+        preAttackDelayReady = true;
+    }
+
+    void OnPlayerDeath()
+    {
         rb.velocity = Vector2.zero;
-        animator.SetTrigger("attack");
-
-        if (attackCoroutine != null)
-            StopCoroutine(attackCoroutine);
-
-        attackCoroutine = StartCoroutine(AttackRoutine());
-    }
-
-    private System.Collections.IEnumerator AttackRoutine()
-    {
-        // Wait until animator actually enters the "attack" state (or timeout)
-        float enterTimeout = 0f;
-        while (enterTimeout < 0.25f)
+        if (attackRoutine != null)
         {
-            var state = animator.GetCurrentAnimatorStateInfo(0);
-            if (state.IsName("attack"))
-                break;
-            enterTimeout += Time.deltaTime;
-            yield return null;
+            StopCoroutine(attackRoutine);
+            attackRoutine = null;
         }
-
-        // Now wait for completion based on normalizedTime if we're in attack state.
-        // Use attackDuration as a max fallback (also covers cases where attack state isn't found).
-        float elapsed = 0f;
-        while (elapsed < attackDuration)
+        if (preAttackDelayRoutine != null)
         {
-            var state = animator.GetCurrentAnimatorStateInfo(0);
-            if (state.IsName("attack"))
-            {
-                // normalizedTime >= 1 means the clip finished one loop
-                if (state.normalizedTime >= 1f)
-                    break;
-            }
-            elapsed += Time.deltaTime;
-            yield return null;
+            StopCoroutine(preAttackDelayRoutine);
+            preAttackDelayRoutine = null;
         }
-
+        preAttackDelayReady = false;
+        wasInAttackRange = false;
         isAttacking = false;
-        attackCoroutine = null;
+        attackOnCooldown = false;
 
-        // After attack, ensure running bonus is reset so a new run buildup starts fresh
-        ResetRunningSpeedBonus();
+        animator.SetBool("attack", false);
+        animator.SetBool("attackflip", false);
+
+        animator.SetBool("moving", false);
+        animator.SetBool("movingflip", false);
+        animator.SetBool("running", false);
+        animator.SetBool("runningflip", false);
+        animator.SetBool("idle", true);
+        CancelAttackAction();
     }
 
-    public void ApplyKnockback(Vector2 direction)
+    public void ApplyKnockback(Vector2 direction, float force)
     {
-        isKnockedBack = true;
-        ResetRunningSpeedBonus();
+        if (isDead) return;
+
+        knockbackVelocity = direction.normalized * force * knockbackIntensity;
+        knockbackEndTime = Time.time + knockbackDuration;
+
+        if (attackRoutine != null)
+        {
+            StopCoroutine(attackRoutine);
+            attackRoutine = null;
+        }
+        if (preAttackDelayRoutine != null)
+        {
+            StopCoroutine(preAttackDelayRoutine);
+            preAttackDelayRoutine = null;
+            preAttackDelayReady = false;
+            wasInAttackRange = false;
+        }
+        isAttacking = false;
+
+        animator.SetBool("attack", false);
+        animator.SetBool("attackflip", false);
+
+        attackOnCooldown = false;
+        CancelAttackAction();
+    }
+
+    void FixedUpdate()
+    {
+        if (isDead)
+        {
+            rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (Time.time < knockbackEndTime)
+        {
+            rb.velocity = knockbackVelocity;
+            return;
+        }
+        else if (knockbackVelocity != Vector2.zero)
+        {
+            knockbackVelocity = Vector2.zero;
+        }
+
+        if (isAttacking || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
+        {
+            rb.velocity = Vector2.zero;
+            return;
+        }
+
+        Vector3 toPlayer = AdvancedPlayerController.Instance.transform.position - transform.position;
+        float distance = toPlayer.magnitude;
+
+        // Once in attack range and preparing to attack, stop moving so pre-attack uses idle instead of moving/running
+        if ((preAttackDelayRoutine != null || preAttackDelayReady) && distance <= attackRange)
+        {
+            rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (distance <= stopDistance)
+        {
+            rb.velocity = Vector2.zero;
+            return;
+        }
+
+        spriteRenderer.flipX = toPlayer.x <= 0;
+
+        float speedMult = 1f;
+        if (statusController != null)
+        {
+            speedMult = statusController.GetEnemyMoveSpeedMultiplier();
+        }
+        rb.velocity = toPlayer.normalized * (currentMoveSpeed * speedMult);
+    }
+
+    IEnumerator AttackRoutine()
+    {
+        int myToken = BeginAttackAction();
+        isAttacking = true;
+
+        float originalSpeed = animator.speed;
+        animator.speed = attackAnimSpeed;
+
+        bool isFlipped = spriteRenderer.flipX;
+        animator.SetBool("attack", !isFlipped);
+        animator.SetBool("attackflip", isFlipped);
+
+        if (attackDamageDelayV2 > 0f)
+        {
+            yield return new WaitForSeconds(attackDamageDelayV2);
+        }
+
+        if (isDead || myToken != attackActionToken)
+        {
+            animator.SetBool("attack", false);
+            animator.SetBool("attackflip", false);
+            animator.speed = originalSpeed;
+            isAttacking = false;
+            attackRoutine = null;
+            yield break;
+        }
+
+        if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive &&
+            AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
+        {
+            Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
+            Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
+            PlayerHealth.RegisterPendingAttacker(gameObject);
+            playerDamageable.TakeDamage(attackDamageV2, hitPoint, hitNormal);
+        }
+        else
+        {
+            animator.SetBool("attack", false);
+            animator.SetBool("attackflip", false);
+            animator.speed = originalSpeed;
+            isAttacking = false;
+            attackRoutine = null;
+            yield break;
+        }
+
+        float elapsedAttackTime = Mathf.Max(0f, attackDamageDelayV2);
+        float remainingTime = attackDuration - elapsedAttackTime;
+        if (remainingTime > 0f)
+        {
+            yield return new WaitForSeconds(remainingTime);
+        }
+
+        if (isDead || myToken != attackActionToken)
+        {
+            animator.SetBool("attack", false);
+            animator.SetBool("attackflip", false);
+            animator.speed = originalSpeed;
+            isAttacking = false;
+            attackRoutine = null;
+            yield break;
+        }
+
+        animator.SetBool("attack", false);
+        animator.SetBool("attackflip", false);
+
+        animator.speed = originalSpeed;
+        isAttacking = false;
+
+        float cooldown = attackCooldown;
+        if (statusController != null)
+        {
+            cooldown += statusController.GetLethargyAttackCooldownBonus();
+        }
+        if (cooldown < 0f)
+        {
+            cooldown = 0f;
+        }
+
+        if (cooldown <= 0f)
+        {
+            attackOnCooldown = false;
+            attackRoutine = null;
+        }
+        else
+        {
+            attackOnCooldown = true;
+            animator.SetBool("idle", true);
+
+            yield return new WaitForSeconds(cooldown);
+
+            attackOnCooldown = false;
+            animator.SetBool("idle", false);
+            attackRoutine = null;
+        }
+    }
+
+    void HandleDeath()
+    {
+        if (isDead) return;
+        isDead = true;
+
+        CancelAttackAction();
+
+        if (attackRoutine != null) StopCoroutine(attackRoutine);
+
+        bool isFlipped = spriteRenderer.flipX;
+        animator.SetBool("dead", !isFlipped);
+        animator.SetBool("deadflip", isFlipped);
+
+        animator.SetBool("moving", false);
+        animator.SetBool("movingflip", false);
+        animator.SetBool("running", false);
+        animator.SetBool("runningflip", false);
+        animator.SetBool("idle", false);
+        animator.SetBool("attack", false);
+        animator.SetBool("attackflip", false);
+
         rb.velocity = Vector2.zero;
-        rb.AddForce(direction.normalized * knockbackForce, ForceMode2D.Impulse);
-        animator.SetTrigger("knockback");
-        Invoke(nameof(EndKnockback), 0.5f);
+        knockbackVelocity = Vector2.zero;
+        rb.bodyType = RigidbodyType2D.Static;
+
+        if (capsuleCollider != null)
+        {
+            capsuleCollider.enabled = false;
+        }
+
+        StartCoroutine(FadeOutAndDestroy());
     }
 
-    private void EndKnockback()
+    IEnumerator FadeOutAndDestroy()
     {
-        isKnockedBack = false;
+        float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
+        if (animationDelay > 0)
+        {
+            yield return new WaitForSeconds(animationDelay);
+        }
+
+        if (spriteRenderer != null)
+        {
+            float elapsed = 0f;
+            Color startColor = spriteRenderer.color;
+
+            while (elapsed < deathFadeOutDuration)
+            {
+                elapsed += Time.deltaTime;
+                float alpha = Mathf.Lerp(1f, 0f, elapsed / deathFadeOutDuration);
+                spriteRenderer.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
+                yield return null;
+            }
+        }
+
+        Destroy(gameObject);
     }
 
-    private void ResetRunningSpeedBonus()
+    void OnCollisionEnter2D(Collision2D collision)
     {
-        currentMoveSpeed = speed;
-        speedIncreaseTimer = 0f;
+        if (isDead) return;
+
+        if (collision.gameObject.CompareTag("Projectile"))
+        {
+            // Projectiles handle damage via EnemyHealth component
+        }
+        else if (collision.gameObject.CompareTag("Player"))
+        {
+            // Physical contact with player
+        }
     }
 }
