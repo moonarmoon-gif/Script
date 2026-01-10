@@ -115,8 +115,7 @@ public class CriticalAttackSpeedFavour : FavourEffect
         {
             float perStackAttackSpeed = Mathf.Max(0f, AttackSpeedIncrement);
             float total = perStackAttackSpeed * currentStacks;
-            // Remove the temporary attack speed bonus while clamping at 0.
-            playerStats.attackSpeedPercent = Mathf.Max(0f, playerStats.attackSpeedPercent - total);
+            playerStats.attackSpeedPercent = playerStats.attackSpeedPercent - total;
         }
 
         currentStacks = 0;

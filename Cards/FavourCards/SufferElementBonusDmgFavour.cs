@@ -4,81 +4,51 @@ using UnityEngine;
 public class SufferElementBonusDmgFavour : FavourEffect
 {
     [Header("Suffer Element Bonus Damage Settings")]
-    [Tooltip("Bonus damage against enemies currently affected by a status effect (0.15 = +15%).")]
-    public float BonusDamage = 0.15f;
+    public int VulnerableStack = 1;
 
-    private float currentBonusMultiplier = 1f;
+    [Header("Enhanced")]
+    public int BonusVulnerableStack = 1;
+
+    private int sourceKey;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        currentBonusMultiplier = 1f + Mathf.Max(0f, BonusDamage);
+        sourceKey = Mathf.Abs(GetInstanceID());
+        if (sourceKey == 0)
+        {
+            sourceKey = 1;
+        }
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        // Enhanced: increase BonusDamage by the same base amount each time.
-        currentBonusMultiplier += Mathf.Max(0f, BonusDamage);
+        VulnerableStack += Mathf.Max(0, BonusVulnerableStack);
     }
 
-    public override void OnBeforeDealDamage(GameObject player, GameObject enemy, ref float damage, FavourEffectManager manager)
-    {
-        damage = ApplyBonus(enemy, damage);
-    }
-
-    public override float PreviewBeforeDealDamage(GameObject player, GameObject enemy, float damage, FavourEffectManager manager)
-    {
-        return ApplyBonus(enemy, damage);
-    }
-
-    private bool HasAnyStatusEffect(GameObject enemy)
+    public override void OnStatusApplied(GameObject player, GameObject enemy, StatusId statusId, FavourEffectManager manager)
     {
         if (enemy == null)
         {
-            return false;
+            return;
         }
 
-        // Burn
-        var burn = enemy.GetComponent<BurnEffect.BurnStatus>() ?? enemy.GetComponentInChildren<BurnEffect.BurnStatus>();
-        if (burn != null)
+        if (statusId == StatusId.Vulnerable)
         {
-            return true;
+            return;
         }
 
-        // Slow
-        var slow = enemy.GetComponent<SlowStatus>() ?? enemy.GetComponentInChildren<SlowStatus>();
-        if (slow != null)
+        int stacks = Mathf.Max(0, VulnerableStack);
+        if (stacks <= 0)
         {
-            return true;
+            return;
         }
 
-        // Static
-        var stat = enemy.GetComponent<StaticStatus>() ?? enemy.GetComponentInChildren<StaticStatus>();
-        if (stat != null)
+        StatusController statusController = enemy.GetComponent<StatusController>() ?? enemy.GetComponentInParent<StatusController>();
+        if (statusController == null)
         {
-            return true;
+            return;
         }
 
-        return false;
-    }
-
-    private float ApplyBonus(GameObject enemy, float damage)
-    {
-        if (damage <= 0f)
-        {
-            return damage;
-        }
-
-        if (!HasAnyStatusEffect(enemy))
-        {
-            return damage;
-        }
-
-        if (currentBonusMultiplier <= 0f || Mathf.Approximately(currentBonusMultiplier, 1f))
-        {
-            return damage;
-        }
-
-        damage *= currentBonusMultiplier;
-        return damage;
+        statusController.AddStatus(StatusId.Vulnerable, stacks, -1f, 0f, null, sourceKey);
     }
 }

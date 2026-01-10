@@ -93,7 +93,8 @@ public class StatusEffectManager : MonoBehaviour
 
         if (DamageNumberManager.Instance != null)
         {
-            DamageNumberManager.Instance.ShowSlow(transform.position);
+            Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
+            DamageNumberManager.Instance.ShowSlow(anchor);
         }
 
         float finalMultiplier = speedMultiplier;

@@ -156,6 +156,19 @@ public class RangedNecromancerEnemy : MonoBehaviour
         {
             projectileSpawnTimingV2 = projectileSpawnTiming;
         }
+
+        float referenceX = transform.position.x;
+        if (player != null)
+        {
+            referenceX = player.position.x;
+        }
+        else if (Camera.main != null)
+        {
+            referenceX = Camera.main.transform.position.x;
+        }
+
+        sr.flipX = transform.position.x >= referenceX;
+        UpdateFirePointPosition();
     }
 
     private int BeginShootAction()

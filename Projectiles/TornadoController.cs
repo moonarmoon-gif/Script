@@ -306,13 +306,7 @@ public class TornadoController : MonoBehaviour, IInstantModifiable
             lastDamageTimes[enemyID] = Time.time;
 
             // Apply status effects using shared BurnEffect/SlowEffect components
-            BurnEffect burnEffect = GetComponent<BurnEffect>();
-            if (burnEffect != null)
-            {
-                ProjectileType projType = isFireTornado ? ProjectileType.Fire : ProjectileType.Ice;
-                burnEffect.Initialize(finalDamage, projType);
-                burnEffect.TryApplyBurn(other.gameObject, hitPoint);
-            }
+            StatusController.TryApplyBurnFromProjectile(gameObject, other.gameObject, hitPoint, finalDamage);
 
             SlowEffect slowEffect = GetComponent<SlowEffect>();
             if (slowEffect != null)

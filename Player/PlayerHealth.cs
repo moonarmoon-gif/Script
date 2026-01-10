@@ -99,8 +99,6 @@ public class PlayerHealth : MonoBehaviour, IDamageable
 
                 currentHealth = Mathf.Clamp(currentHealth + regenAmount, 0f, maxHealth);
                 RaiseHealthChanged();
-
-                Debug.Log($"<color=green>Regenerated {regenAmount:F2} health ({currentHealth:F1}/{maxHealth:F1}) [RegenPerSecond={regenPerSecond:F2}/s]</color>");
             }
             
             nextRegenTime = Time.time + healthRegenInterval;
@@ -159,8 +157,27 @@ public class PlayerHealth : MonoBehaviour, IDamageable
     {
         if (!IsAlive) return;
 
+        bool hadIncomingDamage = damage > 0f || pendingAttacker != null;
+
         float scaledDamage = damage;
         bool reflectedMeleeHit = false;
+
+        GameObject attacker = pendingAttacker;
+        pendingAttacker = null;
+
+        if (attacker != null && scaledDamage > 0f)
+        {
+            EnemyCardTag attackerTag = attacker.GetComponent<EnemyCardTag>() ?? attacker.GetComponentInParent<EnemyCardTag>();
+            if (attackerTag != null)
+            {
+                float bossMul = attackerTag.damageMultiplier;
+                if (bossMul > 0f && !Mathf.Approximately(bossMul, 1f))
+                {
+                    scaledDamage *= bossMul;
+                }
+            }
+        }
+
         if (EnemyScalingSystem.Instance != null)
         {
             float damageMultiplier = EnemyScalingSystem.Instance.GetDamageMultiplier();
@@ -170,9 +187,6 @@ public class PlayerHealth : MonoBehaviour, IDamageable
                 Debug.Log($"<color=red>Enemy damage scaled: {damage:F1} x {damageMultiplier:F2} = {scaledDamage:F1}</color>");
             }
         }
-
-        GameObject attacker = pendingAttacker;
-        pendingAttacker = null;
 
         if (attacker != null && scaledDamage > 0f)
         {
@@ -235,9 +249,37 @@ public class PlayerHealth : MonoBehaviour, IDamageable
             }
         }
 
+        if (!isAoeDamage && !StatusDamageScope.IsStatusTick && isMeleeLikeHit && ReflectShield.ActiveShield != null && ReflectShield.ActiveShield.IsAlive)
+        {
+            ReflectShield.ActiveShield.TryHandleMeleeHit(scaledDamage, attacker);
+            if (favourManager != null)
+            {
+                favourManager.NotifyPlayerDamageFinalized(attacker, 0f, false, isAoeDamage);
+            }
+            lastDamageTime = Time.time;
+            return;
+        }
+
+        if (!isAoeDamage && !StatusDamageScope.IsStatusTick && isRangedLikeHit && NullifyShield.ActiveShield != null && NullifyShield.ActiveShield.IsAlive)
+        {
+            if (NullifyShield.ActiveShield.TryNullifyProjectileHit())
+            {
+                if (favourManager != null)
+                {
+                    favourManager.NotifyPlayerDamageFinalized(attacker, 0f, false, isAoeDamage);
+                }
+                lastDamageTime = Time.time;
+                return;
+            }
+        }
+
         if (HolyShield.ActiveShield != null && HolyShield.ActiveShield.IsAlive)
         {
-            HolyShield.ActiveShield.HandleIncomingHit(scaledDamage, attacker, hitPoint, hitNormal, isMeleeLikeHit, isRangedLikeHit);
+            HolyShield.ActiveShield.TakeDamage(scaledDamage, hitPoint, hitNormal);
+            if (favourManager != null)
+            {
+                favourManager.NotifyPlayerDamageFinalized(attacker, 0f, StatusDamageScope.IsStatusTick, isAoeDamage);
+            }
             return;
         }
 
@@ -249,7 +291,7 @@ public class PlayerHealth : MonoBehaviour, IDamageable
 
         StatusController statusController = GetComponent<StatusController>();
         bool isStatusTick = StatusDamageScope.IsStatusTick;
-        bool hasImmuneStatus = false;
+        bool hasImmuneStatus = statusController != null && statusController.HasStatus(StatusId.Immune);
         bool woundAppliedToPlayerDamage = false;
 
         if (statusController != null && scaledDamage > 0f)
@@ -269,6 +311,10 @@ public class PlayerHealth : MonoBehaviour, IDamageable
                     {
                         DamageNumberManager.Instance.ShowNullify(transform.position);
                     }
+                    if (favourManager != null)
+                    {
+                        favourManager.NotifyPlayerDamageFinalized(attacker, 0f, false, isAoeDamage);
+                    }
                     lastDamageTime = Time.time;
                     return;
                 }
@@ -286,10 +332,8 @@ public class PlayerHealth : MonoBehaviour, IDamageable
             statusController.ModifyIncomingDamage(ref scaledDamage, ref ctx);
             woundAppliedToPlayerDamage = ctx.wasWoundApplied;
 
-            if (!isStatusTick && statusController.HasStatus(StatusId.Immune))
-            {
-                hasImmuneStatus = true;
-            }
+            // hasImmuneStatus is computed unconditionally above so that it can
+            // also protect status-tick damage from being forced to minimum 1.
         }
 
         // This value represents the damage after all status-based modifiers
@@ -301,10 +345,12 @@ public class PlayerHealth : MonoBehaviour, IDamageable
         // Armor should never reduce damage absorbed by shields. Apply it only
         // after all shield-like effects (OnPlayerHit hooks, HolyShield) have
         // already processed the incoming value, so it only mitigates HP damage.
+        bool reducedToZeroByArmor = false;
         if (scaledDamage > 0f && playerStats != null && playerStats.armor > 0f)
         {
             float beforeArmor = scaledDamage;
             scaledDamage = Mathf.Max(0f, scaledDamage - playerStats.armor);
+            reducedToZeroByArmor = scaledDamage <= 0f && beforeArmor > 0f;
             Debug.Log($"<color=cyan>Armor absorbed {beforeArmor - scaledDamage:F1} damage (armor={playerStats.armor:F1}). Final HP damage={scaledDamage:F1}</color>");
         }
 
@@ -376,23 +422,41 @@ public class PlayerHealth : MonoBehaviour, IDamageable
             scaledDamage = statusController.ApplyAbsorption(scaledDamage);
         }
 
-        // DoT ticks (burn, poison, bleed) should always deal at least 1 damage
-        // after all reductions, unless they are fully negated (e.g., by
-        // Immunity). This check runs after Absorption.
+        // DoT ticks (burn, poison, bleed, future statuses) should always deal
+        // at least 1 damage after all reductions, unless they are fully
+        // negated (e.g., by Immunity). This check runs after Absorption.
         if (isStatusTick && scaledDamage > 0f && scaledDamage < 1f)
         {
             scaledDamage = 1f;
         }
 
+        if (scaledDamage > 0f && StatusControllerManager.Instance != null)
+        {
+            if (isStatusTick)
+            {
+                scaledDamage = StatusControllerManager.Instance.RoundDamage(scaledDamage);
+                if (scaledDamage > 0f && scaledDamage < 1f)
+                {
+                    scaledDamage = 1f;
+                }
+            }
+            else
+            {
+                scaledDamage = StatusControllerManager.Instance.RoundDamage(scaledDamage);
+            }
+        }
+
         if (scaledDamage <= 0f)
         {
-            // When damage has been reduced to exactly 0 by normal mitigation
-            // (armor, Defense, etc.) and NONE of the special statuses
-            // triggered, show a numeric 0. If IMMUNE status is present, show
-            // only the Immune text instead.
-            if (!isStatusTick)
+            if (isStatusTick)
             {
-                if (hasImmuneStatus)
+                StatusDamageScope.LastResolvedDamage = 0f;
+            }
+
+            // Preserve complete negation systems.
+            if (hasImmuneStatus || immune || reflectedMeleeHit)
+            {
+                if (!isStatusTick && hasImmuneStatus)
                 {
                     if (DamageNumberManager.Instance != null)
                     {
@@ -400,12 +464,37 @@ public class PlayerHealth : MonoBehaviour, IDamageable
                     }
                     lastDamageTime = Time.time;
                 }
-                else if (!immune && DamageNumberManager.Instance != null && !reflectedMeleeHit)
+
+                if (favourManager != null)
                 {
-                    DamageNumberManager.Instance.ShowDamage(0f, hitPoint, DamageNumberManager.DamageType.Player);
+                    favourManager.NotifyPlayerDamageFinalized(attacker, 0f, isStatusTick, isAoeDamage);
                 }
+                return;
             }
-            return;
+
+            // Minimum damage rule: if this TakeDamage call was a real hit
+            // (caller passed damage > 0) and it was reduced to 0 by normal
+            // mitigation, clamp to 1.
+            if (hadIncomingDamage)
+            {
+                if (reducedToZeroByArmor)
+                {
+                    if (favourManager != null)
+                    {
+                        favourManager.NotifyPlayerDamageFinalized(attacker, 0f, isStatusTick, isAoeDamage);
+                    }
+                    return;
+                }
+                scaledDamage = 1f;
+            }
+            else
+            {
+                if (favourManager != null)
+                {
+                    favourManager.NotifyPlayerDamageFinalized(attacker, 0f, isStatusTick, isAoeDamage);
+                }
+                return;
+            }
         }
 
         // When immune, do NOT show numeric damage – only the Immune status text.
@@ -416,6 +505,10 @@ public class PlayerHealth : MonoBehaviour, IDamageable
                 DamageNumberManager.Instance.ShowImmune(transform.position);
             }
             Debug.Log($"<color=cyan>Player is IMMUNE - took {scaledDamage} damage but health unchanged!</color>");
+            if (favourManager != null)
+            {
+                favourManager.NotifyPlayerDamageFinalized(attacker, 0f, isStatusTick, isAoeDamage);
+            }
             lastDamageTime = Time.time;
             return;
         }
@@ -434,9 +527,19 @@ public class PlayerHealth : MonoBehaviour, IDamageable
             }
         }
 
+        if (isStatusTick)
+        {
+            StatusDamageScope.LastResolvedDamage = scaledDamage;
+        }
+
         lastDamageTime = Time.time;
         currentHealth = Mathf.Clamp(currentHealth - scaledDamage, 0f, maxHealth);
         RaiseHealthChanged();
+
+        if (favourManager != null)
+        {
+            favourManager.NotifyPlayerDamageFinalized(attacker, scaledDamage, isStatusTick, isAoeDamage);
+        }
 
         if (currentHealth <= 0f)
         {
@@ -447,6 +550,11 @@ public class PlayerHealth : MonoBehaviour, IDamageable
     public void Damage(float amount)
     {
         if (amount <= 0f || !IsAlive) return;
+
+        if (amount > 0f && amount < 1f)
+        {
+            amount = 1f;
+        }
 
         // Check invulnerability
         if (Time.time - lastDamageTime < invulnerabilityDuration) return;

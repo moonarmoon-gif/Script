@@ -1,48 +1,41 @@
 using UnityEngine;
 
-[CreateAssetMenu(fileName = "CritOnCritFavour", menuName = "Favour Effects/Crit On Crit")]
+[CreateAssetMenu(fileName = "CritOnCritFavour", menuName = "Favour Effects 2/Crit On Crit")]
 public class CritOnCritFavour : FavourEffect
 {
     [Header("Crit On Crit Settings")]
     [Tooltip("Bonus crit chance (in percent) granted per stack when killing an enemy with a critical strike (e.g. 2 = +2% per stack).")]
-    public float BonusCritChance = 2f;
+    public float FrenzyGain = 2f;
 
     [Tooltip("Maximum crit chance bonus (in percent) this favour can grant at once (e.g. 10 = +10% max).")]
-    public float MaximumCritChance = 10f;
+    public float MaximumFrenzyStacks = 10f;
 
     [Tooltip("Duration in seconds for each individual crit-on-crit stack (per kill). Example: 5 = each stack lasts 5s.")]
-    public float CritDuration = 5f;
+    public float FrenzyDuration = 5f;
 
     private PlayerStats playerStats;
 
-    // Current number of active stacks and total applied bonus (percent)
-    private int activeStacks = 0;
-    private float currentBonusPercent = 0f;
+    private StatusController playerStatus;
+    private int sourceKey;
 
-    // Time remaining per stack; independent timers as requested
-    private System.Collections.Generic.List<float> stackExpiryTimes = new System.Collections.Generic.List<float>();
-
-    // Cached reference to the owning player for convenience
-    private GameObject owner;
+    private readonly System.Collections.Generic.List<float> stackExpiryTimes = new System.Collections.Generic.List<float>();
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        owner = player;
-
         if (player == null)
         {
             return;
         }
 
         playerStats = player.GetComponent<PlayerStats>();
-        if (playerStats == null)
+        playerStatus = player.GetComponent<StatusController>();
+
+        sourceKey = Mathf.Abs(GetInstanceID());
+        if (sourceKey == 0)
         {
-            Debug.LogWarning($"<color=yellow>CritOnCritFavour could not find PlayerStats on {player.name}.</color>");
-            return;
+            sourceKey = 1;
         }
 
-        activeStacks = 0;
-        currentBonusPercent = 0f;
         stackExpiryTimes.Clear();
 
         // Mark this favour card as one-time-per-run so it cannot appear again
@@ -55,13 +48,12 @@ public class CritOnCritFavour : FavourEffect
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        // Enhanced: increase the maximum crit bonus cap by the same base amount.
-        MaximumCritChance += Mathf.Max(0f, MaximumCritChance);
+        OnApply(player, manager, sourceCard);
     }
 
     public override void OnEnemyKilled(GameObject player, GameObject enemy, FavourEffectManager manager)
     {
-        if (playerStats == null)
+        if (playerStats == null || playerStatus == null)
         {
             return;
         }
@@ -72,86 +64,71 @@ public class CritOnCritFavour : FavourEffect
             return;
         }
 
-        float perStack = Mathf.Max(0f, BonusCritChance);
-        if (perStack <= 0f)
+        float duration = Mathf.Max(0f, FrenzyDuration);
+        if (duration <= 0f)
         {
             return;
         }
 
-        // Add a new independent stack lasting CritDuration seconds
+        int stacksPerKill = Mathf.RoundToInt(Mathf.Max(0f, FrenzyGain));
+        int maxStacks = Mathf.RoundToInt(Mathf.Max(0f, MaximumFrenzyStacks));
+        if (stacksPerKill <= 0 || maxStacks <= 0)
+        {
+            return;
+        }
+
         float now = Time.time;
-        float duration = Mathf.Max(0f, CritDuration);
-        float expiry = now + duration;
+        for (int i = stackExpiryTimes.Count - 1; i >= 0; i--)
+        {
+            if (now >= stackExpiryTimes[i])
+            {
+                stackExpiryTimes.RemoveAt(i);
+            }
+        }
 
-        stackExpiryTimes.Add(expiry);
-        activeStacks++;
+        int room = maxStacks - stackExpiryTimes.Count;
+        if (room <= 0)
+        {
+            return;
+        }
 
-        RecalculateBonus();
+        int toAdd = Mathf.Min(room, stacksPerKill);
+        for (int i = 0; i < toAdd; i++)
+        {
+            stackExpiryTimes.Add(now + duration);
+            playerStatus.AddStatus(StatusId.Frenzy, 1, duration, 0f, null, sourceKey);
+        }
     }
 
     public override void OnUpdate(GameObject player, FavourEffectManager manager, float deltaTime)
     {
-        if (playerStats == null || stackExpiryTimes.Count == 0)
+        if (stackExpiryTimes.Count == 0)
         {
             return;
         }
 
         float now = Time.time;
-        bool changed = false;
 
         for (int i = stackExpiryTimes.Count - 1; i >= 0; i--)
         {
             if (now >= stackExpiryTimes[i])
             {
                 stackExpiryTimes.RemoveAt(i);
-                activeStacks--;
-                if (activeStacks < 0) activeStacks = 0;
-                changed = true;
             }
-        }
-
-        if (changed)
-        {
-            RecalculateBonus();
         }
     }
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)
     {
-        if (playerStats == null)
+        if (playerStatus == null && player != null)
         {
-            return;
+            playerStatus = player.GetComponent<StatusController>();
         }
 
-        if (!Mathf.Approximately(currentBonusPercent, 0f))
+        if (playerStatus != null)
         {
-            playerStats.critChance = Mathf.Max(0f, playerStats.critChance - currentBonusPercent);
+            while (playerStatus.ConsumeStacks(StatusId.Frenzy, 1, sourceKey)) { }
         }
-
-        currentBonusPercent = 0f;
-        activeStacks = 0;
         stackExpiryTimes.Clear();
-    }
-
-    private void RecalculateBonus()
-    {
-        if (playerStats == null)
-        {
-            return;
-        }
-
-        float perStack = Mathf.Max(0f, BonusCritChance);
-        float maxCap = Mathf.Max(0f, MaximumCritChance);
-
-        float desiredBonus = Mathf.Min(activeStacks * perStack, maxCap);
-        float delta = desiredBonus - currentBonusPercent;
-
-        if (Mathf.Approximately(delta, 0f))
-        {
-            return;
-        }
-
-        playerStats.critChance += delta;
-        currentBonusPercent = desiredBonus;
     }
 }

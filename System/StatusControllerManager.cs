@@ -64,10 +64,6 @@ public class StatusControllerManager : MonoBehaviour
     [SerializeField, Tooltip("Bonus percent damage for First Strike (applied once when the status is consumed).")]
     private float firstStrikeBonusPercent = 10f;
 
-    [Header("Execute")]
-    [SerializeField, Tooltip("Health percent threshold under which Execute will instantly kill enemies.")]
-    private float executeThresholdPercent = 20f;
-
     [Header("Player Movement")]
     [SerializeField, Tooltip("Percent movement speed reduction per stack of SLOW on the Player.")]
     private float playerSlowPercentPerStack = 25f;
@@ -82,6 +78,14 @@ public class StatusControllerManager : MonoBehaviour
 
     [SerializeField, Tooltip("Percent movement speed reduction per stack of BURDEN on enemies.")]
     private float enemyBurdenMoveSpeedPercentPerStack = 1f;
+
+    [Header("Overweight")]
+    [SerializeField, Tooltip("Additional Rigidbody2D mass added per stack of OVERWEIGHT.")]
+    private float massPerStack = 1f;
+
+    [Header("Frenzy")]
+    [SerializeField, Tooltip("Bonus critical chance (percent) granted per stack of FRENZY.")]
+    private float critPerStack = 1f;
 
     [Header("Lethargy")]
     [SerializeField, Tooltip("Additional seconds of attack cooldown per stack of LETHARGY on enemies.")]
@@ -135,6 +139,28 @@ public class StatusControllerManager : MonoBehaviour
     [SerializeField, Tooltip("Low-health threshold percent (0-100) used by FURY (e.g., 50 = 50% or below).")]
     private float furyLowHealthThresholdPercent = 50f;
 
+    [Header("Rage")]
+    [SerializeField, Tooltip("Flat Attack bonus granted to the PLAYER per stack of RAGE.")]
+    private float rageAttackBonusPerStack = 1f;
+    [SerializeField, Tooltip("Flat base damage bonus granted to ENEMIES per stack of RAGE.")]
+    private float rageEnemyBaseDamageBonusPerStack = 1f;
+    [SerializeField, Tooltip("Duration in seconds for RAGE status when applied with default duration (-1 in AddStatus).")]
+    private float rageDurationSeconds = 5f;
+
+    [Header("Burn")]
+    [SerializeField, Tooltip("Global burn tick interval in seconds. All burn systems must obey this value.")]
+    private float burnTickIntervalSeconds = 0.25f;
+
+    [SerializeField, Range(0f, 10f)]
+    public float damageRoundingThreshold = 5.5f;
+
+    public float BurnTickIntervalSeconds
+    {
+        get { return Mathf.Max(0.01f, burnTickIntervalSeconds); }
+    }
+
+    public float DamageRoundingThreshold => Mathf.Clamp(damageRoundingThreshold, 0f, 10f);
+
     public float VulnerableDamageMultiplier
     {
         get
@@ -144,234 +170,111 @@ public class StatusControllerManager : MonoBehaviour
         }
     }
 
-    public float DefenseDamageMultiplier
+    public float DefenseDamageMultiplier => Mathf.Clamp(defenseDamageMultiplier, 0f, 1f);
+    public float PoisonDamagePerStack => Mathf.Max(0f, poisonDamagePerStack);
+    public float PoisonTickInterval => Mathf.Max(0.01f, poisonTickInterval);
+    public float PoisonDurationSeconds => Mathf.Max(0f, poisonDurationSeconds);
+    public float AccelerationAttackSpeedPercent => Mathf.Max(0f, accelerationAttackSpeedPercent);
+    public float AccelerationDurationSeconds => Mathf.Max(0f, accelerationDurationSeconds);
+    public float ThornReflectFlatDamagePerStack => Mathf.Max(0f, thornReflectFlatDamagePerStack);
+    public float CurseBonusElementalDamagePercentPerStack => Mathf.Max(0f, curseBonusElementalDamagePercentPerStack);
+    public float DecayDamageReductionPercentPerStack => Mathf.Max(0f, decayDamageReductionPercentPerStack);
+    public float CondemnDamageTakenPercentPerStack => Mathf.Max(0f, condemnDamageTakenPercentPerStack);
+    public float DeathMarkDamageTakenPercentPerStack => Mathf.Max(0f, deathMarkDamageTakenPercentPerStack);
+    public float WoundFlatDamagePerStack => Mathf.Max(0f, woundFlatDamagePerStack);
+    public float WoundDurationSeconds => Mathf.Max(0f, woundDurationSeconds);
+    public float WeakDamageReductionPercent => Mathf.Max(0f, weakDamageReductionPercent);
+    public float ArmorFlatReductionPerStack => Mathf.Max(0f, armorFlatReductionPerStack);
+    public float AbsorptionMaxHitPercent => Mathf.Max(0f, absorptionMaxHitPercent);
+    public float BleedHealingReductionPercent => Mathf.Max(0f, bleedHealingReductionPercent);
+    public float BleedDurationSeconds => Mathf.Max(0f, bleedDurationSeconds);
+    public float BlessingHealingIncreasePercent => Mathf.Max(0f, blessingHealingIncreasePercent);
+    public float BlessingDurationSeconds => Mathf.Max(0f, blessingDurationSeconds);
+    public float FirstStrikeBonusPercent => Mathf.Max(0f, firstStrikeBonusPercent);
+    public float PlayerSlowPercentPerStack => Mathf.Max(0f, playerSlowPercentPerStack);
+    public float AmnesiaChancePerStackPercent => Mathf.Max(0f, amnesiaChancePerStackPercent);
+    public float EnemyHasteMoveSpeedPercentPerStack => Mathf.Max(0f, enemyHasteMoveSpeedPercentPerStack);
+    public float EnemyBurdenMoveSpeedPercentPerStack => Mathf.Max(0f, enemyBurdenMoveSpeedPercentPerStack);
+    public float MassPerStack => Mathf.Max(0f, massPerStack);
+    public float CritPerStack => Mathf.Max(0f, critPerStack);
+    public float LethargyAttackCooldownSecondsPerStack => Mathf.Max(0f, lethargyAttackCooldownSecondsPerStack);
+    public float ShieldStrengthDamageReductionPercentPerStack => Mathf.Max(0f, shieldStrengthDamageReductionPercentPerStack);
+    public float ShatterShieldBonusPercent => Mathf.Max(0f, shatterShieldBonusPercent);
+    public float RevivalHealPercent => Mathf.Max(0f, revivalHealPercent);
+    public float FrostbiteIceDamageTakenPercentPerStack => Mathf.Max(0f, frostbiteIceDamageTakenPercentPerStack);
+    public float ScorchedFireDamageTakenPercentPerStack => Mathf.Max(0f, scorchedFireDamageTakenPercentPerStack);
+    public float ShockedLightningDamageTakenPercentPerStack => Mathf.Max(0f, shockedLightningDamageTakenPercentPerStack);
+
+    public GameObject FreezeOnApplyEffectPrefab => freezeOnApplyEffectPrefab;
+    public GameObject FreezeOnDeathEffectPrefab => freezeOnDeathEffectPrefab;
+    public float FreezeOnApplyEffectSizeMultiplier => Mathf.Max(0f, freezeOnApplyEffectSizeMultiplier);
+    public float FreezeOnDeathEffectSizeMultiplier => Mathf.Max(0f, freezeOnDeathEffectSizeMultiplier);
+
+    public float ImmolationRadius => Mathf.Max(0f, immolationRadius);
+    public GameObject ImmolationOnApplyEffectPrefab => immolationOnApplyEffectPrefab;
+    public GameObject ImmolationOnDeathEffectPrefab => immolationOnDeathEffectPrefab;
+    public float ImmolationOnApplyEffectSizeMultiplier => Mathf.Max(0f, immolationOnApplyEffectSizeMultiplier);
+    public float ImmolationOnDeathEffectSizeMultiplier => Mathf.Max(0f, immolationOnDeathEffectSizeMultiplier);
+
+    public float HatredBonusPercentPerDebuffPerStack => Mathf.Max(0f, hatredBonusPercentPerDebuffPerStack);
+    public float FocusBonusPercentPerStack => Mathf.Max(0f, focusBonusPercentPerStack);
+    public float FuryBonusPercentPerStack => Mathf.Max(0f, furyBonusPercentPerStack);
+    public float FuryLowHealthThresholdPercent => Mathf.Clamp(furyLowHealthThresholdPercent, 0f, 100f);
+
+    public float RageAttackBonusPerStack => Mathf.Max(0f, rageAttackBonusPerStack);
+    public float RageEnemyBaseDamageBonusPerStack => Mathf.Max(0f, rageEnemyBaseDamageBonusPerStack);
+    public float RageDurationSeconds => Mathf.Max(0f, rageDurationSeconds);
+
+    public float FuryAttackBonusPerStack => RageAttackBonusPerStack;
+    public float FuryEnemyBaseDamageBonusPerStack => RageEnemyBaseDamageBonusPerStack;
+    public float FuryDurationSeconds => RageDurationSeconds;
+
+    public float RageBonusPercentPerStack => FuryBonusPercentPerStack;
+    public float RageLowHealthThresholdPercent => FuryLowHealthThresholdPercent;
+
+    public float RoundDamage(float rawDamage)
     {
-        get { return Mathf.Clamp(defenseDamageMultiplier, 0f, 1f); }
+        if (rawDamage <= 0f)
+        {
+            return 0f;
+        }
+
+        float threshold = DamageRoundingThreshold;
+        float floor = Mathf.Floor(rawDamage);
+        float frac = rawDamage - floor;
+
+        if (frac <= 0f)
+        {
+            return floor;
+        }
+
+        float fracTenths = frac * 10f;
+        if (fracTenths < threshold)
+        {
+            return floor;
+        }
+
+        return floor + 1f;
     }
 
-    public float PoisonDamagePerStack
+    private void OnValidate()
     {
-        get { return Mathf.Max(0f, poisonDamagePerStack); }
+        MigrateDamageRoundingThresholdIfNeeded();
     }
 
-    public float PoisonTickInterval
+    private void MigrateDamageRoundingThresholdIfNeeded()
     {
-        get { return Mathf.Max(0.01f, poisonTickInterval); }
-    }
+        if (damageRoundingThreshold <= 1f)
+        {
+            damageRoundingThreshold *= 10f;
+        }
 
-    public float PoisonDurationSeconds
-    {
-        get { return Mathf.Max(0f, poisonDurationSeconds); }
-    }
+        if (Mathf.Abs(damageRoundingThreshold - 8f) <= 0.001f)
+        {
+            damageRoundingThreshold = 5.5f;
+        }
 
-    public float AccelerationAttackSpeedPercent
-    {
-        get { return Mathf.Max(0f, accelerationAttackSpeedPercent); }
-    }
-
-    public float AccelerationDurationSeconds
-    {
-        get { return Mathf.Max(0f, accelerationDurationSeconds); }
-    }
-
-    public float ThornReflectFlatDamagePerStack
-    {
-        get { return Mathf.Max(0f, thornReflectFlatDamagePerStack); }
-    }
-
-    public float CurseBonusElementalDamagePercentPerStack
-    {
-        get { return Mathf.Max(0f, curseBonusElementalDamagePercentPerStack); }
-    }
-
-    public float DecayDamageReductionPercentPerStack
-    {
-        get { return Mathf.Max(0f, decayDamageReductionPercentPerStack); }
-    }
-
-    public float CondemnDamageTakenPercentPerStack
-    {
-        get { return Mathf.Max(0f, condemnDamageTakenPercentPerStack); }
-    }
-
-    public float DeathMarkDamageTakenPercentPerStack
-    {
-        get { return Mathf.Max(0f, deathMarkDamageTakenPercentPerStack); }
-    }
-
-    public float WoundFlatDamagePerStack
-    {
-        get { return Mathf.Max(0f, woundFlatDamagePerStack); }
-    }
-
-    public float WoundDurationSeconds
-    {
-        get { return Mathf.Max(0f, woundDurationSeconds); }
-    }
-
-    public float WeakDamageReductionPercent
-    {
-        get { return Mathf.Max(0f, weakDamageReductionPercent); }
-    }
-
-    public float ArmorFlatReductionPerStack
-    {
-        get { return Mathf.Max(0f, armorFlatReductionPerStack); }
-    }
-
-    public float AbsorptionMaxHitPercent
-    {
-        get { return Mathf.Max(0f, absorptionMaxHitPercent); }
-    }
-
-    public float BleedHealingReductionPercent
-    {
-        get { return Mathf.Max(0f, bleedHealingReductionPercent); }
-    }
-
-    public float BleedDurationSeconds
-    {
-        get { return Mathf.Max(0f, bleedDurationSeconds); }
-    }
-
-    public float BlessingHealingIncreasePercent
-    {
-        get { return Mathf.Max(0f, blessingHealingIncreasePercent); }
-    }
-
-    public float BlessingDurationSeconds
-    {
-        get { return Mathf.Max(0f, blessingDurationSeconds); }
-    }
-
-    public float FirstStrikeBonusPercent
-    {
-        get { return Mathf.Max(0f, firstStrikeBonusPercent); }
-    }
-
-    public float ExecuteThresholdPercent
-    {
-        get { return Mathf.Clamp(executeThresholdPercent, 0f, 100f); }
-    }
-
-    public float PlayerSlowPercentPerStack
-    {
-        get { return Mathf.Max(0f, playerSlowPercentPerStack); }
-    }
-
-    public float AmnesiaChancePerStackPercent
-    {
-        get { return Mathf.Max(0f, amnesiaChancePerStackPercent); }
-    }
-
-    public float EnemyHasteMoveSpeedPercentPerStack
-    {
-        get { return Mathf.Max(0f, enemyHasteMoveSpeedPercentPerStack); }
-    }
-
-    public float EnemyBurdenMoveSpeedPercentPerStack
-    {
-        get { return Mathf.Max(0f, enemyBurdenMoveSpeedPercentPerStack); }
-    }
-
-    public float LethargyAttackCooldownSecondsPerStack
-    {
-        get { return Mathf.Max(0f, lethargyAttackCooldownSecondsPerStack); }
-    }
-
-    public float ShieldStrengthDamageReductionPercentPerStack
-    {
-        get { return Mathf.Max(0f, shieldStrengthDamageReductionPercentPerStack); }
-    }
-
-    public float ShatterShieldBonusPercent
-    {
-        get { return Mathf.Max(0f, shatterShieldBonusPercent); }
-    }
-
-    public float RevivalHealPercent
-    {
-        get { return Mathf.Max(0f, revivalHealPercent); }
-    }
-
-    public float FrostbiteIceDamageTakenPercentPerStack
-    {
-        get { return Mathf.Max(0f, frostbiteIceDamageTakenPercentPerStack); }
-    }
-
-    public float ScorchedFireDamageTakenPercentPerStack
-    {
-        get { return Mathf.Max(0f, scorchedFireDamageTakenPercentPerStack); }
-    }
-
-    public float ShockedLightningDamageTakenPercentPerStack
-    {
-        get { return Mathf.Max(0f, shockedLightningDamageTakenPercentPerStack); }
-    }
-
-    public GameObject FreezeOnApplyEffectPrefab
-    {
-        get { return freezeOnApplyEffectPrefab; }
-    }
-
-    public GameObject FreezeOnDeathEffectPrefab
-    {
-        get { return freezeOnDeathEffectPrefab; }
-    }
-
-    public float FreezeOnApplyEffectSizeMultiplier
-    {
-        get { return Mathf.Max(0f, freezeOnApplyEffectSizeMultiplier); }
-    }
-
-    public float FreezeOnDeathEffectSizeMultiplier
-    {
-        get { return Mathf.Max(0f, freezeOnDeathEffectSizeMultiplier); }
-    }
-
-    public float ImmolationRadius
-    {
-        get { return Mathf.Max(0f, immolationRadius); }
-    }
-
-    public GameObject ImmolationOnApplyEffectPrefab
-    {
-        get { return immolationOnApplyEffectPrefab; }
-    }
-
-    public GameObject ImmolationOnDeathEffectPrefab
-    {
-        get { return immolationOnDeathEffectPrefab; }
-    }
-
-    public float ImmolationOnApplyEffectSizeMultiplier
-    {
-        get { return Mathf.Max(0f, immolationOnApplyEffectSizeMultiplier); }
-    }
-
-    public float ImmolationOnDeathEffectSizeMultiplier
-    {
-        get { return Mathf.Max(0f, immolationOnDeathEffectSizeMultiplier); }
-    }
-
-    public float HatredBonusPercentPerDebuffPerStack
-    {
-        get { return Mathf.Max(0f, hatredBonusPercentPerDebuffPerStack); }
-    }
-
-    public float FocusBonusPercentPerStack
-    {
-        get { return Mathf.Max(0f, focusBonusPercentPerStack); }
-    }
-
-    public float FuryBonusPercentPerStack
-    {
-        get { return Mathf.Max(0f, furyBonusPercentPerStack); }
-    }
-
-    public float FuryLowHealthThresholdPercent
-    {
-        get { return Mathf.Clamp(furyLowHealthThresholdPercent, 0f, 100f); }
+        damageRoundingThreshold = Mathf.Clamp(damageRoundingThreshold, 0f, 10f);
     }
 
     private void Awake()
@@ -383,5 +286,7 @@ public class StatusControllerManager : MonoBehaviour
         }
 
         Instance = this;
+
+        MigrateDamageRoundingThresholdIfNeeded();
     }
 }

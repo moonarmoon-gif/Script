@@ -10,6 +10,20 @@ public class CriticalAccelerationFavour : FavourEffect
     [Tooltip("Time window (seconds) in which the required number of crits must occur.")]
     public float TimeLimit = 1f;
 
+    [Header("Stacks")]
+    [Tooltip("Number of ACCELERATION stacks granted each time this favour triggers.")]
+    public int AccelerationStack = 1;
+
+    [Tooltip("Maximum ACCELERATION stacks this favour can grant in total.")]
+    public int MaxStack = 1;
+
+    [Header("Enhanced")]
+    [Tooltip("Additional MaxStack granted when this favour is enhanced.")]
+    public int BonusMaxStack = 1;
+
+    [Header("Pick Limit")]
+    public int MaxPickLimit = 0;
+
     private PlayerStats playerStats;
     private StatusController statusController;
 
@@ -17,6 +31,12 @@ public class CriticalAccelerationFavour : FavourEffect
     private float windowStartTime;
 
     private bool initialized;
+    private int currentMaxStack;
+
+    protected override int GetMaxPickLimit()
+    {
+        return MaxPickLimit;
+    }
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
@@ -44,6 +64,8 @@ public class CriticalAccelerationFavour : FavourEffect
         windowStartTime = Time.time;
         initialized = true;
 
+        currentMaxStack = Mathf.Max(1, MaxStack);
+
         // One-time favour: prevent this card from appearing again this run.
         if (sourceCard != null && CardSelectionManager.Instance != null)
         {
@@ -53,8 +75,15 @@ public class CriticalAccelerationFavour : FavourEffect
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        // No enhanced parameters specified; upgrades just re-run setup.
-        OnApply(player, manager, sourceCard);
+        // Upgrades increase the maximum stacks this favour can grant.
+        if (!initialized)
+        {
+            OnApply(player, manager, sourceCard);
+        }
+        else
+        {
+            currentMaxStack += Mathf.Max(0, BonusMaxStack);
+        }
     }
 
     public override void OnBeforeDealDamage(GameObject player, GameObject enemy, ref float damage, FavourEffectManager manager)
@@ -90,12 +119,40 @@ public class CriticalAccelerationFavour : FavourEffect
 
         if (critCount >= required)
         {
-            // Grant one stack of Acceleration with default duration (resolved by StatusControllerManager).
-            statusController.AddStatus(StatusId.Acceleration, 1, -1f);
+            TryGrantAccelerationStack();
 
             // Start a new window from now, but keep the same requirement for future triggers.
             windowStartTime = now;
             critCount = 0;
         }
+    }
+
+    private void TryGrantAccelerationStack()
+    {
+        if (statusController == null)
+        {
+            return;
+        }
+
+        int maxStacks = Mathf.Max(1, currentMaxStack > 0 ? currentMaxStack : MaxStack);
+        int currentStacks = statusController.GetStacks(StatusId.Acceleration);
+
+        if (currentStacks >= maxStacks)
+        {
+            return;
+        }
+
+        int stacksToAdd = Mathf.Max(1, AccelerationStack);
+        if (currentStacks + stacksToAdd > maxStacks)
+        {
+            stacksToAdd = maxStacks - currentStacks;
+        }
+
+        if (stacksToAdd <= 0)
+        {
+            return;
+        }
+
+        statusController.AddStatus(StatusId.Acceleration, stacksToAdd, -1f);
     }
 }

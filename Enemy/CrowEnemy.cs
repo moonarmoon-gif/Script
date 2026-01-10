@@ -97,6 +97,18 @@ public class CrowEnemy : MonoBehaviour
         {
             damageInstancesPerAttackV2 = damageInstancesPerAttack;
         }
+
+        float referenceX = transform.position.x;
+        if (AdvancedPlayerController.Instance != null)
+        {
+            referenceX = AdvancedPlayerController.Instance.transform.position.x;
+        }
+        else if (Camera.main != null)
+        {
+            referenceX = Camera.main.transform.position.x;
+        }
+
+        spriteRenderer.flipX = transform.position.x >= referenceX;
     }
 
     private int BeginAttackAction()

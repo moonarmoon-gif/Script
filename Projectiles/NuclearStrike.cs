@@ -11,7 +11,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     [SerializeField] private float minLifetime = 2f;
     [Tooltip("Maximum lifetime before explosion")]
     [SerializeField] private float maxLifetime = 5f;
-    
+
     public enum SpriteFacing2D { Right = 0, Up = 90, Left = 180, Down = 270 }
     [Header("Rotation")]
     [SerializeField] private SpriteFacing2D spriteFacing = SpriteFacing2D.Down;
@@ -20,7 +20,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     [SerializeField] private float maxRotationDegreesPerSecond = 1080f;
     [SerializeField] private float minRotateVelocity = 0.01f;
     [SerializeField] private bool keepInitialRotation = false;
-    
+
     [Header("Explosion")]
     [SerializeField] private float explosionRadius = 5f;
     [Tooltip("Offset for explosion detection area in X and Y coordinates")]
@@ -28,22 +28,25 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     [SerializeField] private float damage = 100f;
     [SerializeField] private LayerMask enemyLayer;
     [SerializeField] private ProjectileType projectileType = ProjectileType.Nuclear;
-    
+
+    [Header("Damage Timing")]
+    public float damageDelay = 0.2f;
+
     [Header("Spawn Area")]
     [Tooltip("Tag name for minimum spawn position GameObject (left side)")]
     [SerializeField] private string minPosTag = "NuclearStrike_MinPos";
     [Tooltip("Tag name for maximum spawn position GameObject (right side)")]
     [SerializeField] private string maxPosTag = "NuclearStrike_MaxPos";
-    
+
     private Transform minPos;
     private Transform maxPos;
-    
+
     // Base values for instant modifier recalculation
     private float baseDropSpeed;
     private float baseExplosionRadius;
     private float baseDamage;
     private Vector3 baseScale;
-    
+
     [Header("Visual Effects")]
     [SerializeField] private GameObject explosionEffectPrefab;
     [SerializeField] private float explosionEffectDuration = 3f;
@@ -59,30 +62,28 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     public float baseExplosionAnimationSpeed = 1f;
     [Tooltip("Effect timing adjustment: negative = delay effect, positive = play effect early (seconds)")]
     [SerializeField] private float explosionEffectTimingAdjustment = 0f;
-    
+
     [Header("Speed-to-Animation Sync")]
     [Tooltip("Speed increase threshold - when speed increases by this amount, animation speed increases")]
     public float speedIncreaseThreshold = 10f;
     [Tooltip("Animation speed increase per threshold (as percentage of base). E.g., 10 = 10% increase per threshold")]
     [Range(0f, 100f)]
     public float animationSpeedIncreasePercent = 10f;
-    
-    [Header("Speed-to-Explosion Size Scaling")]
-    [Tooltip("Speed threshold for explosion size increase (+10 speed = +5% explosion size)")]
-    public float explosionSizeSpeedThreshold = 10f;
-    [Tooltip("Explosion size increase per speed threshold (as percentage). E.g., 5 = 5% increase per 10 speed")]
-    [Range(0f, 100f)]
-    public float explosionSizeIncreasePercent = 5f;
-    
+
+    [Header("Radius-to-Effect Size Scaling")]
+    [Tooltip("Explosion effect size scales proportionally with the final explosionRadius.")]
+    [Range(0.01f, 10f)]
+    public float radiusToEffectBaseRadius = 5f;
+
     private float finalExplosionAnimationSpeed = 1f;
     [SerializeField] private SpriteRenderer spriteRenderer;
-    
+
     [Header("Shadow System")]
     [Tooltip("Shadow prefab that appears at landing location")]
     [SerializeField] private GameObject shadowPrefab;
     [Tooltip("Offset for shadow position (X, Y)")]
     [SerializeField] private Vector2 shadowOffset = Vector2.zero;
-    
+
     [System.Serializable]
     public class SizeOffsetPair
     {
@@ -93,25 +94,25 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         [Tooltip("Offset for right side at this size")]
         public Vector2 offsetRight = Vector2.zero;
     }
-    
+
     [Header("Per-Size Offsets")]
     [Tooltip("Explosion effect offsets for different size multipliers. Automatically interpolates between values.")]
     [SerializeField] private List<SizeOffsetPair> sizeOffsets = new List<SizeOffsetPair>();
-    
+
     [Header("Collider Scaling")]
     [Tooltip("Offset for collider size relative to visual size (0 = same as visual, -0.2 = 20% smaller, 0.2 = 20% larger)")]
     [SerializeField] private float colliderSizeOffset = 0f;
-    
+
     [Header("Audio")]
     [SerializeField] private AudioClip dropClip;
     [Range(0f, 1f)][SerializeField] private float dropVolume = 0.7f;
     [SerializeField] private AudioClip explosionClip;
     [Range(0f, 1f)][SerializeField] private float explosionVolume = 1f;
-    
+
     [Header("Mana & Cooldown")]
     [SerializeField] private int manaCost = 30;
     [SerializeField] private float cooldown = 3f;
-    
+
     [Header("Enhanced Variant 1 - Rapid Strike")]
     [Tooltip("Speed bonus for Enhanced Variant 1 (raw value added)")]
     [SerializeField] private float enhancedSpeedBonus = 20f;
@@ -119,7 +120,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     [SerializeField] private float EnhancedBaseCooldown = 0f;
     [Tooltip("Additional projectile count for Enhanced Variant 1 (e.g., 1 = spawn 1 extra)")]
     [SerializeField] public int enhancedProjectileCountBonus = 1;
-    
+
     private Rigidbody2D _rigidbody2D;
     private AudioSource _audioSource;
     private Collider2D _collider2D;
@@ -128,49 +129,49 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     private bool hasExploded = false;
     private GameObject shadowInstance;
     private Vector3 landingPosition;
-    
+
     // Enhanced system
     private int enhancedVariant = 0; // 0 = basic, 1 = rapid strike, 2-3 = future variants
-    
+
     // Instance-based cooldown tracking
     private static System.Collections.Generic.Dictionary<string, float> lastFireTimes = new System.Collections.Generic.Dictionary<string, float>();
     private string prefabKey;
-    
+
     // Track if enhanced bonus has been added to card modifiers (static per card)
     private static bool hasAddedEnhancedBonus = false;
-    
+
     // Store modifiers for explosion effect
     private CardModifierStats modifiers;
     private float enhancedSpeedAdd = 0f;
     private float baseDropSpeedStored = 0f;
     private float explosionRadiusForEffect = 0f; // Store radius BEFORE modifiers for effect scaling
     private PlayerStats cachedPlayerStats;
-    
+
     private void Awake()
     {
         _rigidbody2D = GetComponent<Rigidbody2D>();
         _collider2D = GetComponent<Collider2D>();
         mainCamera = Camera.main;
-        
+
         // Store base values
         baseDropSpeed = dropSpeed;
         baseExplosionRadius = explosionRadius;
         baseDamage = damage;
         baseScale = transform.localScale;
-        
+
         // Get or add audio source
         _audioSource = GetComponent<AudioSource>();
         if (_audioSource == null)
         {
             _audioSource = gameObject.AddComponent<AudioSource>();
         }
-        
+
         // Get sprite renderer if not assigned
         if (spriteRenderer == null)
         {
             spriteRenderer = GetComponentInChildren<SpriteRenderer>();
         }
-        
+
         // Make projectile kinematic (we'll control movement manually)
         if (_rigidbody2D != null)
         {
@@ -213,11 +214,10 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=red>NuclearStrike using modifiers from {card.cardName}</color>");
         }
 
-
         // Apply enhanced variant modifiers BEFORE card modifiers
         enhancedSpeedAdd = 0f;
         int enhancedProjectileBonus = 0;
-        
+
         if (enhancedVariant == 1)
         {
             enhancedSpeedAdd = enhancedSpeedBonus;
@@ -225,10 +225,10 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             // Store enhanced projectile count bonus for logging; the actual
             // projectile-count increase is applied per-spawn in ProjectileSpawner.
             enhancedProjectileBonus = enhancedProjectileCountBonus;
-            
+
             Debug.Log($"<color=gold>Enhanced Rapid Strike: Speed +{enhancedSpeedAdd}, Additional Projectiles +{enhancedProjectileBonus}</color>");
         }
-        
+
         // CRITICAL: Use ProjectileCards spawnInterval if available, otherwise use script cooldown.
         // When enhanced, allow a dedicated EnhancedBaseCooldown to override the
         // card/runtime value so that further modifiers work off that base.
@@ -248,59 +248,67 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             baseCooldown = EnhancedBaseCooldown;
             Debug.Log($"<color=gold>NuclearStrike Variant 1: Using EnhancedBaseCooldown = {EnhancedBaseCooldown:F2}s as base cooldown</color>");
         }
-        
+
         // Apply card modifiers. All cooldown reductions are applied to the
         // resolved BASE cooldown (which may come from EnhancedBaseCooldown
         // when Variant 1 is active).
-        float finalCooldown = Mathf.Max(0.1f, baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f));
+        float finalCooldown = baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f);
+        if (MinCooldownManager.Instance != null)
+        {
+            finalCooldown = MinCooldownManager.Instance.ClampCooldown(card, finalCooldown);
+        }
+        else
+        {
+            finalCooldown = Mathf.Max(0.1f, finalCooldown);
+        }
         int finalManaCost = Mathf.Max(1, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
         damage += modifiers.damageFlat; // FLAT damage bonus per hit
-        
+
         // Calculate speed increase and animation speed
         float originalDropSpeed = dropSpeed; // Store original BASE speed before ANY modifications
         baseDropSpeedStored = originalDropSpeed; // Store for explosion effect
-        
+
         // Add card modifier speed increase (RAW value)
         dropSpeed += modifiers.speedIncrease;
-        
+
         // Then add enhanced speed bonus (RAW value)
         dropSpeed += enhancedSpeedAdd;
-        
+
         // Calculate speed multiplier for lifetime adjustment (how many times faster than base)
         float speedMultiplier = dropSpeed / originalDropSpeed;
-        
+
         Debug.Log($"<color=cyan>NuclearStrike Speed Calculation: Base={originalDropSpeed:F1}, Card+={modifiers.speedIncrease:F1}, Enhanced+={enhancedSpeedAdd:F1}, Final={dropSpeed:F1}, Multiplier={speedMultiplier:F2}x</color>");
-        
+
         // Calculate total speed increase (from both modifiers and enhanced variant)
         float totalSpeedIncrease = (dropSpeed - originalDropSpeed);
-        
+
         // Calculate how many thresholds we've crossed
         float thresholdsCrossed = totalSpeedIncrease / speedIncreaseThreshold;
-        
+
         // Calculate animation speed increase (additive, based on base)
         // Each threshold = animationSpeedIncreasePercent% of BASE animation speed
         float animSpeedIncrease = (animationSpeedIncreasePercent / 100f) * thresholdsCrossed;
         finalExplosionAnimationSpeed = baseExplosionAnimationSpeed + (baseExplosionAnimationSpeed * animSpeedIncrease);
-        
+
         Debug.Log($"<color=gold>NuclearStrike Speed Sync: Speed Increase={totalSpeedIncrease:F2}, Thresholds={thresholdsCrossed:F2}, AnimSpeed={finalExplosionAnimationSpeed:F2} (base={baseExplosionAnimationSpeed})</color>");
-        
+
         // Apply size multiplier to visual
         float originalExplosionRadius = explosionRadius;
         if (modifiers.sizeMultiplier != 1f)
         {
             transform.localScale *= modifiers.sizeMultiplier;
-            
+
             // IMPORTANT: Scale explosion radius with size (+10% size = +10% explosion radius)
             explosionRadius *= modifiers.sizeMultiplier;
-            
+
             // CRITICAL: Scale explosion offset X with size (Y stays the same)
             explosionRadiusOffset.x *= modifiers.sizeMultiplier;
             // explosionRadiusOffset.y stays unchanged
-            
+
             // Also scale effect offsets X
             explosionEffectOffsetLeft.x *= modifiers.sizeMultiplier;
             explosionEffectOffsetRight.x *= modifiers.sizeMultiplier;
-            
+
             // Scale collider using utility with colliderSizeOffset
             ColliderScaler.ScaleCollider(_collider2D, modifiers.sizeMultiplier, colliderSizeOffset);
         }
@@ -311,31 +319,31 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         Vector3 nukeScale = transform.localScale;
         nukeScale.x = explosionRadiusOffset.x;
         transform.localScale = nukeScale;
-        
+
         // CRITICAL: Store explosion radius BEFORE modifiers for effect scaling
         explosionRadiusForEffect = explosionRadius;
-        
+
         // CRITICAL: Apply explosion radius modifiers from ProjectileCardModifiers
         // This is SEPARATE from size scaling and applies AFTER size scaling
         float explosionRadiusAfterSize = explosionRadius;
         explosionRadius = (explosionRadius + modifiers.explosionRadiusBonus) * modifiers.explosionRadiusMultiplier;
-        
+
         Debug.Log($"<color=red>NuclearStrike Explosion Radius:</color>");
         Debug.Log($"<color=red>  Original: {originalExplosionRadius:F2}</color>");
         Debug.Log($"<color=red>  After Size: {explosionRadiusAfterSize:F2}</color>");
         Debug.Log($"<color=red>  Bonus: +{modifiers.explosionRadiusBonus:F2}</color>");
         Debug.Log($"<color=red>  Multiplier: x{modifiers.explosionRadiusMultiplier:F2}</color>");
         Debug.Log($"<color=red>  Final: {explosionRadius:F2}</color>");
-        
+
         Debug.Log($"<color=red>NuclearStrike Modifiers Applied: Speed=+{modifiers.speedIncrease:F2}, Size={modifiers.sizeMultiplier:F2}x, DamageFlat=+{modifiers.damageFlat:F1}, ExplosionRadius={explosionRadius:F2}</color>");
-        
+
         // Still get PlayerStats for base damage calculation
         PlayerStats stats = FindObjectOfType<PlayerStats>();
         if (stats != null)
         {
             cachedPlayerStats = stats;
         }
-        
+
         // Allow the global "enhanced first spawn" reduction system to bypass this
         // internal cooldown gate exactly once for PASSIVE projectile cards.
         bool bypassEnhancedFirstSpawnCooldown = false;
@@ -350,7 +358,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
 
         // Generate key based ONLY on projectile type (so all NuclearStrikes share same cooldown)
         prefabKey = "NuclearStrike";
-        
+
         // Only check cooldown/mana for first projectile in multi-spawn
         if (!skipCooldownCheck)
         {
@@ -364,7 +372,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                     return;
                 }
             }
-            
+
             // Check mana
             PlayerMana playerMana = FindObjectOfType<PlayerMana>();
             if (playerMana != null && !playerMana.Spend(finalManaCost))
@@ -373,7 +381,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                 Destroy(gameObject);
                 return;
             }
-            
+
             // Record fire time
             lastFireTimes[prefabKey] = Time.time;
         }
@@ -381,7 +389,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         {
             Debug.Log($"<color=gold>NuclearStrike: Skipping cooldown/mana check (multi-projectile spawn)</color>");
         }
-        
+
         // Determine spawn position
         if (minPos != null && maxPos != null)
         {
@@ -389,7 +397,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             float spawnX = Random.Range(minPos.position.x, maxPos.position.x);
             // Y position is fixed at minPos/maxPos Y (they should be at same height - top of screen)
             float spawnY = Mathf.Max(minPos.position.y, maxPos.position.y);
-            
+
             transform.position = new Vector3(spawnX, spawnY, spawnPosition.z);
         }
         else
@@ -397,19 +405,19 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             // Fallback to provided spawn position
             transform.position = spawnPosition;
         }
-        
+
         // Apply lifetime reduction to BOTH min and max BEFORE randomizing
         // Lifetime is divided by speed multiplier to maintain consistent fall distance
-        
+
         // Apply speed-based divisor to min/max
         float adjustedMinLifetime = minLifetime / speedMultiplier;
         float adjustedMaxLifetime = maxLifetime / speedMultiplier;
-        
+
         // NOW randomize between the adjusted values
         actualLifetime = Random.Range(adjustedMinLifetime, adjustedMaxLifetime);
-        
+
         Debug.Log($"<color=red>NuclearStrike spawned! Speed={dropSpeed:F1} (base={baseDropSpeed:F1}, multiplier={speedMultiplier:F2}x), Lifetime={actualLifetime:F2}s (original range: {minLifetime:F2}-{maxLifetime:F2}s, adjusted range: {adjustedMinLifetime:F2}-{adjustedMaxLifetime:F2}s, speed divisor={speedMultiplier:F2})</color>");
-        
+
         // Calculate landing position (where nuclear will explode)
         // Landing Y = current Y - (dropSpeed * actualLifetime)
         landingPosition = new Vector3(
@@ -417,15 +425,15 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             transform.position.y - (dropSpeed * actualLifetime),
             transform.position.z
         );
-        
+
         // Apply shadow offset
         Vector3 shadowPosition = landingPosition + (Vector3)shadowOffset;
-        
+
         // Spawn shadow at landing position
         if (shadowPrefab != null)
         {
             shadowInstance = Instantiate(shadowPrefab, shadowPosition, Quaternion.identity);
-            
+
             // Get shadow animator and adjust animation speed
             Animator shadowAnimator = shadowInstance.GetComponent<Animator>();
             if (shadowAnimator != null)
@@ -436,14 +444,14 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                 // Closer drop = shorter lifetime = faster animation
                 float animSpeed = 1f / actualLifetime;
                 shadowAnimator.speed = animSpeed;
-                
+
                 Debug.Log($"<color=yellow>Shadow spawned at {shadowPosition} with animation speed {animSpeed:F2}x (lifetime: {actualLifetime:F2}s)</color>");
             }
-            
+
             // Destroy shadow when nuclear explodes
             Destroy(shadowInstance, actualLifetime);
         }
-        
+
         // Play drop sound
         if (dropClip != null && _audioSource != null)
         {
@@ -452,12 +460,12 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             _audioSource.loop = true;
             _audioSource.Play();
         }
-        
+
         // Start dropping and explosion countdown
         StartCoroutine(DropRoutine());
         StartCoroutine(ExplodeAfterLifetime());
     }
-    
+
     private void Update()
     {
         if (keepInitialRotation || _rigidbody2D == null || hasExploded) return;
@@ -475,14 +483,14 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         float newAngle = Mathf.MoveTowardsAngle(current, desired, step);
         transform.rotation = Quaternion.Euler(0f, 0f, newAngle);
     }
-    
+
     private IEnumerator DropRoutine()
     {
         while (!hasExploded)
         {
             // Move straight down
             _rigidbody2D.velocity = Vector2.down * dropSpeed;
-            
+
             // Set initial rotation if not keeping it
             if (!keepInitialRotation && rotateToVelocity)
             {
@@ -491,40 +499,439 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                 float finalAngle = baseAngle + facingCorrection + additionalRotationOffsetDeg;
                 transform.rotation = Quaternion.Euler(0f, 0f, finalAngle);
             }
-            
+
             yield return null;
         }
     }
-    
+
     private IEnumerator ExplodeAfterLifetime()
     {
+        // Wait until the projectile reaches its landing position (actualLifetime)
         yield return new WaitForSeconds(actualLifetime);
-        
+
+        // Trigger the explosion visuals and schedule damage application.
         if (!hasExploded)
         {
             Explode();
         }
     }
-    
+
     private void Explode()
     {
         if (hasExploded) return;
         hasExploded = true;
-        
+
         Debug.Log($"<color=red>NuclearStrike exploding at {transform.position}!</color>");
-        
-        // Calculate explosion center with offset
+
+        // Calculate explosion center with offset for visual and damage logic
         Vector2 explosionCenter = (Vector2)transform.position + explosionRadiusOffset;
-        
-        // Find all enemies in explosion radius
+
+        // Snapshot all targets in the explosion radius immediately at impact.
+        // Damage application will be delayed, but the target set is decided now.
+        Collider2D[] hitCollidersAtImpact = Physics2D.OverlapCircleAll(explosionCenter, explosionRadius, enemyLayer);
+        List<Collider2D> impactTargets = new List<Collider2D>(hitCollidersAtImpact != null ? hitCollidersAtImpact.Length : 0);
+        if (hitCollidersAtImpact != null)
+        {
+            for (int i = 0; i < hitCollidersAtImpact.Length; i++)
+            {
+                if (hitCollidersAtImpact[i] != null)
+                {
+                    impactTargets.Add(hitCollidersAtImpact[i]);
+                }
+            }
+        }
+
+        // Create a detached runner that will handle delayed damage and any
+        // delayed explosion VFX timing even after this projectile is destroyed.
+        GameObject runnerObj = new GameObject("NuclearStrikeDamageRunner");
+        NuclearStrikeDamageRunner runner = runnerObj.AddComponent<NuclearStrikeDamageRunner>();
+
+        if (ProjectileCardModifiers.Instance != null)
+        {
+            ProjectileCards card = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
+            if (card != null)
+            {
+                ProjectileCardModifiers.Instance.TagProjectileWithCard(runnerObj, card);
+            }
+        }
+
+        BurnEffect burnEffect = GetComponent<BurnEffect>();
+        SlowEffect slowEffect = GetComponent<SlowEffect>();
+        StaticEffect staticEffect = GetComponent<StaticEffect>();
+
+        bool expectsExplosionEffect = explosionEffectPrefab != null;
+
+        runner.Initialize(
+            impactTargets,
+            explosionCenter,
+            explosionRadius,
+            damage,
+            projectileType,
+            damageDelay,
+            cachedPlayerStats,
+            burnEffect,
+            slowEffect,
+            staticEffect,
+            expectsExplosionEffect
+        );
+
+        // Spawn explosion effect with offset, size, and timing.
+        // If the effect is configured to be delayed, schedule it via the runner
+        // so it still happens even though this projectile will be destroyed.
+        if (explosionEffectPrefab != null)
+        {
+            Camera mainCam = Camera.main;
+            bool isOnLeftSide = mainCam != null && transform.position.x < mainCam.transform.position.x;
+            Vector2 effectOffset = GetOffsetForCurrentSize(isOnLeftSide);
+            Vector3 explosionPosition = transform.position + (Vector3)effectOffset;
+
+            float effectDelay = explosionEffectTimingAdjustment < 0f ? Mathf.Abs(explosionEffectTimingAdjustment) : 0f;
+
+            runner.ConfigureExplosionEffect(
+                explosionEffectPrefab,
+                explosionPosition,
+                effectDelay,
+                explosionEffectDuration,
+                explosionFadeOutDuration,
+                explosionEffectSizeMultiplier,
+                radiusToEffectBaseRadius,
+                baseExplosionRadius,
+                finalExplosionAnimationSpeed
+            );
+
+            if (effectDelay <= 0f)
+            {
+                // Immediate spawn to preserve current behavior.
+                runner.SpawnConfiguredExplosionEffectNow();
+            }
+        }
+
+        runner.StartWork();
+
+        // Play explosion sound
+        if (explosionClip != null)
+        {
+            AudioSource.PlayClipAtPoint(explosionClip, transform.position, explosionVolume);
+        }
+
+        // Destroy the missile immediately on impact. Any delayed damage/effect
+        // timing is handled by NuclearStrikeDamageRunner.
+        Destroy(gameObject);
+    }
+
+    private class NuclearStrikeDamageRunner : MonoBehaviour
+    {
+        private List<Collider2D> targets;
+        private Vector2 explosionCenter;
+        private float explosionRadius;
+        private float damage;
+        private ProjectileType projectileType;
+        private float damageDelay;
+        private PlayerStats cachedPlayerStats;
+
+        private BurnEffect burnEffect;
+        private SlowEffect slowEffect;
+        private StaticEffect staticEffect;
+
+        private GameObject explosionEffectPrefab;
+        private Vector3 explosionEffectPosition;
+        private float explosionEffectDelay;
+        private float explosionEffectDuration;
+        private float explosionFadeOutDuration;
+        private float explosionEffectSizeMultiplier;
+        private float radiusToEffectBaseRadius;
+        private float baseExplosionRadius;
+        private float finalExplosionAnimationSpeed;
+        private bool hasExplosionEffectConfig;
+
+        private bool damageRoutineFinished;
+        private bool effectRoutineFinished;
+
+        private bool expectsExplosionEffect;
+
+        public void Initialize(
+            List<Collider2D> impactTargets,
+            Vector2 center,
+            float radius,
+            float baseDamage,
+            ProjectileType type,
+            float delay,
+            PlayerStats stats,
+            BurnEffect sourceBurn,
+            SlowEffect sourceSlow,
+            StaticEffect sourceStatic,
+            bool expectsExplosionEffect)
+        {
+            targets = impactTargets;
+            explosionCenter = center;
+            explosionRadius = radius;
+            damage = baseDamage;
+            projectileType = type;
+            damageDelay = delay;
+            cachedPlayerStats = stats;
+
+            this.expectsExplosionEffect = expectsExplosionEffect;
+            effectRoutineFinished = !expectsExplosionEffect;
+
+            if (sourceBurn != null)
+            {
+                burnEffect = gameObject.AddComponent<BurnEffect>();
+                burnEffect.burnChance = sourceBurn.burnChance;
+                burnEffect.burnStacksPerHit = sourceBurn.burnStacksPerHit;
+                burnEffect.burnDamageMultiplier = sourceBurn.burnDamageMultiplier;
+                burnEffect.burnDuration = sourceBurn.burnDuration;
+                burnEffect.burnVFXPrefab = sourceBurn.burnVFXPrefab;
+                burnEffect.burnVFXOffsetLeft = sourceBurn.burnVFXOffsetLeft;
+                burnEffect.burnVFXOffsetRight = sourceBurn.burnVFXOffsetRight;
+            }
+
+            if (sourceSlow != null)
+            {
+                slowEffect = gameObject.AddComponent<SlowEffect>();
+                slowEffect.slowChance = sourceSlow.slowChance;
+                slowEffect.slowStacksPerHit = sourceSlow.slowStacksPerHit;
+                slowEffect.slowDuration = sourceSlow.slowDuration;
+                slowEffect.slowVFXPrefab = sourceSlow.slowVFXPrefab;
+                slowEffect.slowTintColor = sourceSlow.slowTintColor;
+            }
+
+            if (sourceStatic != null)
+            {
+                staticEffect = gameObject.AddComponent<StaticEffect>();
+                staticEffect.staticChance = sourceStatic.staticChance;
+                staticEffect.staticPeriod = sourceStatic.staticPeriod;
+                staticEffect.staticDuration = sourceStatic.staticDuration;
+                staticEffect.staticReapplyChance = sourceStatic.staticReapplyChance;
+                staticEffect.staticReapplyInterval = sourceStatic.staticReapplyInterval;
+                staticEffect.staticVFXPrefab = sourceStatic.staticVFXPrefab;
+                staticEffect.staticVFXOffsetLeft = sourceStatic.staticVFXOffsetLeft;
+                staticEffect.staticVFXOffsetRight = sourceStatic.staticVFXOffsetRight;
+            }
+
+        }
+
+        public void StartWork()
+        {
+            StartCoroutine(ApplyDelayedDamageRoutine());
+        }
+
+        public void ConfigureExplosionEffect(
+            GameObject prefab,
+            Vector3 position,
+            float delaySeconds,
+            float effectDurationSeconds,
+            float fadeOutSeconds,
+            float sizeMultiplier,
+            float baseRadiusForScaling,
+            float baseRadiusFromProjectile,
+            float animSpeed)
+        {
+            explosionEffectPrefab = prefab;
+            explosionEffectPosition = position;
+            explosionEffectDelay = Mathf.Max(0f, delaySeconds);
+            explosionEffectDuration = Mathf.Max(0f, effectDurationSeconds);
+            explosionFadeOutDuration = Mathf.Max(0f, fadeOutSeconds);
+            explosionEffectSizeMultiplier = sizeMultiplier;
+            radiusToEffectBaseRadius = baseRadiusForScaling;
+            baseExplosionRadius = baseRadiusFromProjectile;
+            finalExplosionAnimationSpeed = animSpeed;
+            hasExplosionEffectConfig = explosionEffectPrefab != null;
+
+            effectRoutineFinished = false;
+            if (explosionEffectDelay > 0f)
+            {
+                StartCoroutine(SpawnExplosionEffectAfterDelay());
+            }
+        }
+
+        public void SpawnConfiguredExplosionEffectNow()
+        {
+            if (!hasExplosionEffectConfig)
+            {
+                effectRoutineFinished = true;
+                TryCleanup();
+                return;
+            }
+
+            if (explosionEffectDelay > 0f)
+            {
+                return;
+            }
+
+            SpawnExplosionEffectImmediate(explosionEffectPosition);
+            effectRoutineFinished = true;
+            TryCleanup();
+        }
+
+        private IEnumerator SpawnExplosionEffectAfterDelay()
+        {
+            if (explosionEffectDelay > 0f)
+            {
+                yield return new WaitForSeconds(explosionEffectDelay);
+            }
+
+            if (hasExplosionEffectConfig)
+            {
+                SpawnExplosionEffectImmediate(explosionEffectPosition);
+            }
+
+            effectRoutineFinished = true;
+            TryCleanup();
+        }
+
+        private void SpawnExplosionEffectImmediate(Vector3 position)
+        {
+            if (explosionEffectPrefab == null) return;
+
+            GameObject explosion = Instantiate(explosionEffectPrefab, position, Quaternion.identity);
+
+            float baseRadius = radiusToEffectBaseRadius > 0f ? radiusToEffectBaseRadius : baseExplosionRadius;
+            if (baseRadius <= 0f)
+            {
+                baseRadius = explosionRadius;
+            }
+
+            float radiusRatio = baseRadius > 0f ? (explosionRadius / baseRadius) : 1f;
+            float finalEffectScale = explosionEffectSizeMultiplier * radiusRatio;
+            explosion.transform.localScale = Vector3.one * finalEffectScale;
+
+            Animator explosionAnimator = explosion.GetComponent<Animator>();
+            if (explosionAnimator != null && finalExplosionAnimationSpeed > 0f)
+            {
+                explosionAnimator.speed = finalExplosionAnimationSpeed;
+            }
+
+            if (explosionFadeOutDuration > 0f)
+            {
+                ExplosionSelfDestruct selfDestruct = explosion.AddComponent<ExplosionSelfDestruct>();
+                selfDestruct.Initialize(explosionEffectDuration, explosionFadeOutDuration);
+            }
+            else
+            {
+                Destroy(explosion, explosionEffectDuration);
+            }
+        }
+
+        private IEnumerator ApplyDelayedDamageRoutine()
+        {
+            if (damageDelay > 0f)
+            {
+                yield return new WaitForSeconds(damageDelay);
+            }
+            else
+            {
+                yield return null;
+            }
+
+            bool burnRollDetermined = false;
+            bool applyBurnToAll = false;
+
+            if (targets != null)
+            {
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    Collider2D hitCollider = targets[i];
+                    if (hitCollider == null) continue;
+
+                    IDamageable damageable = hitCollider.GetComponent<IDamageable>() ?? hitCollider.GetComponentInParent<IDamageable>();
+                    if (damageable == null || !damageable.IsAlive) continue;
+
+                    if (!OffscreenDamageChecker.CanTakeDamage(hitCollider.transform.position))
+                    {
+                        continue;
+                    }
+
+                    Vector3 hitPoint = hitCollider.ClosestPoint(explosionCenter);
+                    Vector3 hitNormal = (explosionCenter - (Vector2)hitPoint).normalized;
+
+                    float baseDamageForEnemy = damage;
+                    float finalDamage = baseDamageForEnemy;
+
+                    Component damageableComponent = damageable as Component;
+                    GameObject enemyObject = damageableComponent != null ? damageableComponent.gameObject : hitCollider.gameObject;
+
+                    if (cachedPlayerStats != null)
+                    {
+                        finalDamage = PlayerDamageHelper.ComputeProjectileDamage(cachedPlayerStats, enemyObject, baseDamageForEnemy, gameObject);
+                    }
+
+                    if (enemyObject != null)
+                    {
+                        EnemyHealth enemyHealth = enemyObject.GetComponent<EnemyHealth>() ?? enemyObject.GetComponentInParent<EnemyHealth>();
+                        if (enemyHealth != null)
+                        {
+                            DamageNumberManager.DamageType dmgType = projectileType == ProjectileType.Fire
+                                ? DamageNumberManager.DamageType.Fire
+                                : DamageNumberManager.DamageType.Ice;
+                            enemyHealth.SetLastIncomingDamageType(dmgType);
+                        }
+                    }
+
+                    DamageAoeScope.BeginAoeDamage();
+                    damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
+                    DamageAoeScope.EndAoeDamage();
+
+                    if (!burnRollDetermined)
+                    {
+                        StatusController immuneCheck = hitCollider.GetComponent<StatusController>() ?? hitCollider.GetComponentInParent<StatusController>();
+                        if (immuneCheck == null || !immuneCheck.HasStatus(StatusId.Immune))
+                        {
+                            applyBurnToAll = StatusController.TryApplyBurnFromProjectile(gameObject, hitCollider.gameObject, hitPoint, finalDamage);
+                            burnRollDetermined = true;
+                        }
+                    }
+                    else if (applyBurnToAll)
+                    {
+                        StatusController.TryApplyBurnFromProjectile(gameObject, hitCollider.gameObject, hitPoint, finalDamage, true);
+                    }
+
+                    if (slowEffect != null)
+                    {
+                        slowEffect.TryApplySlow(hitCollider.gameObject, hitPoint);
+                    }
+
+                    if (staticEffect != null)
+                    {
+                        staticEffect.TryApplyStatic(hitCollider.gameObject, hitPoint);
+                    }
+                }
+            }
+
+            damageRoutineFinished = true;
+            TryCleanup();
+        }
+
+        private void TryCleanup()
+        {
+            if (damageRoutineFinished && effectRoutineFinished)
+            {
+                Destroy(gameObject);
+            }
+        }
+    }
+
+    private IEnumerator ApplyExplosionDamageAfterDelay(Vector2 explosionCenter)
+    {
+        if (damageDelay > 0f)
+        {
+            yield return new WaitForSeconds(damageDelay);
+        }
+
+        // Find all enemies in explosion radius at the time damage is applied
         Collider2D[] hitColliders = Physics2D.OverlapCircleAll(explosionCenter, explosionRadius, enemyLayer);
-        
-        Debug.Log($"<color=red>NuclearStrike hit {hitColliders.Length} enemies</color>");
-        
+
+        Debug.Log($"<color=red>NuclearStrike damage pass: {hitColliders.Length} enemies in radius after {damageDelay:F2}s delay</color>");
+
+        // We want burn chance to be rolled ONCE per explosion. The first
+        // valid enemy we hit determines whether this explosion will burn, and
+        // that result is then applied uniformly to all other enemies hit.
+        bool burnRollDetermined = false;
+        bool applyBurnToAll = false;
+
         foreach (Collider2D hitCollider in hitColliders)
         {
             IDamageable damageable = hitCollider.GetComponent<IDamageable>() ?? hitCollider.GetComponentInParent<IDamageable>();
-            
+
             if (damageable != null && damageable.IsAlive)
             {
                 // Check if enemy is within damageable area (on-screen or slightly offscreen)
@@ -532,14 +939,14 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                 {
                     continue; // Skip this enemy
                 }
-                
+
                 Vector3 hitPoint = hitCollider.ClosestPoint(explosionCenter);
                 Vector3 hitNormal = (explosionCenter - (Vector2)hitPoint).normalized;
 
                 // Use damage value after card modifiers but roll crit PER ENEMY via PlayerStats
                 float baseDamageForEnemy = damage;
                 float finalDamage = baseDamageForEnemy;
-                
+
                 Component damageableComponent = damageable as Component;
                 GameObject enemyObject = damageableComponent != null ? damageableComponent.gameObject : hitCollider.gameObject;
 
@@ -562,13 +969,25 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                     }
                 }
 
+                // === AOE DAMAGE CLASSIFICATION (bypasses enemy NULLIFY) ===
+                DamageAoeScope.BeginAoeDamage();
                 damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
+                DamageAoeScope.EndAoeDamage();
 
-                BurnEffect burnEffect = GetComponent<BurnEffect>();
-                if (burnEffect != null)
+                // First valid enemy: perform the actual burn chance roll
+                // and cache the outcome, then apply to all others.
+                if (!burnRollDetermined)
                 {
-                    burnEffect.Initialize(finalDamage, projectileType);
-                    burnEffect.TryApplyBurn(hitCollider.gameObject, hitPoint);
+                    StatusController immuneCheck = hitCollider.GetComponent<StatusController>() ?? hitCollider.GetComponentInParent<StatusController>();
+                    if (immuneCheck == null || !immuneCheck.HasStatus(StatusId.Immune))
+                    {
+                        applyBurnToAll = StatusController.TryApplyBurnFromProjectile(gameObject, hitCollider.gameObject, hitPoint, finalDamage);
+                        burnRollDetermined = true;
+                    }
+                }
+                else if (applyBurnToAll)
+                {
+                    StatusController.TryApplyBurnFromProjectile(gameObject, hitCollider.gameObject, hitPoint, finalDamage, true);
                 }
 
                 SlowEffect slowEffect = GetComponent<SlowEffect>();
@@ -584,41 +1003,12 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                 }
             }
         }
-        
-        // Spawn explosion effect with offset, size, and timing
-        if (explosionEffectPrefab != null)
-        {
-            // Determine which side of screen we're on (left or right of center)
-            Camera mainCam = Camera.main;
-            bool isOnLeftSide = mainCam != null && transform.position.x < mainCam.transform.position.x;
-            
-            // Get offset based on current size (uses per-size offsets if configured)
-            Vector2 effectOffset = GetOffsetForCurrentSize(isOnLeftSide);
-            Vector3 explosionPosition = transform.position + (Vector3)effectOffset;
-            
-            // Handle timing adjustment
-            if (explosionEffectTimingAdjustment < 0f)
-            {
-                // Delay effect
-                StartCoroutine(SpawnDelayedExplosionEffect(explosionPosition, Mathf.Abs(explosionEffectTimingAdjustment)));
-            }
-            else
-            {
-                // Normal or early timing
-                SpawnExplosionEffectImmediate(explosionPosition);
-            }
-        }
-        
-        // Play explosion sound
-        if (explosionClip != null)
-        {
-            AudioSource.PlayClipAtPoint(explosionClip, transform.position, explosionVolume);
-        }
-        
-        // Destroy projectile
+
+        // After applying all delayed damage and status effects, the
+        // NuclearStrike projectile can safely be destroyed.
         Destroy(gameObject);
     }
-    
+
     /// <summary>
     /// Gets the appropriate offset based on current size percentage.
     /// Interpolates between configured size offset pairs.
@@ -630,20 +1020,20 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         {
             return isLeftSide ? explosionEffectOffsetLeft : explosionEffectOffsetRight;
         }
-        
+
         // Get current size multiplier from transform scale and convert to percentage
         float currentSizeMultiplier = transform.localScale.x; // e.g., 1.2 for +20%
         float currentSizePercentage = (currentSizeMultiplier - 1f) * 100f; // Convert to percentage (e.g., 1.2 -> 20)
-        
+
         Debug.Log($"<color=red>NuclearStrike: Current size multiplier = {currentSizeMultiplier:F2}, percentage = {currentSizePercentage:F1}%</color>");
-        
+
         // Sort size offsets by percentage (in case they're not in order)
         sizeOffsets.Sort((a, b) => a.sizePercentage.CompareTo(b.sizePercentage));
-        
+
         // Find the two closest size percentages to interpolate between
         SizeOffsetPair lower = null;
         SizeOffsetPair upper = null;
-        
+
         for (int i = 0; i < sizeOffsets.Count; i++)
         {
             if (sizeOffsets[i].sizePercentage <= currentSizePercentage)
@@ -655,28 +1045,28 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                 upper = sizeOffsets[i];
             }
         }
-        
+
         // If exact match or only one bound found
         if (lower != null && upper != null && Mathf.Approximately(lower.sizePercentage, upper.sizePercentage))
         {
             Debug.Log($"<color=red>NuclearStrike: Exact match! Using size {lower.sizePercentage}%</color>");
             return isLeftSide ? lower.offsetLeft : lower.offsetRight;
         }
-        
+
         // If below all configured sizes, use the smallest
         if (lower == null && upper != null)
         {
             Debug.Log($"<color=red>NuclearStrike: Below all sizes, using {upper.sizePercentage}%</color>");
             return isLeftSide ? upper.offsetLeft : upper.offsetRight;
         }
-        
+
         // If above all configured sizes, use the largest
         if (upper == null && lower != null)
         {
             Debug.Log($"<color=red>NuclearStrike: Above all sizes, using {lower.sizePercentage}%</color>");
             return isLeftSide ? lower.offsetLeft : lower.offsetRight;
         }
-        
+
         // Interpolate between lower and upper
         if (lower != null && upper != null)
         {
@@ -686,31 +1076,34 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=red>NuclearStrike: Interpolating between {lower.sizePercentage}% and {upper.sizePercentage}% (t={t:F2})</color>");
             return Vector2.Lerp(lowerOffset, upperOffset, t);
         }
-        
+
         // Fallback to default offsets
         return isLeftSide ? explosionEffectOffsetLeft : explosionEffectOffsetRight;
     }
-    
+
     private void SpawnExplosionEffectImmediate(Vector3 position)
     {
         GameObject explosion = Instantiate(explosionEffectPrefab, position, Quaternion.identity);
-        
-        // CRITICAL: Scale explosion effect with ORIGINAL radius (before modifiers), size multiplier, AND projectile size
-        // Do NOT scale with explosion radius modifiers - only visual size matters for effect
-        float baseScale = explosionRadiusForEffect / 5f;
-        float projectileSizeMultiplier = transform.localScale.x; // Use projectile's current scale
-        
-        // Calculate speed-based explosion size increase
-        float totalSpeedIncrease = dropSpeed - baseDropSpeedStored;
-        float sizeThresholdsCrossed = totalSpeedIncrease / explosionSizeSpeedThreshold;
-        float explosionSizeIncrease = (explosionSizeIncreasePercent / 100f) * sizeThresholdsCrossed;
-        float finalExplosionSizeMultiplier = explosionEffectSizeMultiplier * (1f + explosionSizeIncrease);
-        
-        Debug.Log($"<color=gold>NuclearStrike Explosion Size: Base={explosionEffectSizeMultiplier:F2}, Speed Increase={totalSpeedIncrease:F2}, Thresholds={sizeThresholdsCrossed:F2}, Final Size={finalExplosionSizeMultiplier:F2}x</color>");
-        
-        // Apply final size multiplier (base * speed scaling)
-        explosion.transform.localScale = Vector3.one * (baseScale * finalExplosionSizeMultiplier * projectileSizeMultiplier);
-        
+
+        // Radius-to-effect scaling: treat explosionEffectSizeMultiplier as the
+        // base visual size when explosionRadius equals the base radius. When
+        // explosionRadius grows (from size modifiers, explosionRadiusBonus,
+        // or multipliers), scale the effect proportionally.
+
+        // Determine the baseline radius used for visual scaling.
+        float baseRadius = radiusToEffectBaseRadius > 0f ? radiusToEffectBaseRadius : baseExplosionRadius;
+        if (baseRadius <= 0f)
+        {
+            baseRadius = explosionRadius;
+        }
+
+        float radiusRatio = baseRadius > 0f ? (explosionRadius / baseRadius) : 1f;
+        float finalEffectScale = explosionEffectSizeMultiplier * radiusRatio;
+
+        Debug.Log($"<color=gold>NuclearStrike Explosion Size (Radius-Scaled): baseRadius={baseRadius:F2}, explosionRadius={explosionRadius:F2}, ratio={radiusRatio:F2}, effectSizeMult={explosionEffectSizeMultiplier:F2}, finalScale={finalEffectScale:F2}</color>");
+
+        explosion.transform.localScale = Vector3.one * finalEffectScale;
+
         // Set animation speed if explosion has Animator
         Animator explosionAnimator = explosion.GetComponent<Animator>();
         if (explosionAnimator != null && finalExplosionAnimationSpeed > 0f)
@@ -718,7 +1111,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             explosionAnimator.speed = finalExplosionAnimationSpeed;
             Debug.Log($"<color=cyan>Explosion animation speed set to {finalExplosionAnimationSpeed:F2}x (base={baseExplosionAnimationSpeed})</color>");
         }
-        
+
         // Start fade-out if duration is set
         if (explosionFadeOutDuration > 0f)
         {
@@ -733,7 +1126,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             Destroy(explosion, explosionEffectDuration);
         }
     }
-    
+
     private IEnumerator FadeOutExplosion(GameObject explosion, float totalDuration, float fadeOutDuration)
     {
         // Wait until it's time to start fading
@@ -742,25 +1135,25 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         {
             yield return new WaitForSeconds(waitTime);
         }
-        
+
         // Get all sprite renderers and particle systems
         SpriteRenderer[] sprites = explosion.GetComponentsInChildren<SpriteRenderer>();
         ParticleSystem[] particles = explosion.GetComponentsInChildren<ParticleSystem>();
-        
+
         // Store original alpha values
         Color[] originalColors = new Color[sprites.Length];
         for (int i = 0; i < sprites.Length; i++)
         {
             originalColors[i] = sprites[i].color;
         }
-        
+
         // Fade out
         float elapsed = 0f;
         while (elapsed < fadeOutDuration && explosion != null)
         {
             elapsed += Time.deltaTime;
             float alpha = 1f - (elapsed / fadeOutDuration);
-            
+
             // Fade sprites
             for (int i = 0; i < sprites.Length; i++)
             {
@@ -771,7 +1164,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                     sprites[i].color = c;
                 }
             }
-            
+
             // Fade particles
             foreach (var ps in particles)
             {
@@ -783,10 +1176,10 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                     main.startColor = c;
                 }
             }
-            
+
             yield return null;
         }
-        
+
         // Destroy after fade (this will automatically destroy all children)
         if (explosion != null)
         {
@@ -799,60 +1192,58 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                     Destroy(child.gameObject);
                 }
             }
-            
+
             // Then destroy the parent
             Destroy(explosion);
         }
     }
-    
+
     private IEnumerator SpawnDelayedExplosionEffect(Vector3 position, float delay)
     {
         yield return new WaitForSeconds(delay);
-        
+
         if (explosionEffectPrefab != null)
         {
             SpawnExplosionEffectImmediate(position);
             Debug.Log($"<color=cyan>Explosion effect played {delay}s late</color>");
         }
     }
-    
+
     private void OnDrawGizmosSelected()
     {
         // Draw explosion radius in editor with offset
         Vector3 explosionCenter = transform.position + (Vector3)explosionRadiusOffset;
-        
+
         Gizmos.color = new Color(1f, 0f, 0f, 0.3f);
         Gizmos.DrawSphere(explosionCenter, explosionRadius);
-        
+
         Gizmos.color = new Color(1f, 0f, 0f, 0.8f);
         Gizmos.DrawWireSphere(explosionCenter, explosionRadius);
 
-
-        
         // Draw spawn area if tags are set
         if (!string.IsNullOrEmpty(minPosTag) && !string.IsNullOrEmpty(maxPosTag))
         {
             GameObject minPosObj = GameObject.FindGameObjectWithTag(minPosTag);
             GameObject maxPosObj = GameObject.FindGameObjectWithTag(maxPosTag);
-            
+
             if (minPosObj != null && maxPosObj != null)
             {
                 Gizmos.color = new Color(1f, 0f, 0f, 0.3f);
-                
+
                 // Draw horizontal spawn line at top
                 Vector3 leftPoint = new Vector3(minPosObj.transform.position.x, Mathf.Max(minPosObj.transform.position.y, maxPosObj.transform.position.y), 0f);
                 Vector3 rightPoint = new Vector3(maxPosObj.transform.position.x, Mathf.Max(minPosObj.transform.position.y, maxPosObj.transform.position.y), 0f);
-                
+
                 Gizmos.color = new Color(1f, 0f, 0f, 0.8f);
                 Gizmos.DrawLine(leftPoint, rightPoint);
-                
+
                 // Draw vertical drop indicators
                 Gizmos.DrawLine(leftPoint, leftPoint + Vector3.down * 2f);
                 Gizmos.DrawLine(rightPoint, rightPoint + Vector3.down * 2f);
             }
         }
     }
-    
+
     private void OnDestroy()
     {
         // Stop audio
@@ -860,7 +1251,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         {
             _audioSource.Stop();
         }
-        
+
         // CRITICAL: Destroy shadow when projectile is destroyed
         if (shadowInstance != null)
         {
@@ -868,14 +1259,14 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=yellow>NuclearStrike destroyed - cleaning up shadow</color>");
         }
     }
-    
+
     /// <summary>
     /// Apply modifiers instantly (IInstantModifiable interface)
     /// </summary>
     public void ApplyInstantModifiers(CardModifierStats modifiers)
     {
         Debug.Log($"<color=lime>╔═══ NUCLEARSTRIKE INSTANT MODIFIERS ═══╗</color>");
-        
+
         // Recalculate drop speed
         float newSpeed = baseDropSpeed + modifiers.speedIncrease;
         if (newSpeed != dropSpeed)
@@ -883,7 +1274,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             dropSpeed = newSpeed;
             Debug.Log($"<color=lime>  Drop Speed: {baseDropSpeed:F2} + {modifiers.speedIncrease:F2} = {dropSpeed:F2}</color>");
         }
-        
+
         // Recalculate explosion radius
         float newRadius = (baseExplosionRadius + modifiers.explosionRadiusBonus) * modifiers.explosionRadiusMultiplier;
         if (newRadius != explosionRadius)
@@ -891,7 +1282,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             explosionRadius = newRadius;
             Debug.Log($"<color=lime>  Explosion Radius: ({baseExplosionRadius:F2} + {modifiers.explosionRadiusBonus:F2}) * {modifiers.explosionRadiusMultiplier:F2}x = {explosionRadius:F2}</color>");
         }
-        
+
         // Recalculate damage
         float newDamage = baseDamage * modifiers.damageMultiplier;
         if (newDamage != damage)
@@ -899,14 +1290,14 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             damage = newDamage;
             Debug.Log($"<color=lime>  Damage: {baseDamage:F2} * {modifiers.damageMultiplier:F2}x = {damage:F2}</color>");
         }
-        
+
         // Recalculate size
         if (modifiers.sizeMultiplier != 1f)
         {
             transform.localScale = baseScale * modifiers.sizeMultiplier;
             Debug.Log($"<color=lime>  Size: {baseScale} * {modifiers.sizeMultiplier:F2}x = {transform.localScale}</color>");
         }
-        
+
         Debug.Log($"<color=lime>╚═══════════════════════════════════════╝</color>");
     }
 }
@@ -919,14 +1310,14 @@ public class ExplosionSelfDestruct : MonoBehaviour
 {
     private float totalDuration;
     private float fadeOutDuration;
-    
+
     public void Initialize(float total, float fadeOut)
     {
         totalDuration = total;
         fadeOutDuration = fadeOut;
         StartCoroutine(FadeAndDestroy());
     }
-    
+
     private IEnumerator FadeAndDestroy()
     {
         // Wait until it's time to start fading
@@ -935,25 +1326,25 @@ public class ExplosionSelfDestruct : MonoBehaviour
         {
             yield return new WaitForSeconds(waitTime);
         }
-        
+
         // Get all sprite renderers and particle systems
         SpriteRenderer[] sprites = GetComponentsInChildren<SpriteRenderer>();
         ParticleSystem[] particles = GetComponentsInChildren<ParticleSystem>();
-        
+
         // Store original alpha values
         Color[] originalColors = new Color[sprites.Length];
         for (int i = 0; i < sprites.Length; i++)
         {
             originalColors[i] = sprites[i].color;
         }
-        
+
         // Fade out
         float elapsed = 0f;
         while (elapsed < fadeOutDuration)
         {
             elapsed += Time.deltaTime;
             float alpha = 1f - (elapsed / fadeOutDuration);
-            
+
             // Fade sprites
             for (int i = 0; i < sprites.Length; i++)
             {
@@ -964,7 +1355,7 @@ public class ExplosionSelfDestruct : MonoBehaviour
                     sprites[i].color = c;
                 }
             }
-            
+
             // Fade particles
             foreach (var ps in particles)
             {
@@ -976,10 +1367,10 @@ public class ExplosionSelfDestruct : MonoBehaviour
                     main.startColor = c;
                 }
             }
-            
+
             yield return null;
         }
-        
+
         // Destroy explosion GameObject (this destroys all children automatically)
         Destroy(gameObject);
         Debug.Log($"<color=yellow>Explosion effect destroyed by ExplosionSelfDestruct</color>");

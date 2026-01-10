@@ -44,6 +44,9 @@ public enum StatusId
     Focus,
     Fury,
     Weak,
+    Rage,
+    Overweight,
+    Frenzy,
 }
 
 public struct IncomingDamageContext
@@ -66,8 +69,31 @@ public static class StatusDamageScope
 {
     public static bool IsStatusTick { get; private set; }
 
-    public static void BeginStatusTick() => IsStatusTick = true;
-    public static void EndStatusTick() => IsStatusTick = false;
+    public static DamageNumberManager.DamageType CurrentDamageNumberType { get; private set; }
+
+    public static bool CurrentIsBurn { get; private set; }
+
+    public static float LastResolvedDamage;
+
+    public static void BeginStatusTick()
+    {
+        IsStatusTick = true;
+        LastResolvedDamage = 0f;
+    }
+
+    public static void EndStatusTick()
+    {
+        IsStatusTick = false;
+        CurrentIsBurn = false;
+    }
+
+    public static void BeginStatusTick(DamageNumberManager.DamageType damageType, bool isBurn)
+    {
+        IsStatusTick = true;
+        CurrentDamageNumberType = damageType;
+        CurrentIsBurn = isBurn;
+        LastResolvedDamage = 0f;
+    }
 }
 
 public static class DamageAoeScope
@@ -85,6 +111,9 @@ public class ActiveStatus
     public int stacks;
     public float remainingDuration; // -1 = permanent
     public float tickTimer;
+    public float baseDamagePerTick;
+    public int sourceKey;
+    public ProjectileCards sourceCard;
 }
 
 public class StatusController : MonoBehaviour
@@ -146,12 +175,29 @@ public class StatusController : MonoBehaviour
 
         // Shield absorbs first. (Persists until broken; no decay.)
         float before = damage;
-        damage = ApplyShield(damage);
+        float after = ApplyShield(damage);
+
+        // If any amount of damage was actually absorbed by shield, show a
+        // shield-colored damage number for enemies so players can see shield
+        // depletion separately from HP loss.
+        if (before > after)
+        {
+            float absorbed = before - after;
+            if (absorbed > 0f && !StatusDamageScope.IsStatusTick && DamageNumberManager.Instance != null)
+            {
+                EnemyHealth enemyHealth = cachedEnemyHealth;
+                if (enemyHealth != null && enemyHealth.IsAlive)
+                {
+                    Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(enemyHealth.gameObject, enemyHealth.transform.position);
+                    DamageNumberManager.Instance.ShowDamage(absorbed, anchor, DamageNumberManager.DamageType.Shield);
+                }
+            }
+        }
+
+        damage = after;
 
         if (damage <= 0f)
         {
-            // Optional: if you want to show a shield-block popup later, you can detect:
-            // float absorbed = before - damage;
             return;
         }
 
@@ -163,9 +209,16 @@ public class StatusController : MonoBehaviour
 
     // Tracks which debuff types have already granted HATRED stacks for this unit.
     private HashSet<StatusId> hatredDebuffSources;
+    private bool hasOffCameraSpeedBoost;
+    private float offCameraSpeedBoostMultiplier = 1f;
+    private float offCameraSpeedBoostEndTime = 0f;
+    private float offCameraSpeedBoostViewportOffset = -1f;
 
     private EnemyHealth cachedEnemyHealth;
+
     private bool freezeDeathEffectPlayed;
+
+    private float burnTickTimer;
 
     private void OnEnable()
     {
@@ -192,6 +245,13 @@ public class StatusController : MonoBehaviour
             {
                 activeStatuses.RemoveAt(i);
             }
+        }
+
+        // When HATRED is explicitly removed, clear the per-debuff tracking so
+        // future externally granted HATRED can start fresh.
+        if (id == StatusId.Hatred && hatredDebuffSources != null)
+        {
+            hatredDebuffSources.Clear();
         }
     }
 
@@ -240,35 +300,131 @@ public class StatusController : MonoBehaviour
             return damage;
         }
 
-        float cap = maxHealth * (maxPercent / 100f);
-        if (damage > cap)
-        {
-            damage = cap;
+        float maxDamage = maxHealth * (maxPercent / 100f);
+        return Mathf.Min(damage, maxDamage);
+    }
 
-            status.stacks -= 1;
-            if (status.stacks <= 0 && status.remainingDuration <= 0f)
-            {
-                activeStatuses.RemoveAt(index);
-            }
-            else
-            {
-                activeStatuses[index] = status;
-            }
+    /// <summary>
+    /// Estimate a conservative lower bound on remaining Poison damage this unit
+    /// will take within the next <paramref name="windowSeconds"/> seconds,
+    /// based on current stacks and remaining Poison duration.
+    /// </summary>
+    public float EstimateRemainingPoisonDamageWithinWindow(float windowSeconds)
+    {
+        if (windowSeconds <= 0f || activeStatuses.Count == 0)
+        {
+            return 0f;
         }
 
-        return damage;
+        if (StatusControllerManager.Instance == null)
+        {
+            return 0f;
+        }
+
+        float interval = Mathf.Max(0.01f, StatusControllerManager.Instance.PoisonTickInterval);
+        float damagePerStack = Mathf.Max(0f, StatusControllerManager.Instance.PoisonDamagePerStack);
+        if (damagePerStack <= 0f)
+        {
+            return 0f;
+        }
+
+        float window = Mathf.Max(0f, windowSeconds);
+        float totalDamage = 0f;
+
+        for (int i = 0; i < activeStatuses.Count; i++)
+        {
+            ActiveStatus status = activeStatuses[i];
+            if (status.id != StatusId.Poison || status.stacks <= 0)
+            {
+                continue;
+            }
+
+            float effectiveWindow = window;
+            if (status.remainingDuration >= 0f)
+            {
+                effectiveWindow = Mathf.Min(effectiveWindow, Mathf.Max(0f, status.remainingDuration));
+            }
+
+            if (effectiveWindow <= 0f)
+            {
+                continue;
+            }
+
+            float tickTimer = status.tickTimer;
+            if (tickTimer < 0f)
+            {
+                tickTimer = 0f;
+            }
+            if (tickTimer > interval)
+            {
+                tickTimer = interval;
+            }
+
+            float timeUntilNextTick = interval - tickTimer;
+            int ticks = 0;
+            if (effectiveWindow >= timeUntilNextTick)
+            {
+                float remainingAfterFirst = effectiveWindow - timeUntilNextTick;
+                ticks = 1 + Mathf.FloorToInt(remainingAfterFirst / interval);
+            }
+            if (ticks <= 0)
+            {
+                continue;
+            }
+
+            float perTick = Mathf.Max(0f, status.stacks * damagePerStack);
+            if (perTick <= 0f)
+            {
+                continue;
+            }
+
+            totalDamage += perTick * ticks;
+        }
+
+        return totalDamage;
+    }
+
+    private static bool UsesIndependentDurationInstances(StatusId id, float resolvedDuration)
+    {
+        if (resolvedDuration < 0f)
+        {
+            return false;
+        }
+
+        switch (id)
+        {
+            case StatusId.Poison:
+            case StatusId.Bleed:
+            case StatusId.Blessing:
+            case StatusId.Wound:
+            case StatusId.Acceleration:
+            case StatusId.Burn:
+            case StatusId.Slow:
+            case StatusId.Static:
+            case StatusId.Frenzy:
+                return true;
+            default:
+                return false;
+        }
     }
 
     public int GetStacks(StatusId id)
     {
+        int total = 0;
         for (int i = 0; i < activeStatuses.Count; i++)
         {
-            if (activeStatuses[i].id == id)
+            ActiveStatus status = activeStatuses[i];
+            if (status.id != id)
             {
-                return activeStatuses[i].stacks;
+                continue;
+            }
+
+            if (status.stacks > 0)
+            {
+                total += status.stacks;
             }
         }
-        return 0;
+        return total;
     }
 
     public bool HasStatus(StatusId id) => GetStacks(id) > 0;
@@ -280,15 +436,27 @@ public class StatusController : MonoBehaviour
             return false;
         }
 
-        for (int i = 0; i < activeStatuses.Count; i++)
+        int remaining = count;
+        bool consumedAny = false;
+
+        for (int i = activeStatuses.Count - 1; i >= 0; i--)
         {
+            if (remaining <= 0)
+            {
+                break;
+            }
+
             ActiveStatus status = activeStatuses[i];
-            if (status.id != id)
+            if (status.id != id || status.stacks <= 0)
             {
                 continue;
             }
 
-            status.stacks -= count;
+            int consume = Mathf.Min(status.stacks, remaining);
+            status.stacks -= consume;
+            remaining -= consume;
+            consumedAny = consumedAny || consume > 0;
+
             if (status.stacks <= 0)
             {
                 if (status.remainingDuration <= 0f)
@@ -305,15 +473,91 @@ public class StatusController : MonoBehaviour
             {
                 activeStatuses[i] = status;
             }
-
-            return true;
         }
 
-        return false;
+        return consumedAny;
+    }
+
+    public bool ConsumeStacks(StatusId id, int count, int sourceKey)
+    {
+        if (sourceKey == 0)
+        {
+            return ConsumeStacks(id, count);
+        }
+
+        if (count <= 0 || activeStatuses.Count == 0)
+        {
+            return false;
+        }
+
+        int remaining = count;
+        bool consumedAny = false;
+
+        for (int i = activeStatuses.Count - 1; i >= 0; i--)
+        {
+            if (remaining <= 0)
+            {
+                break;
+            }
+
+            ActiveStatus status = activeStatuses[i];
+            if (status.id != id || status.stacks <= 0 || status.sourceKey != sourceKey)
+            {
+                continue;
+            }
+
+            int consume = Mathf.Min(status.stacks, remaining);
+            status.stacks -= consume;
+            remaining -= consume;
+            consumedAny = consumedAny || consume > 0;
+
+            if (status.stacks <= 0)
+            {
+                if (status.remainingDuration <= 0f)
+                {
+                    activeStatuses.RemoveAt(i);
+                }
+                else
+                {
+                    activeStatuses[i] = status;
+                }
+            }
+            else
+            {
+                activeStatuses[i] = status;
+            }
+        }
+
+        return consumedAny;
+    }
+
+    public void ApplyOffCameraSpeedBoost(float multiplier, float durationSeconds)
+    {
+        ApplyOffCameraSpeedBoost(multiplier, durationSeconds, -1f);
+    }
+
+    public void ApplyOffCameraSpeedBoost(float multiplier, float durationSeconds, float viewportOffset)
+    {
+        if (multiplier <= 1f || durationSeconds <= 0f)
+        {
+            return;
+        }
+
+        hasOffCameraSpeedBoost = true;
+        offCameraSpeedBoostMultiplier = multiplier;
+        offCameraSpeedBoostEndTime = Time.time + durationSeconds;
+        offCameraSpeedBoostViewportOffset = viewportOffset;
     }
 
     public float GetEnemyMoveSpeedMultiplier()
     {
+        // NEW: Freeze = 100% move speed reduction (enemy speed becomes 0).
+        // This works with enemies like CrowEnemy that multiply their base moveSpeed by this multiplier.
+        if (HasStatus(StatusId.Freeze))
+        {
+            return 0f;
+        }
+
         if (StatusControllerManager.Instance == null)
         {
             return 1f;
@@ -338,7 +582,60 @@ public class StatusController : MonoBehaviour
             multiplier *= Mathf.Max(0f, 1f - total / 100f);
         }
 
+        int slowStacks = GetStacks(StatusId.Slow);
+        if (slowStacks > 0)
+        {
+            float slowStrength = Mathf.Clamp01(slowStacks / 4f);
+            multiplier *= Mathf.Max(0f, 1f - slowStrength);
+        }
+
+        if (hasOffCameraSpeedBoost)
+        {
+            bool onCamera;
+            if (offCameraSpeedBoostViewportOffset >= 0f)
+            {
+                Camera cam = Camera.main;
+                onCamera = OffscreenDamageChecker.CanTakeDamage(transform.position, cam, offCameraSpeedBoostViewportOffset);
+            }
+            else
+            {
+                onCamera = OffscreenDamageChecker.CanTakeDamage(transform.position);
+            }
+
+            bool expired = Time.time >= offCameraSpeedBoostEndTime;
+            if (expired || onCamera)
+            {
+                hasOffCameraSpeedBoost = false;
+                offCameraSpeedBoostMultiplier = 1f;
+                offCameraSpeedBoostViewportOffset = -1f;
+            }
+            else
+            {
+                multiplier *= offCameraSpeedBoostMultiplier;
+            }
+        }
+
         return multiplier;
+    }
+
+    public float GetEnemyEffectiveMass(float baseMass)
+    {
+        float mass = Mathf.Max(0.01f, baseMass);
+
+        int overweightStacks = GetStacks(StatusId.Overweight);
+        if (overweightStacks <= 0)
+        {
+            return mass;
+        }
+
+        float per = 1f;
+        if (StatusControllerManager.Instance != null)
+        {
+            per = StatusControllerManager.Instance.MassPerStack;
+        }
+
+        mass += Mathf.Max(0f, per) * overweightStacks;
+        return Mathf.Max(0.01f, mass);
     }
 
     public float GetLethargyAttackCooldownBonus()
@@ -381,6 +678,7 @@ public class StatusController : MonoBehaviour
         int hatredStacks = 0;
         int focusStacks = 0;
         int furyStacks = 0;
+        int rageStacks = 0;
 
         for (int i = 0; i < activeStatuses.Count; i++)
         {
@@ -404,10 +702,13 @@ public class StatusController : MonoBehaviour
                 case StatusId.Fury:
                     furyStacks = status.stacks;
                     break;
+                case StatusId.Rage:
+                    rageStacks = status.stacks;
+                    break;
             }
         }
 
-        if (firstStrikeStacks <= 0 && hatredStacks <= 0 && focusStacks <= 0 && furyStacks <= 0)
+        if (firstStrikeStacks <= 0 && hatredStacks <= 0 && focusStacks <= 0 && furyStacks <= 0 && rageStacks <= 0)
         {
             return;
         }
@@ -449,6 +750,10 @@ public class StatusController : MonoBehaviour
             }
         }
 
+        // HATRED: only affects *enemies* and only does anything if they already
+        // have HATRED stacks (e.g. granted by a Favour or other system). The
+        // debuff -> HATRED stacking logic is handled in AddStatus; here we just
+        // convert total stacks into a damage bonus.
         if (hatredStacks > 0 && GetComponent<PlayerHealth>() == null)
         {
             float per = 1f;
@@ -461,10 +766,25 @@ public class StatusController : MonoBehaviour
             totalBonusPercent += hatredBonus;
         }
 
+        if (furyStacks > 0 && GetComponent<PlayerHealth>() == null)
+        {
+            float per = 1f;
+            if (StatusControllerManager.Instance != null)
+            {
+                per = StatusControllerManager.Instance.FuryEnemyBaseDamageBonusPerStack;
+            }
+
+            float flatBonus = Mathf.Max(0f, per * furyStacks);
+            if (flatBonus > 0f)
+            {
+                damage += flatBonus;
+            }
+        }
+
         float normalizedHealth = -1f;
         bool hasHealth = false;
 
-        if (focusStacks > 0 || furyStacks > 0)
+        if (focusStacks > 0 || rageStacks > 0)
         {
             float currentHealth = 0f;
             float maxHealth = 0f;
@@ -504,20 +824,20 @@ public class StatusController : MonoBehaviour
             totalBonusPercent += focusBonus;
         }
 
-        if (furyStacks > 0 && hasHealth)
+        if (rageStacks > 0 && hasHealth)
         {
             float thresholdFraction = 0.5f;
             float per = 10f;
             if (StatusControllerManager.Instance != null)
             {
-                thresholdFraction = StatusControllerManager.Instance.FuryLowHealthThresholdPercent / 100f;
-                per = StatusControllerManager.Instance.FuryBonusPercentPerStack;
+                thresholdFraction = StatusControllerManager.Instance.RageLowHealthThresholdPercent / 100f;
+                per = StatusControllerManager.Instance.RageBonusPercentPerStack;
             }
 
             if (normalizedHealth <= thresholdFraction)
             {
-                float furyBonus = Mathf.Max(0f, per * furyStacks);
-                totalBonusPercent += furyBonus;
+                float rageBonus = Mathf.Max(0f, per * rageStacks);
+                totalBonusPercent += rageBonus;
             }
         }
 
@@ -704,10 +1024,7 @@ public class StatusController : MonoBehaviour
                     break;
 
                 case StatusId.Immune:
-                    if (!ctx.isStatusTick)
-                    {
-                        damage = 0f;
-                    }
+                    damage = 0f;
                     break;
 
                 case StatusId.Decay:
@@ -770,10 +1087,6 @@ public class StatusController : MonoBehaviour
                 case StatusId.Armor:
                     if (status.stacks > 0 && damage > 0f)
                     {
-                        if (isPlayerOwner)
-                        {
-                            break;
-                        }
                         float perStack = 1f;
                         if (StatusControllerManager.Instance != null)
                         {
@@ -794,6 +1107,13 @@ public class StatusController : MonoBehaviour
 
     private void Update()
     {
+        if (hasOffCameraSpeedBoost && Time.time >= offCameraSpeedBoostEndTime)
+        {
+            hasOffCameraSpeedBoost = false;
+            offCameraSpeedBoostMultiplier = 1f;
+            offCameraSpeedBoostViewportOffset = -1f;
+        }
+
         if (activeStatuses.Count == 0)
         {
             return;
@@ -807,11 +1127,163 @@ public class StatusController : MonoBehaviour
 
         IDamageable damageable = GetComponent<IDamageable>();
 
+        float burnInterval = 0.25f;
+        if (StatusControllerManager.Instance != null)
+        {
+            burnInterval = StatusControllerManager.Instance.BurnTickIntervalSeconds;
+        }
+        burnInterval = Mathf.Max(0.01f, burnInterval);
+
+        bool canBurnTick = damageable != null && damageable.IsAlive;
+        bool hasBurn = false;
+        for (int i = 0; i < activeStatuses.Count; i++)
+        {
+            ActiveStatus s = activeStatuses[i];
+            if (s.id != StatusId.Burn || s.stacks <= 0 || s.baseDamagePerTick <= 0f)
+            {
+                continue;
+            }
+
+            if (s.remainingDuration < 0f || s.remainingDuration > 0f)
+            {
+                hasBurn = true;
+                break;
+            }
+        }
+
+        if (!hasBurn || !canBurnTick)
+        {
+            burnTickTimer = 0f;
+        }
+        else
+        {
+            burnTickTimer += dt;
+            while (burnTickTimer >= burnInterval)
+            {
+                burnTickTimer -= burnInterval;
+
+                ProjectileCards lastSourceCard = null;
+                float totalTickDamage = 0f;
+
+                for (int j = 0; j < activeStatuses.Count; j++)
+                {
+                    ActiveStatus burn = activeStatuses[j];
+                    if (burn.id != StatusId.Burn || burn.stacks <= 0 || burn.baseDamagePerTick <= 0f)
+                    {
+                        continue;
+                    }
+
+                    if (burn.remainingDuration == 0f)
+                    {
+                        continue;
+                    }
+
+                    totalTickDamage += Mathf.Max(0f, burn.baseDamagePerTick) * Mathf.Max(0, burn.stacks);
+
+                    if (burn.sourceCard != null)
+                    {
+                        lastSourceCard = burn.sourceCard;
+                    }
+                }
+
+                if (totalTickDamage <= 0f)
+                {
+                    continue;
+                }
+
+                if (lastSourceCard != null)
+                {
+                    EnemyHealth eh = cachedEnemyHealth;
+                    if (eh != null)
+                    {
+                        EnemyLastHitSource marker = eh.GetComponent<EnemyLastHitSource>();
+                        if (marker == null)
+                        {
+                            marker = eh.gameObject.AddComponent<EnemyLastHitSource>();
+                        }
+                        marker.lastProjectileCard = lastSourceCard;
+                    }
+                }
+
+                DemonSlimeEnemy slime = GetComponent<DemonSlimeEnemy>() ?? GetComponentInParent<DemonSlimeEnemy>();
+                if (slime != null)
+                {
+                    float factor = 1f - (slime.FireResistance / 100f);
+                    if (factor <= 0f)
+                    {
+                        factor = 0.01f;
+                    }
+                    totalTickDamage *= factor;
+                }
+
+                bool isCrit = false;
+                PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
+                if (stats != null && stats.burnImmolationCanCrit)
+                {
+                    float frenzyBonus = 0f;
+                    if (StatusControllerManager.Instance != null)
+                    {
+                        StatusController playerStatus = stats.GetComponent<StatusController>();
+                        if (playerStatus != null)
+                        {
+                            int frenzyStacks = playerStatus.GetStacks(StatusId.Frenzy);
+                            if (frenzyStacks > 0)
+                            {
+                                frenzyBonus = StatusControllerManager.Instance.CritPerStack * frenzyStacks;
+                            }
+                        }
+                    }
+
+                    float chance = Mathf.Clamp(stats.critChance + frenzyBonus + Mathf.Max(0f, stats.burnImmolationCritChanceBonus), 0f, 100f);
+                    if (chance > 0f)
+                    {
+                        float roll = Random.Range(0f, 100f);
+                        if (roll < chance)
+                        {
+                            float critDamage = stats.critDamage + Mathf.Max(0f, stats.burnImmolationCritDamageBonusPercent);
+                            totalTickDamage *= Mathf.Max(0f, critDamage / 100f);
+                            isCrit = true;
+                        }
+                    }
+                }
+
+                Vector3 anchor = transform.position;
+                if (DamageNumberManager.Instance != null)
+                {
+                    anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, anchor);
+                }
+
+                StatusDamageScope.BeginStatusTick(DamageNumberManager.DamageType.Fire, true);
+
+                if (stats != null && stats.burnImmolationCanCrit)
+                {
+                    stats.lastHitWasCrit = isCrit;
+                    FavourEffectManager favourManager = stats.GetComponent<FavourEffectManager>();
+                    if (favourManager != null)
+                    {
+                        ProjectileCards previousCard = favourManager.CurrentProjectileCard;
+                        favourManager.CurrentProjectileCard = lastSourceCard;
+                        favourManager.NotifyCritResolved(lastSourceCard, true, isCrit);
+                        favourManager.CurrentProjectileCard = previousCard;
+                    }
+                }
+
+                damageable.TakeDamage(totalTickDamage, anchor, Vector3.zero);
+                float resolved = StatusDamageScope.LastResolvedDamage;
+                StatusDamageScope.EndStatusTick();
+
+                if (DamageNumberManager.Instance != null && resolved > 0f)
+                {
+                    DamageNumberManager.Instance.ShowDamage(resolved, anchor, DamageNumberManager.DamageType.Fire, isCrit, true);
+                }
+            }
+        }
+
         for (int i = activeStatuses.Count - 1; i >= 0; i--)
         {
             ActiveStatus status = activeStatuses[i];
 
-            if (status.remainingDuration > 0f)
+            if (status.id != StatusId.Immolation && status.remainingDuration > 0f)
             {
                 status.remainingDuration -= dt;
                 if (status.remainingDuration < 0f)
@@ -828,28 +1300,27 @@ public class StatusController : MonoBehaviour
                 if (StatusControllerManager.Instance != null)
                 {
                     interval = Mathf.Max(0.01f, StatusControllerManager.Instance.PoisonTickInterval);
-                    damagePerStack = Mathf.Max(0f, StatusControllerManager.Instance.PoisonDamagePerStack);
+                    damagePerStack = StatusControllerManager.Instance.PoisonDamagePerStack;
                 }
                 while (status.tickTimer >= interval)
                 {
                     status.tickTimer -= interval;
-                    float poisonDamage = Mathf.Max(0f, status.stacks * damagePerStack);
-                    if (poisonDamage > 0f)
-                    {
-                        Vector3 anchor = transform.position;
-                        if (DamageNumberManager.Instance != null)
-                        {
-                            anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, anchor);
-                        }
+                    float poisonDamage = status.stacks * damagePerStack;
 
-                        StatusDamageScope.BeginStatusTick();
-                        damageable.TakeDamage(poisonDamage, anchor, Vector3.zero);
-                        if (DamageNumberManager.Instance != null)
-                        {
-                            DamageNumberManager.Instance.ShowDamage(poisonDamage, anchor, DamageNumberManager.DamageType.Poison, false, true);
-                        }
-                        StatusDamageScope.EndStatusTick();
+                    Vector3 anchor = transform.position;
+                    if (DamageNumberManager.Instance != null)
+                    {
+                        anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, anchor);
                     }
+
+                    StatusDamageScope.BeginStatusTick(DamageNumberManager.DamageType.Poison, true);
+                    damageable.TakeDamage(poisonDamage, anchor, Vector3.zero);
+                    float resolved = StatusDamageScope.LastResolvedDamage;
+                    if (DamageNumberManager.Instance != null && resolved > 0f)
+                    {
+                        DamageNumberManager.Instance.ShowDamage(resolved, anchor, DamageNumberManager.DamageType.Poison, false, true);
+                    }
+                    StatusDamageScope.EndStatusTick();
                 }
             }
 
@@ -857,12 +1328,18 @@ public class StatusController : MonoBehaviour
             bool expiredByDuration = hasFiniteDuration && status.remainingDuration <= 0f;
             bool noStacksAndNoDuration = status.stacks <= 0 && !hasFiniteDuration;
 
+            if (status.id == StatusId.Immolation)
+            {
+                expiredByDuration = false;
+            }
+
             if (expiredByDuration || noStacksAndNoDuration)
             {
                 if (status.id == StatusId.Freeze)
                 {
                     SpawnFreezeOnEndEffect();
                 }
+
                 activeStatuses.RemoveAt(i);
             }
             else
@@ -870,6 +1347,211 @@ public class StatusController : MonoBehaviour
                 activeStatuses[i] = status;
             }
         }
+
+        UpdateImmolationDerivedDurationAndPresence();
+    }
+
+    public float GetMaxRemainingDurationSeconds(StatusId id)
+    {
+        return GetMaxRemainingDuration(id);
+    }
+
+    public float GetCurrentBurnTickDamage()
+    {
+        float total = 0f;
+        for (int i = 0; i < activeStatuses.Count; i++)
+        {
+            ActiveStatus s = activeStatuses[i];
+            if (s.id != StatusId.Burn || s.stacks <= 0 || s.baseDamagePerTick <= 0f)
+            {
+                continue;
+            }
+
+            if (s.remainingDuration == 0f)
+            {
+                continue;
+            }
+
+            total += Mathf.Max(0f, s.baseDamagePerTick) * Mathf.Max(0, s.stacks);
+        }
+
+        return total;
+    }
+
+    public static bool TryApplyBurnFromProjectile(GameObject projectile, GameObject enemy, Vector3 hitPoint, float hitDamage, bool forceApply = false)
+    {
+        if (projectile == null || enemy == null)
+        {
+            return false;
+        }
+
+        BurnEffect burn = projectile.GetComponent<BurnEffect>();
+        if (burn == null)
+        {
+            return false;
+        }
+
+        bool ignorePreForThisProjectile =
+            projectile.GetComponent<ElementalBeam>() != null ||
+            projectile.GetComponent<ProjectileFireTalon>() != null ||
+            projectile.GetComponent<ProjectileIceTalon>() != null ||
+            projectile.GetComponent<DwarfStar>() != null ||
+            projectile.GetComponent<NovaStar>() != null;
+
+        PredeterminedStatusRoll pre = ignorePreForThisProjectile
+            ? null
+            : projectile.GetComponent<PredeterminedStatusRoll>();
+
+        if (pre != null)
+        {
+            pre.EnsureRolled();
+        }
+
+        PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
+
+        ProjectileCards sourceCard = null;
+        if (ProjectileCardModifiers.Instance != null)
+        {
+            sourceCard = ProjectileCardModifiers.Instance.GetCardFromProjectile(projectile);
+        }
+
+        bool isActiveSource =
+            sourceCard != null &&
+            sourceCard.projectileSystem == ProjectileCards.ProjectileSystemType.Active;
+
+        float effectiveChance = burn.burnChance;
+        if (stats != null && stats.hasProjectileStatusEffect)
+        {
+            effectiveChance += Mathf.Max(0f, stats.statusEffectChance);
+            if (isActiveSource)
+            {
+                effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
+            }
+        }
+        effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
+
+        if (!forceApply)
+        {
+            if (pre != null && pre.burnRolled)
+            {
+                if (!pre.burnWillApply)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                float roll = Random.Range(0f, 100f);
+                if (roll > effectiveChance)
+                {
+                    return false;
+                }
+            }
+        }
+
+        EnemyHealth ownerHealth = enemy.GetComponent<EnemyHealth>() ?? enemy.GetComponentInParent<EnemyHealth>();
+        GameObject ownerGO = ownerHealth != null ? ownerHealth.gameObject : enemy;
+
+        StatusController immuneCheck = ownerGO.GetComponent<StatusController>() ?? ownerGO.GetComponentInParent<StatusController>();
+        if (immuneCheck != null && immuneCheck.HasStatus(StatusId.Immune))
+        {
+            return false;
+        }
+
+        float baseDamage = Mathf.Max(1f, hitDamage);
+        float damagePerTick = Mathf.Max(1f, baseDamage * burn.burnDamageMultiplier);
+        float duration = burn.burnDuration;
+
+        if (stats != null)
+        {
+            float totalMultiplier = 1f + Mathf.Max(0f, stats.burnTotalDamageMultiplier);
+            if (!Mathf.Approximately(totalMultiplier, 1f))
+            {
+                damagePerTick *= totalMultiplier;
+            }
+
+            if (!Mathf.Approximately(stats.burnDurationBonus, 0f))
+            {
+                duration = Mathf.Max(0f, duration + stats.burnDurationBonus);
+            }
+        }
+
+        StatusController statusController = ownerGO.GetComponent<StatusController>() ?? ownerGO.GetComponentInParent<StatusController>();
+        if (statusController == null)
+        {
+            statusController = ownerGO.AddComponent<StatusController>();
+        }
+
+        int stacks = Mathf.Clamp(burn.burnStacksPerHit, 1, 4);
+        statusController.AddStatus(StatusId.Burn, stacks, duration, damagePerTick, sourceCard);
+
+        if (DamageNumberManager.Instance != null)
+        {
+            Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(ownerGO, ownerGO.transform.position);
+            DamageNumberManager.Instance.ShowBurn(anchor);
+        }
+
+        return true;
+    }
+
+    private void UpdateImmolationDerivedDurationAndPresence()
+    {
+        int immolationIndex = activeStatuses.FindIndex(s => s.id == StatusId.Immolation);
+        if (immolationIndex < 0)
+        {
+            return;
+        }
+
+        int burnStacks = GetStacks(StatusId.Burn);
+        if (burnStacks <= 0)
+        {
+            RemoveStatus(StatusId.Immolation);
+            return;
+        }
+
+        float duration = GetMaxRemainingDuration(StatusId.Burn);
+        if (duration == 0f)
+        {
+            RemoveStatus(StatusId.Immolation);
+            return;
+        }
+
+        ActiveStatus immolation = activeStatuses[immolationIndex];
+        immolation.stacks = Mathf.Max(1, immolation.stacks);
+        immolation.remainingDuration = duration;
+        activeStatuses[immolationIndex] = immolation;
+    }
+
+    private float ComputeTotalRemainingBurnDamage(float burnIntervalSeconds)
+    {
+        float interval = Mathf.Max(0.01f, burnIntervalSeconds);
+        float total = 0f;
+
+        for (int i = 0; i < activeStatuses.Count; i++)
+        {
+            ActiveStatus s = activeStatuses[i];
+            if (s.id != StatusId.Burn || s.stacks <= 0 || s.baseDamagePerTick <= 0f)
+            {
+                continue;
+            }
+
+            float dur = s.remainingDuration;
+            if (dur <= 0f)
+            {
+                continue;
+            }
+
+            float perTick = Mathf.Max(0f, s.baseDamagePerTick) * Mathf.Max(0, s.stacks);
+            if (perTick <= 0f)
+            {
+                continue;
+            }
+
+            float remainingTicks = dur / interval;
+            total += perTick * Mathf.Max(0f, remainingTicks);
+        }
+
+        return total;
     }
 
     private void ShowStatusApplied(StatusId id)
@@ -896,15 +1578,114 @@ public class StatusController : MonoBehaviour
         }
     }
 
-    public void AddStatus(StatusId id, int stacks, float durationSeconds = -1f)
+    private float GetMaxRemainingDuration(StatusId id)
+    {
+        float max = 0f;
+        bool hasAny = false;
+
+        for (int i = 0; i < activeStatuses.Count; i++)
+        {
+            ActiveStatus s = activeStatuses[i];
+            if (s.id != id || s.stacks <= 0)
+            {
+                continue;
+            }
+
+            if (s.remainingDuration < 0f)
+            {
+                return -1f;
+            }
+
+            hasAny = true;
+            if (s.remainingDuration > max)
+            {
+                max = s.remainingDuration;
+            }
+        }
+
+        return hasAny ? max : 0f;
+    }
+
+    private void TryApplyFreezeFromSlow()
+    {
+        if (HasStatus(StatusId.Freeze))
+        {
+            return;
+        }
+
+        int slowStacks = GetStacks(StatusId.Slow);
+        if (slowStacks < 4)
+        {
+            return;
+        }
+
+        float duration = GetMaxRemainingDuration(StatusId.Slow);
+        if (duration == 0f)
+        {
+            return;
+        }
+
+        AddStatus(StatusId.Freeze, 1, duration);
+    }
+
+    private void TryApplyImmolationFromBurn(int previousBurnStacks)
+    {
+        if (HasStatus(StatusId.Immolation))
+        {
+            return;
+        }
+
+        if (previousBurnStacks >= 4)
+        {
+            return;
+        }
+
+        int burnStacks = GetStacks(StatusId.Burn);
+        if (burnStacks < 4)
+        {
+            return;
+        }
+
+        float duration = GetMaxRemainingDuration(StatusId.Burn);
+        if (duration == 0f)
+        {
+            return;
+        }
+
+        AddStatus(StatusId.Immolation, 1, duration);
+    }
+
+    public void AddStatus(StatusId id, int stacks, float durationSeconds = -1f, float baseDamagePerTick = 0f, ProjectileCards sourceCard = null, int sourceKey = 0)
     {
         if (stacks <= 0)
         {
             return;
         }
 
+        int previousStacks = 0;
+        if (id == StatusId.Burn || id == StatusId.Slow)
+        {
+            previousStacks = GetStacks(id);
+        }
+
+        if (id == StatusId.Burn || id == StatusId.Slow)
+        {
+            int current = previousStacks;
+            int max = 4;
+            int allowed = Mathf.Max(0, max - current);
+            if (allowed <= 0)
+            {
+                return;
+            }
+            stacks = Mathf.Min(stacks, allowed);
+        }
+
         float resolvedDuration = durationSeconds;
-        if (durationSeconds < 0f)
+        if (durationSeconds <= -9999f)
+        {
+            resolvedDuration = -1f;
+        }
+        else if (durationSeconds < 0f)
         {
             if (StatusControllerManager.Instance != null)
             {
@@ -944,6 +1725,8 @@ public class StatusController : MonoBehaviour
             }
         }
 
+        bool useIndependentInstances = UsesIndependentDurationInstances(id, resolvedDuration);
+
         if (id != StatusId.Absolution)
         {
             ActiveStatus absolution = activeStatuses.Find(s => s.id == StatusId.Absolution);
@@ -958,10 +1741,15 @@ public class StatusController : MonoBehaviour
             }
         }
 
+        // HATRED-from-debuffs: only allow debuffs to add extra HATRED stacks
+        // if this unit ALREADY has at least 1 HATRED stack (e.g. granted by a
+        // Favour or other external system). Normal enemies that spawn with 0
+        // HATRED will NOT gain stacks just from taking debuffs.
         if (IsDebuff(id))
         {
             EnemyHealth enemy = GetComponent<EnemyHealth>() ?? GetComponentInParent<EnemyHealth>();
-            if (enemy != null)
+            int currentHatredStacks = GetStacks(StatusId.Hatred);
+            if (enemy != null && currentHatredStacks > 0)
             {
                 if (hatredDebuffSources == null)
                 {
@@ -973,18 +1761,7 @@ public class StatusController : MonoBehaviour
                     hatredDebuffSources.Add(id);
 
                     int hatredIndex = activeStatuses.FindIndex(s => s.id == StatusId.Hatred);
-                    if (hatredIndex < 0)
-                    {
-                        ActiveStatus hatredStatus = new ActiveStatus
-                        {
-                            id = StatusId.Hatred,
-                            stacks = 1,
-                            remainingDuration = -1f,
-                            tickTimer = 0f
-                        };
-                        activeStatuses.Add(hatredStatus);
-                    }
-                    else
+                    if (hatredIndex >= 0)
                     {
                         ActiveStatus hatredStatus = activeStatuses[hatredIndex];
                         hatredStatus.stacks += 1;
@@ -995,7 +1772,60 @@ public class StatusController : MonoBehaviour
             }
         }
 
-        ActiveStatus status = activeStatuses.Find(s => s.id == id);
+        if (useIndependentInstances)
+        {
+            if (id == StatusId.Acceleration && stacks > 1)
+            {
+                for (int i = 0; i < stacks; i++)
+                {
+                    ActiveStatus newStatus = new ActiveStatus
+                    {
+                        id = id,
+                        stacks = 1,
+                        remainingDuration = resolvedDuration,
+                        tickTimer = 0f,
+                        baseDamagePerTick = baseDamagePerTick,
+                        sourceKey = sourceKey,
+                        sourceCard = sourceCard
+                    };
+                    activeStatuses.Add(newStatus);
+                }
+            }
+            else
+            {
+                ActiveStatus newStatus = new ActiveStatus
+                {
+                    id = id,
+                    stacks = stacks,
+                    remainingDuration = resolvedDuration,
+                    tickTimer = 0f,
+                    baseDamagePerTick = baseDamagePerTick,
+                    sourceKey = sourceKey,
+                    sourceCard = sourceCard
+                };
+                activeStatuses.Add(newStatus);
+            }
+
+            ShowStatusApplied(id);
+            NotifyStatusAppliedToFavours(id);
+            SpawnStatusOnApplyEffect(id);
+
+            if (id == StatusId.Slow)
+            {
+                if (previousStacks < 4 && GetStacks(StatusId.Slow) >= 4)
+                {
+                    TryApplyFreezeFromSlow();
+                }
+            }
+            else if (id == StatusId.Burn)
+            {
+                TryApplyImmolationFromBurn(previousStacks);
+            }
+            return;
+        }
+
+        ActiveStatus status = activeStatuses.Find(s => s.id == id && s.sourceKey == sourceKey);
+
         if (status == null)
         {
             status = new ActiveStatus
@@ -1003,13 +1833,28 @@ public class StatusController : MonoBehaviour
                 id = id,
                 stacks = stacks,
                 remainingDuration = resolvedDuration,
-                tickTimer = 0f
+                tickTimer = 0f,
+                baseDamagePerTick = baseDamagePerTick,
+                sourceKey = sourceKey,
+                sourceCard = sourceCard
             };
             activeStatuses.Add(status);
 
             ShowStatusApplied(id);
             NotifyStatusAppliedToFavours(id);
             SpawnStatusOnApplyEffect(id);
+
+            if (id == StatusId.Slow)
+            {
+                if (previousStacks < 4 && GetStacks(StatusId.Slow) >= 4)
+                {
+                    TryApplyFreezeFromSlow();
+                }
+            }
+            else if (id == StatusId.Burn)
+            {
+                TryApplyImmolationFromBurn(previousStacks);
+            }
         }
         else
         {
@@ -1025,9 +1870,32 @@ public class StatusController : MonoBehaviour
                     status.remainingDuration = Mathf.Max(status.remainingDuration, resolvedDuration);
                 }
             }
+
+            if (baseDamagePerTick > 0f)
+            {
+                status.baseDamagePerTick = Mathf.Max(status.baseDamagePerTick, baseDamagePerTick);
+            }
+
+            if (sourceCard != null)
+            {
+                status.sourceCard = sourceCard;
+            }
+
             ShowStatusApplied(id);
             NotifyStatusAppliedToFavours(id);
             SpawnStatusOnApplyEffect(id);
+
+            if (id == StatusId.Slow)
+            {
+                if (previousStacks < 4 && GetStacks(StatusId.Slow) >= 4)
+                {
+                    TryApplyFreezeFromSlow();
+                }
+            }
+            else if (id == StatusId.Burn)
+            {
+                TryApplyImmolationFromBurn(previousStacks);
+            }
         }
     }
 
@@ -1070,6 +1938,7 @@ public class StatusController : MonoBehaviour
             case StatusId.Wound:
             case StatusId.Amnesia:
             case StatusId.Weak:
+            case StatusId.Overweight:
                 return true;
             default:
                 return false;
@@ -1115,6 +1984,11 @@ public class StatusController : MonoBehaviour
                     StatusControllerManager.Instance.FreezeOnApplyEffectPrefab,
                     StatusControllerManager.Instance.FreezeOnApplyEffectSizeMultiplier);
                 break;
+            case StatusId.Immolation:
+                SpawnStatusEffectAtColliderCenter(
+                    StatusControllerManager.Instance.ImmolationOnApplyEffectPrefab,
+                    StatusControllerManager.Instance.ImmolationOnApplyEffectSizeMultiplier);
+                break;
         }
     }
 
@@ -1139,11 +2013,142 @@ public class StatusController : MonoBehaviour
 
     private void HandleOwnerDeath()
     {
-        if (GetStacks(StatusId.Freeze) <= 0)
+        if (GetStacks(StatusId.Freeze) > 0)
+        {
+            SpawnFreezeOnEndEffect();
+        }
+
+        if (!HasStatus(StatusId.Immolation))
         {
             return;
         }
 
-        SpawnFreezeOnEndEffect();
+        if (StatusControllerManager.Instance == null)
+        {
+            return;
+        }
+
+        float burnInterval = Mathf.Max(0.01f, StatusControllerManager.Instance.BurnTickIntervalSeconds);
+        float totalDamage = ComputeTotalRemainingBurnDamage(burnInterval);
+        if (totalDamage <= 0f)
+        {
+            return;
+        }
+
+        ProjectileCards lastSourceCard = null;
+        for (int i = 0; i < activeStatuses.Count; i++)
+        {
+            ActiveStatus s = activeStatuses[i];
+            if (s.id != StatusId.Burn || s.stacks <= 0 || s.baseDamagePerTick <= 0f)
+            {
+                continue;
+            }
+
+            if (s.sourceCard != null)
+            {
+                lastSourceCard = s.sourceCard;
+            }
+        }
+
+        bool isCrit = false;
+        PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
+        if (stats != null && stats.burnImmolationCanCrit)
+        {
+            float frenzyBonus = 0f;
+            if (StatusControllerManager.Instance != null)
+            {
+                StatusController playerStatus = stats.GetComponent<StatusController>();
+                if (playerStatus != null)
+                {
+                    int frenzyStacks = playerStatus.GetStacks(StatusId.Frenzy);
+                    if (frenzyStacks > 0)
+                    {
+                        frenzyBonus = StatusControllerManager.Instance.CritPerStack * frenzyStacks;
+                    }
+                }
+            }
+
+            float chance = Mathf.Clamp(stats.critChance + frenzyBonus + Mathf.Max(0f, stats.burnImmolationCritChanceBonus), 0f, 100f);
+            if (chance > 0f)
+            {
+                float roll = Random.Range(0f, 100f);
+                if (roll < chance)
+                {
+                    float critDamage = stats.critDamage + Mathf.Max(0f, stats.burnImmolationCritDamageBonusPercent);
+                    totalDamage *= Mathf.Max(0f, critDamage / 100f);
+                    isCrit = true;
+                }
+            }
+
+            stats.lastHitWasCrit = isCrit;
+            FavourEffectManager favourManager = stats.GetComponent<FavourEffectManager>();
+            if (favourManager != null)
+            {
+                ProjectileCards previousCard = favourManager.CurrentProjectileCard;
+                favourManager.CurrentProjectileCard = lastSourceCard;
+                favourManager.NotifyCritResolved(lastSourceCard, true, isCrit);
+                favourManager.CurrentProjectileCard = previousCard;
+            }
+        }
+
+        float radius = StatusControllerManager.Instance.ImmolationRadius;
+        if (radius <= 0f)
+        {
+            return;
+        }
+
+        SpawnStatusEffectAtColliderCenter(
+            StatusControllerManager.Instance.ImmolationOnDeathEffectPrefab,
+            StatusControllerManager.Instance.ImmolationOnDeathEffectSizeMultiplier);
+
+        Collider2D[] hits = Physics2D.OverlapCircleAll(transform.position, radius, LayerMask.GetMask("Enemy"));
+        if (hits == null || hits.Length == 0)
+        {
+            return;
+        }
+
+        DamageAoeScope.BeginAoeDamage();
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider2D col = hits[i];
+            if (col == null)
+            {
+                continue;
+            }
+
+            GameObject target = col.gameObject;
+            if (target == null || target == gameObject)
+            {
+                continue;
+            }
+
+            EnemyHealth eh = target.GetComponent<EnemyHealth>() ?? target.GetComponentInParent<EnemyHealth>();
+            if (eh == null || !eh.IsAlive)
+            {
+                continue;
+            }
+
+            if (lastSourceCard != null)
+            {
+                EnemyLastHitSource marker = eh.GetComponent<EnemyLastHitSource>();
+                if (marker == null)
+                {
+                    marker = eh.gameObject.AddComponent<EnemyLastHitSource>();
+                }
+                marker.lastProjectileCard = lastSourceCard;
+            }
+
+            Vector3 pos = col.bounds.center;
+            StatusDamageScope.BeginStatusTick(DamageNumberManager.DamageType.Fire, true);
+            eh.TakeDamage(totalDamage, pos, Vector3.zero);
+            float resolved = StatusDamageScope.LastResolvedDamage;
+            StatusDamageScope.EndStatusTick();
+
+            if (DamageNumberManager.Instance != null && resolved > 0f)
+            {
+                DamageNumberManager.Instance.ShowDamage(resolved, pos, DamageNumberManager.DamageType.Fire, isCrit, true);
+            }
+        }
+        DamageAoeScope.EndAoeDamage();
     }
 }

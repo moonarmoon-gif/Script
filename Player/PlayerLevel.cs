@@ -5,8 +5,8 @@ public class PlayerLevel : MonoBehaviour
 {
     [Header("Level Settings")]
     [SerializeField] private int currentLevel = 1;
-    [SerializeField] private int currentExp = 0;
-    [SerializeField] private int expToNextLevel = 100;
+    [SerializeField] private float currentExp = 0f;
+    [SerializeField] private float expToNextLevel = 100f;
     [SerializeField] private int baseExpRequirement = 100;
     [SerializeField] private float expScalingFactor = 1.5f;
     
@@ -34,9 +34,11 @@ public class PlayerLevel : MonoBehaviour
 
     // Properties
     public int CurrentLevel => currentLevel;
-    public int CurrentExp => currentExp;
-    public int ExpToNextLevel => expToNextLevel;
-    public float ExpProgress => (float)currentExp / expToNextLevel;
+    public int CurrentExp => Mathf.RoundToInt(currentExp);
+    public int ExpToNextLevel => Mathf.RoundToInt(expToNextLevel);
+    public float CurrentExpExact => currentExp;
+    public float ExpToNextLevelExact => expToNextLevel;
+    public float ExpProgress => expToNextLevel <= 0f ? 0f : currentExp / expToNextLevel;
 
     private void Awake()
     {
@@ -60,7 +62,7 @@ public class PlayerLevel : MonoBehaviour
         
         // Initialize exp requirement for level 1
         CalculateExpRequirement();
-        OnExpChanged?.Invoke(currentExp, expToNextLevel, currentLevel);
+        OnExpChanged?.Invoke(CurrentExp, ExpToNextLevel, currentLevel);
         
         Debug.Log($"<color=cyan>PlayerLevel initialized: Level {currentLevel}, EXP {currentExp}/{expToNextLevel}</color>");
     }
@@ -70,7 +72,12 @@ public class PlayerLevel : MonoBehaviour
     /// </summary>
     public void GainExperience(int amount)
     {
-        if (amount <= 0) return;
+        GainExperience((float)amount);
+    }
+
+    public void GainExperience(float amount)
+    {
+        if (amount <= 0f) return;
         
         // Check if exp gain is disabled
         if (!expGainEnabled)
@@ -82,10 +89,10 @@ public class PlayerLevel : MonoBehaviour
         // Apply experience multiplier from PlayerStats if it exists
         PlayerStats playerStats = GetComponent<PlayerStats>();
         float multiplier = playerStats != null ? playerStats.experienceMultiplier : 1f;
-        int actualAmount = Mathf.RoundToInt(amount * multiplier);
+        float actualAmount = amount * multiplier;
 
         currentExp += actualAmount;
-        Debug.Log($"Gained {actualAmount} EXP! Current: {currentExp}/{expToNextLevel}");
+        Debug.Log($"Gained {actualAmount:F2} EXP! Current: {currentExp:F2}/{expToNextLevel:F2}");
 
         // Sync with PlayerStats
         if (playerStats != null)
@@ -99,7 +106,7 @@ public class PlayerLevel : MonoBehaviour
             LevelUp();
         }
 
-        OnExpChanged?.Invoke(currentExp, expToNextLevel, currentLevel);
+        OnExpChanged?.Invoke(CurrentExp, ExpToNextLevel, currentLevel);
     }
     
     /// <summary>
@@ -139,8 +146,12 @@ public class PlayerLevel : MonoBehaviour
         // Trigger card selection if CardSelectionManager exists
         if (CardSelectionManager.Instance != null)
         {
+            EnemySpawner enemySpawner = FindObjectOfType<EnemySpawner>();
             EnemyCardSpawner enemyCardSpawner = FindObjectOfType<EnemyCardSpawner>();
-            if (enemyCardSpawner != null && enemyCardSpawner.IsBossDeathCleanupInProgress)
+            bool bossCleanupInProgress = (enemySpawner != null && enemySpawner.IsBossDeathCleanupInProgress)
+                                        || (enemyCardSpawner != null && enemyCardSpawner.IsBossDeathCleanupInProgress);
+
+            if (bossCleanupInProgress)
             {
                 StartCoroutine(ShowLevelUpCardsWhenBossCleanupDone());
             }
@@ -159,8 +170,13 @@ public class PlayerLevel : MonoBehaviour
     {
         while (true)
         {
+            EnemySpawner enemySpawner = FindObjectOfType<EnemySpawner>();
             EnemyCardSpawner enemyCardSpawner = FindObjectOfType<EnemyCardSpawner>();
-            if (enemyCardSpawner == null || !enemyCardSpawner.IsBossDeathCleanupInProgress)
+
+            bool bossCleanupInProgress = (enemySpawner != null && enemySpawner.IsBossDeathCleanupInProgress)
+                                        || (enemyCardSpawner != null && enemyCardSpawner.IsBossDeathCleanupInProgress);
+
+            if (!bossCleanupInProgress)
             {
                 break;
             }
@@ -216,7 +232,7 @@ public class PlayerLevel : MonoBehaviour
         //   expScalingFactor = 0.5 -> 100, 150, 200, 250, 300, ...
         float clampedFactor = Mathf.Max(0f, expScalingFactor);
         float required = baseExpRequirement * (1f + clampedFactor * (currentLevel - 1));
-        expToNextLevel = Mathf.Max(1, Mathf.RoundToInt(required));
+        expToNextLevel = Mathf.Max(1f, required);
     }
 
     /// <summary>
@@ -256,9 +272,9 @@ public class PlayerLevel : MonoBehaviour
     public void ResetLevel()
     {
         currentLevel = 1;
-        currentExp = 0;
+        currentExp = 0f;
         CalculateExpRequirement();
-        OnExpChanged?.Invoke(currentExp, expToNextLevel, currentLevel);
+        OnExpChanged?.Invoke(CurrentExp, ExpToNextLevel, currentLevel);
         Debug.Log("Player level reset to 1");
     }
 }

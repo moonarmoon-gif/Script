@@ -32,13 +32,11 @@ public class SpellEffectController : MonoBehaviour
         this.casterEnemy = casterEnemy;
         this.casterSpellToken = casterSpellToken;
 
-        // Start independent coroutine
         StartCoroutine(SpellEffectRoutine());
     }
 
     IEnumerator SpellEffectRoutine()
     {
-        // Wait for damage delay
         yield return new WaitForSeconds(damageDelay);
 
         if (casterHealth == null || !casterHealth.IsAlive || casterEnemy == null || !casterEnemy.IsSpellActionTokenValid(casterSpellToken))
@@ -47,7 +45,6 @@ public class SpellEffectController : MonoBehaviour
             yield break;
         }
 
-        // Deal damage
         if (!hasDealtDamage && targetDamageable != null && targetDamageable.IsAlive && AdvancedPlayerController.Instance != null)
         {
             Vector3 playerPos = AdvancedPlayerController.Instance.transform.position;
@@ -58,20 +55,19 @@ public class SpellEffectController : MonoBehaviour
                 PlayerHealth.RegisterPendingAttacker(attacker);
             }
 
+            // IMPORTANT: This goes through PlayerHealth.TakeDamage pipeline (armor etc.)
             targetDamageable.TakeDamage(damage, playerPos, hitNormal);
+
             hasDealtDamage = true;
             Debug.Log($"<color=cyan>Spell effect dealt {damage} damage (independent timing)</color>");
         }
 
-        // Wait for remaining effect duration
         float remainingDuration = effectDuration - damageDelay;
         if (remainingDuration > 0)
         {
             yield return new WaitForSeconds(remainingDuration);
         }
 
-        // Destroy spell effect after duration completes
-        Debug.Log("<color=cyan>Spell effect duration complete - destroying</color>");
         Destroy(gameObject);
     }
 }

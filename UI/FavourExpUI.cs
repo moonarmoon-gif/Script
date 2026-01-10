@@ -6,6 +6,23 @@ public class FavourExpUI : MonoBehaviour
 {
     public static FavourExpUI Instance { get; private set; }
 
+    // NEW: global toggle for soul exp gain
+    public static bool SoulExpGainEnabled { get; private set; } = true;
+
+    public static void SetSoulExpGainEnabled(bool enabled)
+    {
+        SoulExpGainEnabled = enabled;
+
+        // Optional: persist it
+        // PlayerPrefs.SetInt("SoulExpGainEnabled", enabled ? 1 : 0);
+        // PlayerPrefs.Save();
+
+        if (Instance != null)
+        {
+            Instance.RefreshUI();
+        }
+    }
+
     [Header("Config")]
     [Tooltip("Base Soul required to gain the FIRST Soul level (Level 0 -> 1).")]
     [SerializeField] private float baseSoulRequirement = 100f;
@@ -24,7 +41,7 @@ public class FavourExpUI : MonoBehaviour
     [SerializeField] private TextMeshProUGUI soulExpText;
     [SerializeField] private Image fillImage;
 
-    [Header("Colors")] 
+    [Header("Colors")]
     [SerializeField] private Color soulColor = new Color(0.5f, 0.9f, 1f);
     [SerializeField] private Gradient soulGradient;
     [SerializeField] private bool useGradient = false;
@@ -47,6 +64,13 @@ public class FavourExpUI : MonoBehaviour
             return;
         }
         Instance = this;
+
+        // Optional: load persisted toggle
+        // if (PlayerPrefs.HasKey("SoulExpGainEnabled"))
+        // {
+        //     SoulExpGainEnabled = PlayerPrefs.GetInt("SoulExpGainEnabled", 1) == 1;
+        // }
+
         currentRequirement = GetRequirementForLevel(currentSoulLevel);
     }
 
@@ -99,7 +123,10 @@ public class FavourExpUI : MonoBehaviour
         {
             int displayCurrent = Mathf.RoundToInt(currentSoulExp);
             int displayRequirement = Mathf.RoundToInt(currentRequirement);
-            soulExpText.text = $"{displayCurrent} / {displayRequirement} Souls";
+
+            // NEW: add simple indicator when disabled
+            string disabledTag = SoulExpGainEnabled ? "" : " (DISABLED)";
+            soulExpText.text = $"{displayCurrent} / {displayRequirement} Souls{disabledTag}";
         }
 
         if (fillImage != null)
@@ -119,6 +146,12 @@ public class FavourExpUI : MonoBehaviour
     public void AddSoul(float amount)
     {
         if (amount <= 0f) return;
+
+        // NEW: global disable gate
+        if (!SoulExpGainEnabled)
+        {
+            return;
+        }
 
         var manager = CardSelectionManager.Instance;
         bool autoSystem = manager != null && manager.AutomaticLevelingFavourSystem;

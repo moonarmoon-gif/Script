@@ -9,6 +9,7 @@ public class ManaRefreshOnLowFavour : FavourEffect
 
     private PlayerMana playerMana;
     private EnemyCardSpawner enemyCardSpawner;
+    private EnemySpawner enemySpawner;
 
     private bool hasTriggeredThisPhase;
     private bool lastBossEventActive;
@@ -25,13 +26,19 @@ public class ManaRefreshOnLowFavour : FavourEffect
             playerMana = player.GetComponent<PlayerMana>();
         }
 
+        if (enemySpawner == null)
+        {
+            enemySpawner = Object.FindObjectOfType<EnemySpawner>();
+        }
+
         if (enemyCardSpawner == null)
         {
             enemyCardSpawner = Object.FindObjectOfType<EnemyCardSpawner>();
         }
 
         hasTriggeredThisPhase = false;
-        lastBossEventActive = enemyCardSpawner != null && enemyCardSpawner.IsBossEventActive;
+        lastBossEventActive = (enemySpawner != null && enemySpawner.IsBossEventActive)
+                              || (enemyCardSpawner != null && enemyCardSpawner.IsBossEventActive);
 
         // Mark this favour as one-time so it will not appear again in this run.
         if (sourceCard != null && CardSelectionManager.Instance != null)
@@ -61,22 +68,27 @@ public class ManaRefreshOnLowFavour : FavourEffect
             }
         }
 
-        // Lazy-acquire EnemyCardSpawner so we can observe boss event phases.
+        // Lazy-acquire spawners so we can observe boss event phases.
+        if (enemySpawner == null)
+        {
+            enemySpawner = Object.FindObjectOfType<EnemySpawner>();
+        }
+
         if (enemyCardSpawner == null)
         {
             enemyCardSpawner = Object.FindObjectOfType<EnemyCardSpawner>();
         }
 
         // Reset the one-per-phase trigger after each completed boss event
-        if (enemyCardSpawner != null)
+        bool bossActiveNow = (enemySpawner != null && enemySpawner.IsBossEventActive)
+                             || (enemyCardSpawner != null && enemyCardSpawner.IsBossEventActive);
+
+        if (lastBossEventActive && !bossActiveNow)
         {
-            bool bossActive = enemyCardSpawner.IsBossEventActive;
-            if (lastBossEventActive && !bossActive)
-            {
-                hasTriggeredThisPhase = false;
-            }
-            lastBossEventActive = bossActive;
+            hasTriggeredThisPhase = false;
         }
+
+        lastBossEventActive = bossActiveNow;
 
         // If we've already triggered in this phase, do nothing until reset
         if (hasTriggeredThisPhase)

@@ -8,17 +8,21 @@ public class PlayerProjectiles : MonoBehaviour
     [Header("Spawn Point")]
     [Tooltip("Custom spawn point for this projectile (overrides FirePoint from AdvancedPlayerController)")]
     [SerializeField] private Transform customSpawnPoint;
-    
+
     [Header("Motion")]
     [SerializeField] private float speed = 15f;
     [SerializeField] private float lifetimeSeconds = 5f;
-    
+
+    [Header("Offscreen Destruction")]
+    [Tooltip("Bonus destroy boundary size (world units). If projectile goes outside the camera bounds plus this value, it is destroyed immediately.")]
+    public float DestroyCameraOffset = 0f;
+
     [Header("Spawn Offset - Left Side")]
     [Tooltip("Spawn offset when firing left at angle ABOVE 45 degrees")]
     [SerializeField] private Vector2 offsetLeftAbove45 = Vector2.zero;
     [Tooltip("Spawn offset when firing left at angle BELOW 45 degrees")]
     [SerializeField] private Vector2 offsetLeftBelow45 = Vector2.zero;
-    
+
     [Header("Spawn Offset - Right Side")]
     [Tooltip("Spawn offset when firing right at angle ABOVE 45 degrees")]
     [SerializeField] private Vector2 offsetRightAbove45 = Vector2.zero;
@@ -36,6 +40,7 @@ public class PlayerProjectiles : MonoBehaviour
     // Instance-based cooldown tracking (per prefab type)
     private static System.Collections.Generic.Dictionary<string, float> lastFireTimes = new System.Collections.Generic.Dictionary<string, float>();
     private string prefabKey;
+
     public enum SpriteFacing2D { Right = 0, Up = 90, Left = 180, Down = 270 }
     [Header("Rotation")]
     [SerializeField] private SpriteFacing2D spriteFacing = SpriteFacing2D.Right;
@@ -94,8 +99,9 @@ public class PlayerProjectiles : MonoBehaviour
     private AudioSource _trailSource;
     private Coroutine _fadeOutRoutine;
     private float lastDamageTime = -999f;
-    private bool hasHitEnemy = false; // Track if we've already hit an enemy (for non-pierce projectiles)
-    private bool hasLaunched = false; // Track if Launch() has been called
+    private bool hasHitEnemy = false;
+    private bool hasLaunched = false;
+    private Camera mainCamera;
     private GameObject player;
     private FavourEffectManager favourEffectManager;
     private PlayerStats cachedPlayerStats;
@@ -113,15 +119,12 @@ public class PlayerProjectiles : MonoBehaviour
     {
         _rigidbody2D = GetComponent<Rigidbody2D>();
         _collider2D = GetComponent<Collider2D>();
-        
-        // Configure rigidbody for smooth piercing
+
         if (_rigidbody2D != null)
         {
             _rigidbody2D.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
-            // Don't freeze rotation for PlayerProjectiles as they need to rotate to velocity
         }
-        
-        // Ensure no physics material that could cause bouncing
+
         if (_collider2D != null && _collider2D.sharedMaterial != null)
         {
             if (_collider2D.sharedMaterial.bounciness > 0f)
@@ -129,13 +132,12 @@ public class PlayerProjectiles : MonoBehaviour
                 Debug.LogWarning($"<color=yellow>Projectile {gameObject.name} has bouncy physics material! This will interfere with piercing.</color>");
             }
         }
-        
+
         EnsureTrailAudioSource();
     }
 
     private void OnEnable()
     {
-        // _launched = false;
         if (_fadeOutRoutine != null)
         {
             StopCoroutine(_fadeOutRoutine);
@@ -151,6 +153,12 @@ public class PlayerProjectiles : MonoBehaviour
 
     private void Update()
     {
+        if (hasLaunched && IsOutsideCameraBounds())
+        {
+            Destroy(gameObject);
+            return;
+        }
+
         if (keepInitialRotation || _rigidbody2D == null) return;
         if (!rotateToVelocity) return;
 
@@ -167,18 +175,39 @@ public class PlayerProjectiles : MonoBehaviour
         transform.rotation = Quaternion.Euler(0f, 0f, newAngle);
     }
 
-    /// <summary>
-    /// Get the custom spawn point for this projectile (overrides FirePoint if set)
-    /// </summary>
+    private bool IsOutsideCameraBounds()
+    {
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+        }
+
+        if (mainCamera == null)
+        {
+            return false;
+        }
+
+        float halfHeight = mainCamera.orthographicSize;
+        float halfWidth = halfHeight * mainCamera.aspect;
+
+        Vector3 camPos = mainCamera.transform.position;
+        Vector3 pos = transform.position;
+
+        float offset = Mathf.Max(0f, DestroyCameraOffset);
+
+        float left = camPos.x - halfWidth - offset;
+        float right = camPos.x + halfWidth + offset;
+        float bottom = camPos.y - halfHeight - offset;
+        float top = camPos.y + halfHeight + offset;
+
+        return pos.x < left || pos.x > right || pos.y < bottom || pos.y > top;
+    }
+
     public Transform GetCustomSpawnPoint()
     {
         return customSpawnPoint;
     }
-    
-    /// <summary>
-    /// Get the spawn offset for this projectile type based on direction
-    /// IMPORTANT: This should ONLY be called BEFORE instantiating the projectile!
-    /// </summary>
+
     public Vector2 GetSpawnOffset(Vector2 direction)
     {
         if (hasLaunched)
@@ -186,12 +215,10 @@ public class PlayerProjectiles : MonoBehaviour
             Debug.LogError("<color=red>GetSpawnOffset() called AFTER Launch()! This causes mid-flight repositioning! Offset should be calculated BEFORE Instantiate()!</color>");
             return Vector2.zero;
         }
+
         float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
-        
-        // Normalize angle to 0-360
         if (angle < 0) angle += 360f;
-        
-        // Right side (0-90 or 270-360)
+
         if ((angle >= 0f && angle <= 90f) || (angle >= 270f && angle <= 360f))
         {
             if (angle >= 0f && angle <= 90f)
@@ -205,7 +232,6 @@ public class PlayerProjectiles : MonoBehaviour
                 return relativeAngle > 45f ? offsetRightAbove45 : offsetRightBelow45;
             }
         }
-        // Left side (90-270)
         else
         {
             if (angle >= 90f && angle <= 180f)
@@ -219,14 +245,14 @@ public class PlayerProjectiles : MonoBehaviour
                 return relativeAngle > 45f ? offsetLeftAbove45 : offsetLeftBelow45;
             }
         }
-        
+
         return Vector2.zero;
     }
 
     public void Launch(Vector2 direction, Collider2D colliderToIgnore, PlayerMana playerMana = null, bool skipCooldownCheck = false)
     {
-        hasLaunched = true; // Mark as launched to prevent offset adjustments
-        
+        hasLaunched = true;
+
         if (_rigidbody2D == null)
         {
             Debug.LogWarning("FireBolt missing Rigidbody2D.");
@@ -234,37 +260,29 @@ public class PlayerProjectiles : MonoBehaviour
             return;
         }
 
-        // Get card-specific modifiers
         ProjectileCards card = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
-        CardModifierStats modifiers = new CardModifierStats(); // Default values
-        
+        CardModifierStats modifiers = new CardModifierStats();
+
         if (card != null)
         {
             modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
             Debug.Log($"<color=cyan>PlayerProjectiles using modifiers from {card.cardName}</color>");
         }
 
-        // Apply card modifiers (NO PlayerStats here – we defer stats+favours per hit
-        // via PlayerDamageHelper so distance-based favours can use the actual
-        // enemy position on impact).
-        float finalSpeed = speed + modifiers.speedIncrease; // RAW value
-        float finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease; // RAW seconds
-        float finalCooldown = Mathf.Max(0.1f, cooldown * (1f - modifiers.cooldownReductionPercent / 100f)); // % from base
+        float finalSpeed = speed + modifiers.speedIncrease;
+        float finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease;
+        float finalCooldown = Mathf.Max(0.1f, cooldown * (1f - modifiers.cooldownReductionPercent / 100f));
         int finalManaCost = Mathf.Max(0, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
-        float finalDamage = damage + modifiers.damageFlat; // FLAT damage bonus per hit
-        
-        // Apply size multiplier
+        float finalDamage = damage + modifiers.damageFlat;
+
         if (modifiers.sizeMultiplier != 1f)
         {
             transform.localScale *= modifiers.sizeMultiplier;
-            
-            // Scale collider using utility with colliderSizeOffset
             ColliderScaler.ScaleCollider(_collider2D, modifiers.sizeMultiplier, colliderSizeOffset);
         }
-        
+
         Debug.Log($"<color=cyan>PlayerProjectile Modifiers Applied: Speed=+{modifiers.speedIncrease:F2}, Size={modifiers.sizeMultiplier:F2}x, DamageFlat=+{modifiers.damageFlat:F1}, Lifetime=+{modifiers.lifetimeIncrease:F2}s</color>");
 
-        // Cache player + stats for the unified damage pipeline.
         cachedPlayerStats = null;
         if (colliderToIgnore != null)
         {
@@ -276,25 +294,16 @@ public class PlayerProjectiles : MonoBehaviour
             cachedPlayerStats = colliderToIgnore.GetComponent<PlayerStats>();
         }
 
-        // Store damage after all card modifiers; PlayerDamageHelper will apply
-        // PlayerStats and favour effects per enemy hit.
         damage = finalDamage;
         baseDamageAfterCards = damage;
 
-        // Generate key based ONLY on projectile type (so all FireBolts/IceBlasts share same cooldown)
-        // CRITICAL: Don't include mana/damage in key - those change with modifiers!
         prefabKey = $"PlayerProjectile_{projectileType}";
-        
-        // Determine whether to use internal prefab cooldown (only when no card is attached)
         bool useInternalCooldown = (card == null);
 
-        // Only check cooldown/mana for first projectile in multi-spawn
         if (!skipCooldownCheck)
         {
-            // When no card drives this projectile (no ProjectileCards tag), fall back to prefab cooldown
             if (useInternalCooldown)
             {
-                // Check cooldown for this specific projectile type
                 if (lastFireTimes.ContainsKey(prefabKey))
                 {
                     if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
@@ -306,7 +315,6 @@ public class PlayerProjectiles : MonoBehaviour
                 }
             }
 
-            // Check mana with modified cost
             if (playerMana != null && !playerMana.Spend(finalManaCost))
             {
                 Debug.Log($"Not enough mana for FireBolt (cost: {finalManaCost})");
@@ -314,7 +322,6 @@ public class PlayerProjectiles : MonoBehaviour
                 return;
             }
 
-            // Record fire time only when using internal prefab cooldown
             if (useInternalCooldown)
             {
                 lastFireTimes[prefabKey] = Time.time;
@@ -324,6 +331,14 @@ public class PlayerProjectiles : MonoBehaviour
         {
             Debug.Log($"<color=gold>PlayerProjectiles: Skipping cooldown/mana check (multi-projectile spawn)</color>");
         }
+
+        // NEW: ensure pre-roll is locked in at launch for ALL projectiles (manual + auto).
+        PredeterminedStatusRoll pre = GetComponent<PredeterminedStatusRoll>();
+        if (pre == null)
+        {
+            pre = gameObject.AddComponent<PredeterminedStatusRoll>();
+        }
+        pre.EnsureRolled();
 
         if (_collider2D != null && colliderToIgnore != null)
         {
@@ -345,41 +360,39 @@ public class PlayerProjectiles : MonoBehaviour
         StartTrailSfx();
     }
 
+    // NEW: used by AdvancedPlayerController to estimate hit travel time for incoming prediction
+    public float GetProjectileSpeed()
+    {
+        return speed;
+    }
+
     private void OnTriggerEnter2D(Collider2D other)
     {
-        // Trigger-based collision for piercing projectiles (no bouncing)
         ProjectilePiercing piercing = GetComponent<ProjectilePiercing>();
         bool allowPierce = piercing != null && piercing.pierceCount > 0;
-        
+
         if (((1 << other.gameObject.layer) & enemyLayer) != 0)
         {
-            // For NON-piercing projectiles (no ProjectilePiercing or pierceCount <= 0),
-            // ensure we only ever damage a single enemy. This prevents a single
-            // projectile from "AOE"-ing multiple tightly packed enemies just because
-            // multiple trigger events fire in the same frame.
             if (!allowPierce && hasHitEnemy)
             {
                 return;
             }
 
-            // If has piercing and already hit this enemy, ignore
             if (allowPierce && piercing.HasHitEnemy(other.gameObject))
             {
                 return;
             }
-            
+
             IDamageable damageable = other.GetComponent<IDamageable>() ?? other.GetComponentInParent<IDamageable>();
-            
-            // Only damage if target is alive AND on-screen
+
             if (damageable != null && damageable.IsAlive)
             {
-                // Check if enemy is within damageable area (on-screen or slightly offscreen)
                 if (!OffscreenDamageChecker.CanTakeDamage(other.transform.position))
                 {
                     Debug.Log($"<color=yellow>PlayerProjectile: Enemy {other.gameObject.name} too far offscreen, no damage dealt</color>");
                     return;
                 }
-                
+
                 Vector3 hitPoint = other.ClosestPoint(transform.position);
                 Vector3 hitNormal = (transform.position - other.transform.position).normalized;
                 Vector3 effectBasePosition = hitPoint;
@@ -399,9 +412,6 @@ public class PlayerProjectiles : MonoBehaviour
                     finalDamage = PlayerDamageHelper.ComputeProjectileDamage(cachedPlayerStats, enemyObject, baseForHit, gameObject);
                 }
 
-                // Tag EnemyHealth with the elemental damage type so it can
-                // display the correct-colored damage number (including 0 when
-                // armor/defense fully negate the hit).
                 EnemyHealth enemyHealth = other.GetComponent<EnemyHealth>() ?? other.GetComponentInParent<EnemyHealth>();
                 if (enemyHealth != null)
                 {
@@ -411,17 +421,9 @@ public class PlayerProjectiles : MonoBehaviour
                     enemyHealth.SetLastIncomingDamageType(damageType);
                 }
 
-                // Let EnemyHealth.ApplyDamage handle the final health change
-                // and numeric damage-number display based on the fully
-                // mitigated value.
                 damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
 
-                BurnEffect burnEffect = GetComponent<BurnEffect>();
-                if (burnEffect != null)
-                {
-                    burnEffect.Initialize(finalDamage, projectileType);
-                    burnEffect.TryApplyBurn(other.gameObject, hitPoint);
-                }
+                StatusController.TryApplyBurnFromProjectile(gameObject, other.gameObject, hitPoint, finalDamage);
 
                 SlowEffect slowEffect = GetComponent<SlowEffect>();
                 if (slowEffect != null)
@@ -434,22 +436,19 @@ public class PlayerProjectiles : MonoBehaviour
                 {
                     staticEffect.TryApplyStatic(other.gameObject, hitPoint);
                 }
-                
+
                 TryPlayHitEffect(effectBasePosition);
-                
-                // Handle piercing
+
                 if (allowPierce)
                 {
                     bool shouldContinue = piercing.OnEnemyHit(other.gameObject);
                     if (shouldContinue)
                     {
-                        // Continue through enemy - don't destroy
                         Debug.Log($"<color=green>Projectile piercing through enemy. Remaining: {piercing.GetRemainingPierces()}</color>");
                         return;
                     }
                 }
-                
-                // No piercing or max pierces reached - mark as having hit and destroy projectile
+
                 hasHitEnemy = true;
                 HandleImpact(hitPoint, hitNormal, other.transform);
                 Destroy(gameObject);
@@ -457,23 +456,17 @@ public class PlayerProjectiles : MonoBehaviour
             }
         }
     }
-    
+
     private void OnCollisionEnter2D(Collision2D collision)
     {
-        // Collision-based handler for non-piercing projectiles
         ProjectilePiercing piercing = GetComponent<ProjectilePiercing>();
-
-        // If has piercing component, use trigger-based collision instead
         if (piercing != null)
         {
-            // Ignore this collision, let OnTriggerEnter2D handle it
             return;
         }
 
-        // Enemy hit
         if (((1 << collision.gameObject.layer) & enemyLayer) != 0)
         {
-            // If we've already hit an enemy (no pierce), ignore subsequent collisions
             if (hasHitEnemy)
             {
                 Debug.Log($"<color=yellow>Projectile already hit an enemy, ignoring {collision.gameObject.name}</color>");
@@ -483,7 +476,6 @@ public class PlayerProjectiles : MonoBehaviour
             IDamageable damageable = collision.gameObject.GetComponent<IDamageable>() ??
                                      collision.gameObject.GetComponentInParent<IDamageable>();
 
-            // Check rigidbody state BEFORE collision
             Rigidbody2D enemyRb = collision.gameObject.GetComponent<Rigidbody2D>();
             if (enemyRb != null && enemyRb.bodyType != RigidbodyType2D.Kinematic)
             {
@@ -492,7 +484,6 @@ public class PlayerProjectiles : MonoBehaviour
 
             if (damageable != null && damageable.IsAlive)
             {
-                // Get hit point and normal from collision
                 Vector3 hitPoint = collision.GetContact(0).point;
                 Vector3 hitNormal = collision.GetContact(0).normal;
                 Vector3 effectBasePosition = hitPoint;
@@ -514,8 +505,6 @@ public class PlayerProjectiles : MonoBehaviour
                     finalDamage = PlayerDamageHelper.ComputeProjectileDamage(cachedPlayerStats, enemyObject, baseForHit, gameObject);
                 }
 
-                // Tag EnemyHealth with the elemental damage type so it can
-                // show the final damage (or 0) with the correct color.
                 EnemyHealth enemyHealth = collision.gameObject.GetComponent<EnemyHealth>() ?? collision.gameObject.GetComponentInParent<EnemyHealth>();
                 if (enemyHealth != null)
                 {
@@ -529,12 +518,7 @@ public class PlayerProjectiles : MonoBehaviour
                 lastDamageTime = Time.time;
                 hasHitEnemy = true;
 
-                BurnEffect burnEffect = GetComponent<BurnEffect>();
-                if (burnEffect != null)
-                {
-                    burnEffect.Initialize(finalDamage, projectileType);
-                    burnEffect.TryApplyBurn(collision.gameObject, hitPoint);
-                }
+                StatusController.TryApplyBurnFromProjectile(gameObject, collision.gameObject, hitPoint, finalDamage);
 
                 SlowEffect slowEffect = GetComponent<SlowEffect>();
                 if (slowEffect != null)
@@ -550,21 +534,18 @@ public class PlayerProjectiles : MonoBehaviour
 
                 TryPlayHitEffect(hitPoint);
 
-                // No piercing behaviour here; collision path is single-hit only
                 HandleImpact(hitPoint, hitNormal, collision.collider.transform);
                 Destroy(gameObject);
                 return;
             }
             else if (damageable != null && !damageable.IsAlive)
             {
-                // Target is already dead, just destroy unless some future pierce logic is added
                 Debug.Log($"<color=yellow>FireBolt hit dead enemy {collision.gameObject.name}, destroying</color>");
                 Destroy(gameObject);
                 return;
             }
         }
 
-        // Hit non-enemy object (wall, etc) - always destroy
         if (collision.contacts.Length > 0)
         {
             Vector3 hitPoint = collision.GetContact(0).point;

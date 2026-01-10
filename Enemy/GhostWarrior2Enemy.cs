@@ -157,7 +157,7 @@ public class GhostWarrior2Enemy : MonoBehaviour
             animator.GetBool("moving") || animator.GetBool("movingflip") ||
             animator.GetBool("running") || animator.GetBool("runningflip") ||
             animator.GetBool("dead") || animator.GetBool("deadflip") ||
-            animator.GetBool("attack") || animator.GetBool("attackflip");
+            animator.GetBool("attack"); // removed attackflip
 
         if (offsetDrivenByAnim != wasOffsetDrivenByAnim)
         {
@@ -180,7 +180,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
         float dt = Time.deltaTime;
         if (dt < 0f) dt = 0f;
 
-        // Update run-up timers
         if (!isRunningPhase)
         {
             initialWalkElapsed += dt;
@@ -193,13 +192,8 @@ public class GhostWarrior2Enemy : MonoBehaviour
         bool ismoving = rb.velocity.sqrMagnitude > 0.0001f && !isAttacking;
         bool isFlipped = spriteRenderer.flipX;
 
-        // IMPORTANT: Running bonus only builds while we are actually playing running/runningflip.
-        // Determine what our animator state SHOULD be this frame:
         bool shouldBeRunningAnim = ismoving && isRunningPhase;
-        bool playingRunningAnim = animator.GetBool("running") || animator.GetBool("runningflip");
 
-        // If running got interrupted (idle, stunned/knockback, attacking, pre-attack stop, etc.)
-        // reset the run speed bonus immediately.
         if (!shouldBeRunningAnim || isAttacking || Time.time < knockbackEndTime || preAttackDelayRoutine != null || preAttackDelayReady)
         {
             ResetRunSpeedBonus();
@@ -271,7 +265,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
                     attackOnCooldown = false;
                     animator.speed = 1f;
                     animator.SetBool("attack", false);
-                    animator.SetBool("attackflip", false);
                 }
             }
             else if (!wasInAttackRange)
@@ -290,12 +283,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
                 }
             }
 
-            // Only build bonus when:
-            // - running phase
-            // - not attacking
-            // - not in knockback
-            // - not in pre-attack stop
-            // - AND we are actually playing running anim (running or runningflip)
             bool canBuildRunningBonus =
                 isRunningPhase &&
                 !isAttacking &&
@@ -384,7 +371,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
         attackOnCooldown = false;
 
         animator.SetBool("attack", false);
-        animator.SetBool("attackflip", false);
 
         animator.SetBool("moving", false);
         animator.SetBool("movingflip", false);
@@ -418,8 +404,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
         isAttacking = false;
 
         animator.SetBool("attack", false);
-        animator.SetBool("attackflip", false);
-
         attackOnCooldown = false;
 
         ResetRunSpeedBonus();
@@ -453,12 +437,9 @@ public class GhostWarrior2Enemy : MonoBehaviour
         Vector3 toPlayer = AdvancedPlayerController.Instance.transform.position - transform.position;
         float distance = toPlayer.magnitude;
 
-        // Once in attack range and preparing to attack, stop moving so pre-attack uses idle instead of moving/running
         if ((preAttackDelayRoutine != null || preAttackDelayReady) && distance <= attackRange)
         {
             rb.velocity = Vector2.zero;
-
-            // stopping movement interrupts running bonus
             ResetRunSpeedBonus();
             return;
         }
@@ -466,8 +447,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
         if (distance <= stopDistance)
         {
             rb.velocity = Vector2.zero;
-
-            // stopping movement interrupts running bonus
             ResetRunSpeedBonus();
             return;
         }
@@ -487,25 +466,23 @@ public class GhostWarrior2Enemy : MonoBehaviour
         int myToken = BeginAttackAction();
         isAttacking = true;
 
-        // Attacking interrupts running bonus
         ResetRunSpeedBonus();
 
         float originalSpeed = animator.speed;
         animator.speed = attackAnimSpeed;
 
-        // Fix: always clear BOTH attack bools first so transitions are reliable from runningflip/idle/etc.
-        animator.SetBool("attack", false);
-        animator.SetBool("attackflip", false);
+        // Force idle off so it doesn't win over attack in the Animator Controller.
+        animator.SetBool("idle", false);
 
-        // Fix: also clear movement bools so we don't get stuck in runningflip when flipped
+        // IMPORTANT: Always use "attack" (there is no attackflip in this controller).
+        animator.SetBool("attack", false);
+
         animator.SetBool("moving", false);
         animator.SetBool("movingflip", false);
         animator.SetBool("running", false);
         animator.SetBool("runningflip", false);
 
-        bool isFlipped = spriteRenderer.flipX;
-        animator.SetBool("attack", !isFlipped);
-        animator.SetBool("attackflip", isFlipped);
+        animator.SetBool("attack", true);
 
         if (attackDamageDelayV2 > 0f)
         {
@@ -515,7 +492,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
         if (isDead || myToken != attackActionToken)
         {
             animator.SetBool("attack", false);
-            animator.SetBool("attackflip", false);
             animator.speed = originalSpeed;
             isAttacking = false;
             attackRoutine = null;
@@ -528,12 +504,14 @@ public class GhostWarrior2Enemy : MonoBehaviour
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
+
+            DamageAoeScope.BeginAoeDamage();
             playerDamageable.TakeDamage(attackDamageV2, hitPoint, hitNormal);
+            DamageAoeScope.EndAoeDamage();
         }
         else
         {
             animator.SetBool("attack", false);
-            animator.SetBool("attackflip", false);
             animator.speed = originalSpeed;
             isAttacking = false;
             attackRoutine = null;
@@ -550,7 +528,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
         if (isDead || myToken != attackActionToken)
         {
             animator.SetBool("attack", false);
-            animator.SetBool("attackflip", false);
             animator.speed = originalSpeed;
             isAttacking = false;
             attackRoutine = null;
@@ -558,7 +535,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
         }
 
         animator.SetBool("attack", false);
-        animator.SetBool("attackflip", false);
 
         animator.speed = originalSpeed;
         isAttacking = false;
@@ -610,7 +586,6 @@ public class GhostWarrior2Enemy : MonoBehaviour
         animator.SetBool("runningflip", false);
         animator.SetBool("idle", false);
         animator.SetBool("attack", false);
-        animator.SetBool("attackflip", false);
 
         rb.velocity = Vector2.zero;
         knockbackVelocity = Vector2.zero;

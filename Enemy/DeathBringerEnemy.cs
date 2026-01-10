@@ -25,24 +25,24 @@ public class DeathBringerEnemy : MonoBehaviour
     [Header("Spell Settings")]
     [Tooltip("ATTACKSPELL ANIMATION DURATION: How long DeathBringer's attackspell animation plays")]
     [SerializeField] private float spellAnimationDuration = 1f;
-    
+
     [Tooltip("SPELL DAMAGE DELAY: Delay for the SPELL EFFECT itself before dealing damage (independent of DeathBringer)")]
     [SerializeField] private float spellDamageDelay = 0.2f;
-    
+
     [SerializeField] private float spellDamage = 20f;
 
     [SerializeField] private float spellDamageDelayV2 = -1f;
     [SerializeField] private float spellDamageV2 = -1f;
-    
+
     [Tooltip("Projectile/effect to spawn on player's head")]
     [SerializeField] private GameObject spellEffectPrefab;
-    
+
     [Tooltip("Duration of the spawned spell effect animation")]
     [SerializeField] private float spellEffectDuration = 2f;
-    
+
     [Tooltip("Offset above player's head for spell effect")]
     [SerializeField] private Vector2 spellEffectOffset = new Vector2(0f, 1.5f);
-    
+
     [Tooltip("TELEPORT ANIMATION DURATION: How long the teleport animation plays")]
     [SerializeField] private float teleportAnimationDuration = 0.5f;
     [Tooltip("ARRIVAL ANIMATION DURATION: Duration of arrival animation (plays AFTER teleporting to new position)")]
@@ -52,7 +52,7 @@ public class DeathBringerEnemy : MonoBehaviour
     [SerializeField] private float postTeleportIdleTime = 0.5f;
     [Tooltip("Cooldown after teleporting before can cast spell again")]
     [SerializeField] private float teleportCooldown = 3f;
-    
+
     [Header("Teleport Position Offsets")]
     [Tooltip("Offset from player when teleporting to left side (X = horizontal, Y = vertical)")]
     [SerializeField] private Vector2 teleportOffsetLeft = new Vector2(-1.5f, 0f);
@@ -66,23 +66,31 @@ public class DeathBringerEnemy : MonoBehaviour
 
     [SerializeField] private float attackDamageV2 = -1f;
     [SerializeField] private float attackDamageDelayV2 = -1f;
-    
+
     [Header("Knockback Settings")]
     [Tooltip("Knockback force when hit by projectiles")]
     public float knockbackIntensity = 5f;
     [Tooltip("How long knockback lasts")]
     public float knockbackDuration = 0.2f;
-    
+
     [Header("References")]
     [SerializeField] private SpriteRenderer spriteRenderer;
     [SerializeField] private Rigidbody2D rb;
     [SerializeField] private Animator animator;
     [SerializeField] private CapsuleCollider2D capsuleCollider;
 
+    // NEW: prevent Collapse pull / physics drift during teleport phases
+    [Header("Teleport Physics Lock")]
+    [SerializeField] private bool lockPhysicsDuringTeleport = true;
+
+    [Header("Spell/Teleport Mass")]
+    public float spellTeleportMass = 150f;
+
     private EnemyHealth health;
     private StatusController statusController;
     private IDamageable playerDamageable;
     private bool isDead;
+    private bool isPlayerDead;
     private bool isAttacking;
     private bool isCastingSpell;
     private bool attackOnCooldown;
@@ -98,6 +106,11 @@ public class DeathBringerEnemy : MonoBehaviour
     private int attackActionToken = 0;
     private int spellActionToken = 0;
 
+    // Cache original bodyType to restore after teleport locks.
+    private RigidbodyType2D originalBodyType;
+    private float originalMass;
+    private bool hasOriginalMass;
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -112,12 +125,19 @@ public class DeathBringerEnemy : MonoBehaviour
         Physics2D.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Default"), true);
         Physics2D.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Enemy"), true);
 
+        if (rb != null)
+        {
+            originalBodyType = rb.bodyType;
+            originalMass = rb.mass;
+            hasOriginalMass = true;
+        }
+
         if (AdvancedPlayerController.Instance != null)
         {
             playerDamageable = AdvancedPlayerController.Instance.GetComponent<IDamageable>();
             AdvancedPlayerController.Instance.GetComponent<PlayerHealth>().OnDeath += OnPlayerDeath;
         }
-        
+
         spriteFlipOffset = GetComponent<SpriteFlipOffset>();
 
         if (attackDamageV2 < 0f)
@@ -137,6 +157,26 @@ public class DeathBringerEnemy : MonoBehaviour
         {
             spellDamageDelayV2 = spellDamageDelay;
         }
+    }
+
+    private void ApplySpellTeleportMass()
+    {
+        if (rb == null || !hasOriginalMass)
+        {
+            return;
+        }
+
+        rb.mass = Mathf.Max(0.0001f, spellTeleportMass);
+    }
+
+    private void RestoreOriginalMass()
+    {
+        if (rb == null || !hasOriginalMass)
+        {
+            return;
+        }
+
+        rb.mass = originalMass;
     }
 
     private int BeginAttackAction()
@@ -165,7 +205,7 @@ public class DeathBringerEnemy : MonoBehaviour
     {
         return !isDead && token == spellActionToken;
     }
-    
+
     void Start()
     {
         // DISABLED: Don't auto-sync invertFlip - let user set it manually in SpriteFlipOffset Inspector
@@ -178,7 +218,7 @@ public class DeathBringerEnemy : MonoBehaviour
             Debug.Log("<color=purple>DeathBringer: Recaptured SpriteFlipOffset base offsets after spawn</color>");
         }
     }
-    
+
     void OnEnable() => health.OnDeath += HandleDeath;
 
     void OnDisable()
@@ -196,8 +236,20 @@ public class DeathBringerEnemy : MonoBehaviour
 
     void Update()
     {
-        if (isDead || AdvancedPlayerController.Instance == null) return;
-        
+        if (isDead) return;
+
+        if (isPlayerDead || (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead))
+        {
+            ForceIdleState();
+            return;
+        }
+
+        if (AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
+        {
+            ForceIdleState();
+            return;
+        }
+
         // CRITICAL: Ensure collider is always enabled when alive
         if (!isDead && !capsuleCollider.enabled)
         {
@@ -251,11 +303,11 @@ public class DeathBringerEnemy : MonoBehaviour
 
         // Update animator - handle moving/movingflip based on flip state
         bool isMoving = rb.velocity.sqrMagnitude > 0.0001f && !isAttacking && !isCastingSpell;
-        
+
         // CRITICAL: Since DeathBringer uses invertFlip, we need to check the ACTUAL flip state
         // When invertFlip is true, the sprite is flipped when flipX is FALSE (inverted logic)
         bool isFlipped = spriteRenderer.flipX;
-        
+
         if (isMoving)
         {
             animator.SetBool("moving", !isFlipped);      // Normal moving when NOT flipped
@@ -292,7 +344,25 @@ public class DeathBringerEnemy : MonoBehaviour
 
     void OnPlayerDeath()
     {
-        rb.velocity = Vector2.zero;
+        isPlayerDead = true;
+
+        if (rb != null)
+        {
+            rb.velocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+            rb.bodyType = RigidbodyType2D.Static;
+        }
+
+        // Prevent Collapse from forcing walk animations after the player is dead.
+        // (Collapse will keep calling SetPulled if the component exists, so we ensure
+        // a disabled component is present to block LateUpdate overrides.)
+        CollapsePullController pullController = GetComponent<CollapsePullController>();
+        if (pullController == null)
+        {
+            pullController = gameObject.AddComponent<CollapsePullController>();
+        }
+        pullController.enabled = false;
+
         if (attackRoutine != null)
         {
             StopCoroutine(attackRoutine);
@@ -314,6 +384,35 @@ public class DeathBringerEnemy : MonoBehaviour
         animator.SetBool("attack", false);
         animator.SetBool("attackspell", false);
         animator.SetBool("moving", false);
+        animator.SetBool("movingflip", false);
+        animator.SetBool("teleport", false);
+        animator.SetBool("arrival", false);
+        animator.SetBool("idle", true);
+    }
+
+    private void ForceIdleState()
+    {
+        if (rb != null)
+        {
+            rb.velocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+
+            if (rb.bodyType != RigidbodyType2D.Static)
+            {
+                rb.bodyType = RigidbodyType2D.Static;
+            }
+        }
+
+        if (animator != null)
+        {
+            animator.SetBool("moving", false);
+            animator.SetBool("movingflip", false);
+            animator.SetBool("attack", false);
+            animator.SetBool("attackspell", false);
+            animator.SetBool("teleport", false);
+            animator.SetBool("arrival", false);
+            animator.SetBool("idle", true);
+        }
     }
 
     void FixedUpdate()
@@ -321,6 +420,12 @@ public class DeathBringerEnemy : MonoBehaviour
         if (isDead)
         {
             rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (isPlayerDead || (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead))
+        {
+            ForceIdleState();
             return;
         }
 
@@ -338,15 +443,17 @@ public class DeathBringerEnemy : MonoBehaviour
 
     void MoveTowardsPlayer()
     {
-        if (AdvancedPlayerController.Instance == null || isDead) return;
+        if (isDead || isPlayerDead) return;
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead) return;
+        if (AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled) return;
 
         Vector3 toPlayer = AdvancedPlayerController.Instance.transform.position - transform.position;
         float distanceToPlayer = toPlayer.magnitude;
-        
+
         // Flip sprite based on direction (with invertFlip for backwards sprite)
         bool shouldFlip = toPlayer.x <= 0;
         spriteRenderer.flipX = invertFlip ? !shouldFlip : shouldFlip;
-        
+
         // Stop moving if within stop distance
         if (distanceToPlayer <= stopDistance)
         {
@@ -359,8 +466,28 @@ public class DeathBringerEnemy : MonoBehaviour
         {
             speedMult = statusController.GetEnemyMoveSpeedMultiplier();
         }
-        
+
         rb.velocity = toPlayer.normalized * (moveSpeed * speedMult);
+    }
+
+    private void SetTeleportPhysicsLock(bool locked)
+    {
+        if (!lockPhysicsDuringTeleport || rb == null) return;
+
+        if (locked)
+        {
+            // Zero out forces so Collapse can't drift/slide him mid-teleport.
+            rb.velocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+
+            // Static is safest: ignores forces.
+            rb.bodyType = RigidbodyType2D.Static;
+        }
+        else
+        {
+            // Restore default type
+            rb.bodyType = originalBodyType;
+        }
     }
 
     IEnumerator SpellRoutine()
@@ -369,43 +496,46 @@ public class DeathBringerEnemy : MonoBehaviour
         isCastingSpell = true;
         spellOnCooldown = true;
         rb.velocity = Vector2.zero;
-        
+
+        ApplySpellTeleportMass();
+
         // CRITICAL: Ensure collider stays enabled during spell casting
         capsuleCollider.enabled = true;
-        
+
         Debug.Log("<color=purple>DeathBringer: Casting spell (ranged)!</color>");
         animator.SetBool("attackspell", true);
-        
+
         // Wait for attackspell animation to complete
         yield return new WaitForSeconds(spellAnimationDuration);
 
         if (isDead || mySpellToken != spellActionToken)
         {
             animator.SetBool("attackspell", false);
+            RestoreOriginalMass();
             isCastingSpell = false;
             spellRoutine = null;
             spellOnCooldown = false;
             yield break;
         }
-        
+
         animator.SetBool("attackspell", false);
-        
+
         // IMMEDIATELY spawn spell effect (independent of DeathBringer's actions)
         if (playerDamageable != null && playerDamageable.IsAlive && AdvancedPlayerController.Instance != null)
         {
             Vector3 playerPos = AdvancedPlayerController.Instance.transform.position;
             Vector3 spellPos = playerPos + (Vector3)spellEffectOffset;
-            
+
             // Spawn spell effect with its own independent timing
             if (spellEffectPrefab != null)
             {
                 GameObject spellEffect = Instantiate(spellEffectPrefab, spellPos, Quaternion.identity);
-                
+
                 // Start independent coroutine for spell damage
                 StartCoroutine(SpellEffectDamageRoutine(spellEffect, mySpellToken));
             }
         }
-        
+
         // DeathBringer immediately teleports (doesn't wait for spell)
         // Wait for teleport delay BEFORE teleport animation (idle state)
         if (teleportDelay > 0)
@@ -417,41 +547,48 @@ public class DeathBringerEnemy : MonoBehaviour
 
             if (isDead || mySpellToken != spellActionToken)
             {
+                RestoreOriginalMass();
                 isCastingSpell = false;
                 spellRoutine = null;
                 spellOnCooldown = false;
                 yield break;
             }
         }
-        
+
         // Play teleport animation
         animator.SetBool("teleport", true);
-        // CRITICAL: Keep collider enabled during teleport
         capsuleCollider.enabled = true;
+
+        SetTeleportPhysicsLock(true);
         yield return new WaitForSeconds(teleportAnimationDuration);
         animator.SetBool("teleport", false);
 
         if (isDead || mySpellToken != spellActionToken)
         {
+            SetTeleportPhysicsLock(false);
+            RestoreOriginalMass();
             isCastingSpell = false;
             spellRoutine = null;
             spellOnCooldown = false;
             yield break;
         }
-        
+
         // Teleport to player's side
         TeleportToPlayerSide();
         lastTeleportTime = Time.time;
-        
-        // CRITICAL: Re-enable collider after teleport
+
         capsuleCollider.enabled = true;
-        
+
         // Play arrival animation
         animator.SetBool("arrival", true);
-        // CRITICAL: Keep collider enabled during arrival
         capsuleCollider.enabled = true;
         yield return new WaitForSeconds(arrivalAnimationDuration);
         animator.SetBool("arrival", false);
+
+        RestoreOriginalMass();
+
+        // Release lock after arrival so he doesn't get pulled mid-arrival either.
+        SetTeleportPhysicsLock(false);
 
         if (isDead || mySpellToken != spellActionToken)
         {
@@ -460,7 +597,7 @@ public class DeathBringerEnemy : MonoBehaviour
             spellOnCooldown = false;
             yield break;
         }
-        
+
         // Post-teleport idle (if duration > 0)
         if (postTeleportIdleTime > 0)
         {
@@ -470,70 +607,65 @@ public class DeathBringerEnemy : MonoBehaviour
 
             if (isDead || mySpellToken != spellActionToken)
             {
+                RestoreOriginalMass();
                 isCastingSpell = false;
                 spellRoutine = null;
                 spellOnCooldown = false;
                 yield break;
             }
         }
-        
+
         isCastingSpell = false;
         spellRoutine = null;
-        
-        // CRITICAL: Ensure collider is enabled after spell routine completes
+
         capsuleCollider.enabled = true;
-        
+
         // Start teleport cooldown
         yield return new WaitForSeconds(teleportCooldown);
         spellOnCooldown = false;
         Debug.Log("<color=purple>DeathBringer: Spell off cooldown!</color>");
     }
-    
+
     IEnumerator SpellRoutineInPlace()
     {
         int mySpellToken = BeginSpellAction();
         isCastingSpell = true;
         spellOnCooldown = true;
         rb.velocity = Vector2.zero;
-        
-        // CRITICAL: Ensure collider stays enabled during spell casting
+
+        ApplySpellTeleportMass();
+
         capsuleCollider.enabled = true;
-        
+
         Debug.Log("<color=purple>DeathBringer: Casting spell IN PLACE (melee range)!</color>");
         animator.SetBool("attackspell", true);
-        
-        // Wait for attackspell animation to complete
+
         yield return new WaitForSeconds(spellAnimationDuration);
 
         if (isDead || mySpellToken != spellActionToken)
         {
             animator.SetBool("attackspell", false);
+            RestoreOriginalMass();
             isCastingSpell = false;
             spellRoutine = null;
             spellOnCooldown = false;
             yield break;
         }
-        
+
         animator.SetBool("attackspell", false);
-        
-        // IMMEDIATELY spawn spell effect (independent of DeathBringer's actions)
+
         if (playerDamageable != null && playerDamageable.IsAlive && AdvancedPlayerController.Instance != null)
         {
             Vector3 playerPos = AdvancedPlayerController.Instance.transform.position;
             Vector3 spellPos = playerPos + (Vector3)spellEffectOffset;
-            
-            // Spawn spell effect with its own independent timing
+
             if (spellEffectPrefab != null)
             {
                 GameObject spellEffect = Instantiate(spellEffectPrefab, spellPos, Quaternion.identity);
-                
-                // Start independent coroutine for spell damage
                 StartCoroutine(SpellEffectDamageRoutine(spellEffect, mySpellToken));
             }
         }
-        
-        // DeathBringer immediately teleports (doesn't wait for spell)
-        // Wait for teleport delay BEFORE teleport animation (idle state)
+
         if (teleportDelay > 0)
         {
             animator.SetBool("idle", true);
@@ -543,41 +675,44 @@ public class DeathBringerEnemy : MonoBehaviour
 
             if (isDead || mySpellToken != spellActionToken)
             {
+                RestoreOriginalMass();
                 isCastingSpell = false;
                 spellRoutine = null;
                 spellOnCooldown = false;
                 yield break;
             }
         }
-        
-        // Play teleport animation
+
         animator.SetBool("teleport", true);
-        // CRITICAL: Keep collider enabled during teleport
         capsuleCollider.enabled = true;
+
+        SetTeleportPhysicsLock(true);
         yield return new WaitForSeconds(teleportAnimationDuration);
         animator.SetBool("teleport", false);
 
         if (isDead || mySpellToken != spellActionToken)
         {
+            SetTeleportPhysicsLock(false);
+            RestoreOriginalMass();
             isCastingSpell = false;
             spellRoutine = null;
             spellOnCooldown = false;
             yield break;
         }
-        
-        // Teleport to OPPOSITE side of player
+
         TeleportToOppositeSide();
         lastTeleportTime = Time.time;
-        
-        // CRITICAL: Re-enable collider after teleport
+
         capsuleCollider.enabled = true;
-        
-        // Play arrival animation
+
         animator.SetBool("arrival", true);
-        // CRITICAL: Keep collider enabled during arrival
         capsuleCollider.enabled = true;
         yield return new WaitForSeconds(arrivalAnimationDuration);
         animator.SetBool("arrival", false);
+
+        RestoreOriginalMass();
+
+        SetTeleportPhysicsLock(false);
 
         if (isDead || mySpellToken != spellActionToken)
         {
@@ -586,8 +721,7 @@ public class DeathBringerEnemy : MonoBehaviour
             spellOnCooldown = false;
             yield break;
         }
-        
-        // Post-teleport idle (if duration > 0)
+
         if (postTeleportIdleTime > 0)
         {
             animator.SetBool("idle", true);
@@ -602,136 +736,110 @@ public class DeathBringerEnemy : MonoBehaviour
                 yield break;
             }
         }
-        
+
         isCastingSpell = false;
         spellRoutine = null;
-        
-        // CRITICAL: Ensure collider is enabled after spell routine completes
+
         capsuleCollider.enabled = true;
-        
-        // Start teleport cooldown
+
         yield return new WaitForSeconds(teleportCooldown);
         spellOnCooldown = false;
         Debug.Log("<color=purple>DeathBringer: Spell off cooldown!</color>");
     }
 
-    /// <summary>
-    /// Independent coroutine for spell effect damage timing
-    /// Attached to spell effect itself so it persists even if DeathBringer dies
-    /// </summary>
     IEnumerator SpellEffectDamageRoutine(GameObject spellEffect, int mySpellToken)
     {
-        // Add independent component to spell effect to handle damage
         SpellEffectController controller = spellEffect.AddComponent<SpellEffectController>();
         controller.Initialize(spellDamageV2, spellDamageDelayV2, spellEffectDuration, playerDamageable, gameObject, transform.position, health, this, mySpellToken);
-        
-        yield break; // Exit immediately - controller handles everything
+        yield break;
     }
-    
+
     void TeleportToPlayerSide()
     {
         if (AdvancedPlayerController.Instance == null) return;
-        
+
         Vector3 playerPos = AdvancedPlayerController.Instance.transform.position;
-        
-        // Determine which side is closer (left or right)
+
         Vector3 leftPos = playerPos + new Vector3(teleportOffsetLeft.x, teleportOffsetLeft.y, 0f);
         Vector3 rightPos = playerPos + new Vector3(teleportOffsetRight.x, teleportOffsetRight.y, 0f);
-        
+
         float distToLeft = Vector3.Distance(transform.position, leftPos);
         float distToRight = Vector3.Distance(transform.position, rightPos);
-        
+
         bool teleportingToLeft = distToLeft < distToRight;
         Vector3 teleportPos = teleportingToLeft ? leftPos : rightPos;
-        
-        // IMPORTANT: Set position BEFORE flipping sprite
+
         transform.position = teleportPos;
-        
-        // CRITICAL: Ensure collider is enabled
+
         if (capsuleCollider != null)
         {
             capsuleCollider.enabled = true;
             Debug.Log($"<color=green>DeathBringer: Collider enabled = {capsuleCollider.enabled}</color>");
         }
-        
-        // CRITICAL: Force physics system to update collider position immediately
-        // Call multiple times to ensure it takes effect
+
         Physics2D.SyncTransforms();
         Physics2D.SyncTransforms();
-        
+
         Debug.Log($"<color=purple>DeathBringer teleported to {(teleportingToLeft ? "LEFT" : "RIGHT")} side at {teleportPos}</color>");
-        
-        // Determine flip state based on player direction
+
         Vector3 newToPlayer = playerPos - transform.position;
         bool shouldFlip = newToPlayer.x <= 0;
         bool newFlipState = invertFlip ? !shouldFlip : shouldFlip;
-        
+
         Debug.Log($"<color=purple>DeathBringer flip logic: toPlayer.x={newToPlayer.x}, shouldFlip={shouldFlip}, invertFlip={invertFlip}, newFlipState={newFlipState}</color>");
-        
-        // Change sprite flip state
+
         spriteRenderer.flipX = newFlipState;
-        
-        // Force reapply offset after teleport
+
         SpriteFlipOffset flipOffset = GetComponent<SpriteFlipOffset>();
         if (flipOffset != null)
         {
             flipOffset.ForceReapplyOffset();
             Debug.Log("<color=green>DeathBringer: Forced SpriteFlipOffset reapply after teleport</color>");
         }
-        
-        // CRITICAL: Sync physics again after all changes
+
         Physics2D.SyncTransforms();
     }
-    
+
     void TeleportToOppositeSide()
     {
         if (AdvancedPlayerController.Instance == null) return;
-        
+
         Vector3 playerPos = AdvancedPlayerController.Instance.transform.position;
         Vector3 currentOffset = transform.position - playerPos;
-        
-        // Teleport to opposite side with offsets
+
         bool isOnLeft = currentOffset.x < 0;
-        Vector3 teleportPos = isOnLeft ? 
-            playerPos + new Vector3(teleportOffsetRight.x, teleportOffsetRight.y, 0f) : 
-            playerPos + new Vector3(teleportOffsetLeft.x, teleportOffsetLeft.y, 0f);
-        
-        // IMPORTANT: Set position BEFORE flipping sprite
+        Vector3 teleportPos = isOnLeft
+            ? playerPos + new Vector3(teleportOffsetRight.x, teleportOffsetRight.y, 0f)
+            : playerPos + new Vector3(teleportOffsetLeft.x, teleportOffsetLeft.y, 0f);
+
         transform.position = teleportPos;
-        
-        // CRITICAL: Ensure collider is enabled
+
         if (capsuleCollider != null)
         {
             capsuleCollider.enabled = true;
             Debug.Log($"<color=green>DeathBringer: Collider enabled = {capsuleCollider.enabled}</color>");
         }
-        
-        // CRITICAL: Force physics system to update collider position immediately
-        // Call multiple times to ensure it takes effect
+
         Physics2D.SyncTransforms();
         Physics2D.SyncTransforms();
-        
+
         Debug.Log($"<color=purple>DeathBringer teleported to OPPOSITE side (was {(isOnLeft ? "LEFT" : "RIGHT")}, now {(isOnLeft ? "RIGHT" : "LEFT")}) at {teleportPos}</color>");
-        
-        // Determine flip state based on player direction
+
         Vector3 newToPlayer = playerPos - transform.position;
         bool shouldFlip = newToPlayer.x <= 0;
         bool newFlipState = invertFlip ? !shouldFlip : shouldFlip;
-        
+
         Debug.Log($"<color=purple>DeathBringer flip logic: toPlayer.x={newToPlayer.x}, shouldFlip={shouldFlip}, invertFlip={invertFlip}, newFlipState={newFlipState}</color>");
-        
-        // Change sprite flip state
+
         spriteRenderer.flipX = newFlipState;
-        
-        // Force reapply offset after teleport
+
         SpriteFlipOffset flipOffset = GetComponent<SpriteFlipOffset>();
         if (flipOffset != null)
         {
             flipOffset.ForceReapplyOffset();
             Debug.Log("<color=green>DeathBringer: Forced SpriteFlipOffset reapply after teleport</color>");
         }
-        
-        // CRITICAL: Sync physics again after all changes
+
         Physics2D.SyncTransforms();
     }
 
@@ -739,13 +847,12 @@ public class DeathBringerEnemy : MonoBehaviour
     {
         int myAttackToken = BeginAttackAction();
         isAttacking = true;
-        attackOnCooldown = true; // Set cooldown immediately to prevent attack spam
+        attackOnCooldown = true;
         hasDealtDamageThisAttack = false;
         animator.SetBool("attack", true);
         float originalSpeed = animator.speed;
         animator.speed = attackAnimSpeed;
 
-        // Wait for damage delay
         if (attackDamageDelayV2 > 0f)
         {
             yield return new WaitForSeconds(attackDamageDelayV2);
@@ -761,8 +868,7 @@ public class DeathBringerEnemy : MonoBehaviour
             yield break;
         }
 
-        // Deal damage
-        if (!hasDealtDamageThisAttack && playerDamageable != null && playerDamageable.IsAlive && 
+        if (!hasDealtDamageThisAttack && playerDamageable != null && playerDamageable.IsAlive &&
             AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
@@ -773,7 +879,6 @@ public class DeathBringerEnemy : MonoBehaviour
             Debug.Log($"<color=cyan>DeathBringer dealt {attackDamageV2} damage</color>");
         }
 
-        // Wait for rest of attack duration
         float remainingAttackTime = attackDuration - attackDamageDelayV2;
         if (remainingAttackTime > 0f)
         {
@@ -783,8 +888,7 @@ public class DeathBringerEnemy : MonoBehaviour
         animator.SetBool("attack", false);
         animator.speed = originalSpeed;
         isAttacking = false;
-        
-        // Set idle state during cooldown
+
         animator.SetBool("idle", true);
 
         float cooldown = attackCooldown;
@@ -800,10 +904,9 @@ public class DeathBringerEnemy : MonoBehaviour
         {
             yield return new WaitForSeconds(cooldown);
         }
-        
-        // Cooldown complete, exit idle
+
         animator.SetBool("idle", false);
-        
+
         attackOnCooldown = false;
         attackRoutine = null;
     }
@@ -819,13 +922,10 @@ public class DeathBringerEnemy : MonoBehaviour
         if (attackRoutine != null) StopCoroutine(attackRoutine);
         if (spellRoutine != null) StopCoroutine(spellRoutine);
 
-        // CRITICAL: Set death animation based on flip state
-        // DeathBringer uses invertFlip, so flipX logic is inverted
         bool isFlipped = spriteRenderer.flipX;
-        animator.SetBool("dead", !isFlipped);      // Normal death when NOT flipped
-        animator.SetBool("deadflip", isFlipped);   // Flipped death when flipped
-        
-        // Disable all other animation states
+        animator.SetBool("dead", !isFlipped);
+        animator.SetBool("deadflip", isFlipped);
+
         animator.SetBool("moving", false);
         animator.SetBool("movingflip", false);
         animator.SetBool("attack", false);
@@ -833,11 +933,11 @@ public class DeathBringerEnemy : MonoBehaviour
         animator.SetBool("idle", false);
         animator.SetBool("teleport", false);
         animator.SetBool("arrival", false);
-        
+
         rb.velocity = Vector2.zero;
         knockbackVelocity = Vector2.zero;
         rb.bodyType = RigidbodyType2D.Static;
-        
+
         capsuleCollider.enabled = false;
 
         Destroy(gameObject, deathCleanupDelay);
@@ -855,8 +955,8 @@ public class DeathBringerEnemy : MonoBehaviour
 
     public void ApplyKnockback(Vector2 direction, float force)
     {
-        if (isDead) return;
-        
+        if (isDead || isPlayerDead) return;
+
         knockbackVelocity = direction.normalized * force * knockbackIntensity;
         knockbackEndTime = Time.time + knockbackDuration;
 
@@ -884,15 +984,5 @@ public class DeathBringerEnemy : MonoBehaviour
         animator.SetBool("teleport", false);
         animator.SetBool("arrival", false);
         animator.SetBool("idle", false);
-        
-        // If knocked out of spell range and spell is off cooldown, allow recasting
-        if (!spellOnCooldown && AdvancedPlayerController.Instance != null)
-        {
-            float distAfterKnockback = Vector2.Distance(transform.position, AdvancedPlayerController.Instance.transform.position);
-            if (distAfterKnockback > attackRange && distAfterKnockback <= attackSpellRange)
-            {
-                Debug.Log("<color=purple>DeathBringer knocked back - will recast spell when in range</color>");
-            }
-        }
     }
 }

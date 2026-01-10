@@ -44,6 +44,9 @@ public class CardSelectionManager : MonoBehaviour
     [Tooltip("Delay after game freezes before showing card UI")]
     public float cardDisplayDelay = 0.5f;
 
+    public float EnemyCardDisplayDelay = 0.1f;
+    public float FavourCardDisplayDelay = 0.1f;
+
     [Header("Variant Selection Settings")]
     [Tooltip("Delay before showing the variant selection UI after an enhancement tier is reached (seconds, unscaled time)")]
     [SerializeField] private float variantSelectionDelay = 0.1f;
@@ -120,6 +123,14 @@ public class CardSelectionManager : MonoBehaviour
     private Queue<PendingVariantSelection> pendingVariantSelections = new Queue<PendingVariantSelection>();
     private bool processingVariantQueue = false;
 
+    private bool deferVariantSelections = false;
+
+    private Queue<List<BaseCard>> pendingExternalCardSelections = new Queue<List<BaseCard>>();
+    private bool processingExternalCardQueue = false;
+
+    private Queue<List<CombinedCard>> pendingExternalCombinedSelections = new Queue<List<CombinedCard>>();
+    private bool processingExternalCombinedQueue = false;
+
     // Ensure we only subscribe once to the enhancement tier event, even if
     // ProjectileCardLevelSystem is created after CardSelectionManager.
     private bool subscribedToTierEvents = false;
@@ -130,6 +141,98 @@ public class CardSelectionManager : MonoBehaviour
     private bool mineUsesAlternateElement = false;
     private bool pendingMineElementSelection = false;
     private ProjectileCards pendingMineCard = null;
+
+    private enum ExternalSelectionPriority
+    {
+        Core = 0,
+        Projectile = 1,
+        Favour = 2,
+        Enemy = 3,
+        Other = 4
+    }
+
+    private ExternalSelectionPriority GetExternalSelectionPriority(List<BaseCard> cards)
+    {
+        if (cards == null || cards.Count == 0)
+        {
+            return ExternalSelectionPriority.Other;
+        }
+
+        bool hasCore = false;
+        bool hasProjectile = false;
+        bool hasFavour = false;
+        bool hasEnemy = false;
+
+        for (int i = 0; i < cards.Count; i++)
+        {
+            BaseCard c = cards[i];
+            if (c == null) continue;
+
+            if (c is CoreCards)
+            {
+                hasCore = true;
+            }
+            else if (c is ProjectileCards)
+            {
+                hasProjectile = true;
+            }
+            else if (c is FavourCards)
+            {
+                hasFavour = true;
+            }
+            else if (c is EnemyCards)
+            {
+                hasEnemy = true;
+            }
+        }
+
+        if (hasCore) return ExternalSelectionPriority.Core;
+        if (hasProjectile) return ExternalSelectionPriority.Projectile;
+        if (hasFavour) return ExternalSelectionPriority.Favour;
+        if (hasEnemy) return ExternalSelectionPriority.Enemy;
+        return ExternalSelectionPriority.Other;
+    }
+
+    private List<BaseCard> DequeueNextExternalSelectionByPriority()
+    {
+        if (pendingExternalCardSelections == null || pendingExternalCardSelections.Count == 0)
+        {
+            return null;
+        }
+
+        List<BaseCard>[] batches = pendingExternalCardSelections.ToArray();
+
+        int bestIndex = -1;
+        int bestPriority = int.MaxValue;
+        for (int i = 0; i < batches.Length; i++)
+        {
+            int priority = (int)GetExternalSelectionPriority(batches[i]);
+            if (priority < bestPriority)
+            {
+                bestPriority = priority;
+                bestIndex = i;
+                if (bestPriority == (int)ExternalSelectionPriority.Core)
+                {
+                    break;
+                }
+            }
+        }
+
+        if (bestIndex < 0)
+        {
+            return pendingExternalCardSelections.Dequeue();
+        }
+
+        List<BaseCard> selected = batches[bestIndex];
+        pendingExternalCardSelections.Clear();
+        for (int i = 0; i < batches.Length; i++)
+        {
+            if (i == bestIndex) continue;
+            pendingExternalCardSelections.Enqueue(batches[i]);
+        }
+
+        return selected;
+    }
 
     private int GetPlayerLevelForGating()
     {
@@ -173,7 +276,11 @@ public class CardSelectionManager : MonoBehaviour
     /// </summary>
     public bool IsSelectionActive()
     {
-        return isSelectionActive;
+        return isSelectionActive ||
+               processingLevelUpQueue || pendingLevelUps.Count > 0 ||
+               processingVariantQueue || pendingVariantSelections.Count > 0 ||
+               processingExternalCombinedQueue || pendingExternalCombinedSelections.Count > 0 ||
+               processingExternalCardQueue || pendingExternalCardSelections.Count > 0;
     }
 
     public bool UseFavourSoulSystem
@@ -233,7 +340,11 @@ public class CardSelectionManager : MonoBehaviour
 
     public bool HasPendingLevelUpStages()
     {
-        return processingLevelUpQueue || pendingLevelUps.Count > 0 || isSelectionActive;
+        return processingLevelUpQueue || pendingLevelUps.Count > 0 ||
+               processingVariantQueue || pendingVariantSelections.Count > 0 ||
+               processingExternalCombinedQueue || pendingExternalCombinedSelections.Count > 0 ||
+               processingExternalCardQueue || pendingExternalCardSelections.Count > 0 ||
+               isSelectionActive;
     }
 
     public Color GetRarityColor(CardRarity rarity)
@@ -314,32 +425,78 @@ public class CardSelectionManager : MonoBehaviour
         }
     }
 
+    public void ForceCloseSelectionUI()
+    {
+        StopAllCoroutines();
+
+        if (cardSelectionUI != null)
+        {
+            cardSelectionUI.SetActive(false);
+        }
+
+        if (pauseGameOnSelection)
+        {
+            Time.timeScale = 1f;
+        }
+
+        isSelectionActive = false;
+        isFirstStage = false;
+        waitingForSecondStage = false;
+
+        pendingLevelUps.Clear();
+        pendingVariantSelections.Clear();
+        pendingExternalCardSelections.Clear();
+        pendingExternalCombinedSelections.Clear();
+
+        processingLevelUpQueue = false;
+        processingVariantQueue = false;
+        processingExternalCardQueue = false;
+        processingExternalCombinedQueue = false;
+
+        pendingMineElementSelection = false;
+        pendingMineCard = null;
+    }
+
     /// <summary>
     /// Show card selection UI - queues multiple level-ups
     /// </summary>
     public void ShowCardSelection()
     {
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            return;
+        }
+
         // Add to queue
         pendingLevelUps.Enqueue(1);
         
         // Start processing if not already processing
-        if (!processingLevelUpQueue)
+        if (!processingLevelUpQueue && !isSelectionActive)
         {
+            // Reset the two-stage selection state
+            isFirstStage = true;
+            waitingForSecondStage = false;
             StartCoroutine(ProcessLevelUpQueue());
         }
     }
     
     /// <summary>
-    /// Process queued level-ups one at a time
+    /// Process queued level-ups in batches.
+    /// For each batch, all CORE stages are shown first, then all PROJECTILE stages.
+    /// New level-ups that arrive while a batch is processing are handled in the
+    /// next batch once the current one completes.
     /// </summary>
     private IEnumerator ProcessLevelUpQueue()
     {
         processingLevelUpQueue = true;
-        
+
         while (pendingLevelUps.Count > 0)
         {
-            int batchCount = pendingLevelUps.Count;
-            for (int i = 0; i < batchCount; i++)
+            deferVariantSelections = true;
+
+            // Snapshot how many level-ups are currently pending and clear them
+            int totalLevels = pendingLevelUps.Count;
+            for (int i = 0; i < totalLevels; i++)
             {
                 if (pendingLevelUps.Count > 0)
                 {
@@ -347,48 +504,68 @@ public class CardSelectionManager : MonoBehaviour
                 }
             }
 
-            for (int i = 0; i < batchCount; i++)
+            // Process all CORE card stages for this batch
+            for (int i = 0; i < totalLevels; i++)
             {
-                // Give variant selections top priority. If a projectile card has
-                // just become enhanced and enqueued a variant choice, wait until
-                // the variant queue has finished before showing the next
-                // level-up stage.
-                while (processingVariantQueue || pendingVariantSelections.Count > 0)
+                // Wait for any variant selections to complete
+                while (processingVariantQueue)
                 {
                     yield return null;
                 }
 
                 yield return StartCoroutine(ShowSingleLevelUpStage(true));
-                if (i < batchCount - 1)
+
+                // Small delay between core card selections
+                if (i < totalLevels - 1)
                 {
                     yield return new WaitForSecondsRealtime(delayBetweenStages);
                 }
             }
 
-            if (enableTwoStageSelection)
+            // Now process all PROJECTILE card stages for this batch, if enabled
+            if (enableTwoStageSelection && totalLevels > 0)
             {
-                for (int i = 0; i < batchCount; i++)
+                // Small gap between finishing all cores and starting projectiles
+                yield return new WaitForSecondsRealtime(delayBetweenStages * 1.5f);
+
+                for (int i = 0; i < totalLevels; i++)
                 {
-                    // Same priority rule for the second (projectile) stage.
-                    while (processingVariantQueue || pendingVariantSelections.Count > 0)
+                    // Wait for any variant selections to complete
+                    while (processingVariantQueue)
                     {
                         yield return null;
                     }
 
                     yield return StartCoroutine(ShowSingleLevelUpStage(false));
-                    if (i < batchCount - 1)
+
+                    // Small delay between projectile card selections
+                    if (i < totalLevels - 1)
                     {
                         yield return new WaitForSecondsRealtime(delayBetweenStages);
                     }
                 }
             }
 
+            // After all Core + Projectile stages are complete, show any pending Variant cards.
+            deferVariantSelections = false;
+            if (!processingVariantQueue && pendingVariantSelections.Count > 0)
+            {
+                StartCoroutine(ProcessVariantSelectionQueue());
+            }
+
+            while (processingVariantQueue || pendingVariantSelections.Count > 0)
+            {
+                yield return null;
+            }
+
+            // If more level-ups accumulated during this batch, add a short
+            // delay before starting the next batch so the UI feels sequential.
             if (pendingLevelUps.Count > 0)
             {
                 yield return new WaitForSecondsRealtime(delayBetweenStages);
             }
         }
-        
+
         processingLevelUpQueue = false;
     }
     
@@ -397,6 +574,11 @@ public class CardSelectionManager : MonoBehaviour
     /// </summary>
     private IEnumerator ShowSingleLevelUpStage(bool isCoreStage)
     {
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            yield break;
+        }
+
         isSelectionActive = true;
         isFirstStage = isCoreStage;
         waitingForSecondStage = false;
@@ -407,6 +589,12 @@ public class CardSelectionManager : MonoBehaviour
         }
 
         yield return new WaitForSecondsRealtime(cardDisplayDelay);
+
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            ForceCloseSelectionUI();
+            yield break;
+        }
 
         bool excludeCommon = pendingNoCommonLevelUpStages > 0;
 
@@ -447,19 +635,43 @@ public class CardSelectionManager : MonoBehaviour
 
     private IEnumerator ShowCardsAfterDelay()
     {
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            yield break;
+        }
+
+        // Use the same delay as other card displays
         yield return new WaitForSecondsRealtime(cardDisplayDelay);
+
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            yield break;
+        }
 
         List<CombinedCard> selectedCards = GenerateRandomCombinedCards(cardsToShow, false);
 
         if (cardSelectionUI != null)
         {
             cardSelectionUI.SetActive(true);
+            
+            // Ensure the cards are visible
+            CanvasGroup canvasGroup = cardSelectionUI.GetComponent<CanvasGroup>();
+            if (canvasGroup != null)
+            {
+                canvasGroup.alpha = 1f;
+            }
+            
             DisplayCombinedCards(selectedCards);
         }
     }
 
     public IEnumerator ShowInitialActiveProjectileSelection(int count)
     {
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            yield break;
+        }
+
         while (isSelectionActive)
         {
             yield return null;
@@ -475,6 +687,12 @@ public class CardSelectionManager : MonoBehaviour
         }
 
         yield return new WaitForSecondsRealtime(cardDisplayDelay);
+
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            ForceCloseSelectionUI();
+            yield break;
+        }
 
         List<CombinedCard> cards = GenerateRandomActiveProjectileCards(count, true);
         if (cards.Count == 0)
@@ -1019,22 +1237,69 @@ public class CardSelectionManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Helper for selecting a Favour card whose BASE rarity is less than or equal
-    /// to the assigned rarity (projectile-style rule: can spawn at base or higher,
-    /// but never below base rarity).
+    /// Helper for selecting a Favour card of a given rarity from favourCardPool,
+    /// respecting per-card spawnChance, one-time flags, already-used cards, and
+    /// any internal pick limits declared on the favour effect itself.
     /// </summary>
     private FavourCards GetRandomFavourCardOfRarity(CardRarity targetRarity, HashSet<FavourCards> usedCards)
     {
-        var matching = favourCardPool
-            .Where(c => c != null && c.spawnChance > 0f && c.rarity == targetRarity && !usedCards.Contains(c) && !IsOneTimeFavourUsed(c))
-            .ToList();
-
-        if (matching.Count == 0)
+        if (favourCardPool == null || favourCardPool.Count == 0)
         {
             return null;
         }
 
-        return matching[Random.Range(0, matching.Count)];
+        List<FavourCards> candidates = favourCardPool
+            .Where(c => c != null
+                        && c.spawnChance > 0f
+                        && c.rarity == targetRarity
+                        && !usedCards.Contains(c)
+                        && !IsOneTimeFavourUsed(c))
+            .ToList();
+
+        // Enforce per-effect pick limits for ANY favour effect that implements
+        // IFavourPickLimit. This replaces the previous special case for
+        // ProjectileCooldownReductionFavour.
+        candidates.RemoveAll(card =>
+        {
+            if (card == null || card.favourEffect == null) return false;
+
+            IFavourPickLimit limited = card.favourEffect as IFavourPickLimit;
+            if (limited == null) return false;
+
+            return limited.IsAtPickLimit();
+        });
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        // Weighted random selection based on spawnChance
+        float totalWeight = 0f;
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            totalWeight += Mathf.Max(0f, candidates[i].spawnChance);
+        }
+
+        if (totalWeight <= 0f)
+        {
+            return candidates[Random.Range(0, candidates.Count)];
+        }
+
+        float roll = Random.Range(0f, totalWeight);
+        float accumulator = 0f;
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            float weight = Mathf.Max(0f, candidates[i].spawnChance);
+            accumulator += weight;
+            if (roll <= accumulator)
+            {
+                return candidates[i];
+            }
+        }
+
+        return candidates[candidates.Count - 1];
     }
 
     /// <summary>
@@ -1069,7 +1334,9 @@ public class CardSelectionManager : MonoBehaviour
             }
         }
 
-        float luck = Mathf.Max(0f, playerLuck);
+        // Effective luck is scaled down so that achieving the same rarity
+        // shift now requires roughly twice as much PlayerStats.luck as before.
+        float luck = Mathf.Max(0f, playerLuck) * 0.5f;
 
         // Base odds from inspector (should sum to ~100 via OnValidate)
         float baseCommon = commonOdds;
@@ -1509,7 +1776,7 @@ public class CardSelectionManager : MonoBehaviour
 
         pendingVariantSelections.Enqueue(pending);
 
-        if (!processingVariantQueue)
+        if (!processingVariantQueue && !deferVariantSelections)
         {
             StartCoroutine(ProcessVariantSelectionQueue());
         }
@@ -1556,11 +1823,22 @@ public class CardSelectionManager : MonoBehaviour
 
     private IEnumerator ShowVariantSelectionAfterDelay(ProjectileCards card, ProjectileVariantSet set, int tier)
     {
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            yield break;
+        }
+
         float elapsed = 0f;
         while (elapsed < variantSelectionDelay)
         {
             elapsed += Time.unscaledDeltaTime;
             yield return null;
+        }
+
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            ForceCloseSelectionUI();
+            yield break;
         }
 
         if (cardSelectionUI == null || cardContainer == null || variantSelectorCardButtonPrefab == null)
@@ -1585,6 +1863,8 @@ public class CardSelectionManager : MonoBehaviour
 
         cardSelectionUI.SetActive(true);
         isSelectionActive = true;
+        isFirstStage = false;
+        waitingForSecondStage = false;
 
         bool anyButtons = false;
 
@@ -1820,6 +2100,14 @@ public class CardSelectionManager : MonoBehaviour
         }
 
         yield return new WaitForSecondsRealtime(cardDisplayDelay);
+
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            pendingMineElementSelection = false;
+            pendingMineCard = null;
+            ForceCloseSelectionUI();
+            yield break;
+        }
 
         if (cardSelectionUI == null || cardContainer == null)
         {
@@ -2062,14 +2350,113 @@ public class CardSelectionManager : MonoBehaviour
 
     /// <summary>
     /// Show a list of BaseCard instances directly (used by EnemyCardSpawner and
-    /// Favour card flow).
+    /// Favour card flow). Calls are queued so they do not conflict with level-up
+    /// or variant selections and are processed sequentially.
     /// </summary>
     public void ShowCards(List<BaseCard> cards)
     {
+        if (cards == null || cards.Count == 0)
+        {
+            return;
+        }
+
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            return;
+        }
+
+        // Enqueue a copy so callers can safely reuse/modify their lists.
+        pendingExternalCardSelections.Enqueue(new List<BaseCard>(cards));
+
+        if (!processingExternalCardQueue)
+        {
+            StartCoroutine(ProcessExternalCardSelectionQueue());
+        }
+    }
+
+    private IEnumerator ProcessExternalCardSelectionQueue()
+    {
+        processingExternalCardQueue = true;
+
+        bool showedAny = false;
+
+        while (pendingExternalCardSelections.Count > 0)
+        {
+            // Wait for any level-up or variant selections, or any current card
+            // selection, to finish before showing the next external batch.
+            while (processingLevelUpQueue || pendingLevelUps.Count > 0 ||
+                   processingVariantQueue || pendingVariantSelections.Count > 0 ||
+                   processingExternalCombinedQueue || pendingExternalCombinedSelections.Count > 0 ||
+                   isSelectionActive)
+            {
+                if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+                {
+                    pendingExternalCardSelections.Clear();
+                    processingExternalCardQueue = false;
+                    yield break;
+                }
+
+                yield return null;
+            }
+
+            List<BaseCard> cards = DequeueNextExternalSelectionByPriority();
+            if (cards == null || cards.Count == 0)
+            {
+                continue;
+            }
+
+            if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+            {
+                continue;
+            }
+
+            if (showedAny && delayBetweenStages > 0f)
+            {
+                yield return new WaitForSecondsRealtime(delayBetweenStages);
+            }
+
+            ShowCardsImmediate(cards);
+            showedAny = true;
+
+            // Wait for the player to finish this selection.
+            while (isSelectionActive)
+            {
+                if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+                {
+                    ForceCloseSelectionUI();
+                    pendingExternalCardSelections.Clear();
+                    processingExternalCardQueue = false;
+                    yield break;
+                }
+
+                yield return null;
+            }
+        }
+
+        processingExternalCardQueue = false;
+    }
+
+    private void ShowCardsImmediate(List<BaseCard> cards)
+    {
+        if (cards == null || cards.Count == 0)
+        {
+            return;
+        }
+
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            return;
+        }
+
         if (cardSelectionUI == null || cardContainer == null)
         {
-            Debug.LogError("<color=red>CardSelectionManager: UI references not set!</color>");
+            Debug.LogError("<color=red>CardSelectionManager.ShowCards: UI references not assigned!</color>");
             return;
+        }
+
+        foreach (Transform child in cardContainer)
+        {
+            Destroy(child.gameObject);
         }
 
         if (pauseGameOnSelection)
@@ -2077,20 +2464,58 @@ public class CardSelectionManager : MonoBehaviour
             Time.timeScale = 0f;
         }
 
-        foreach (Transform child in cardContainer)
+        if (cardSelectionUI != null)
         {
-            if (child != null && child.gameObject.activeSelf)
+            cardSelectionUI.SetActive(false);
+        }
+        isSelectionActive = true;
+        isFirstStage = false;
+        waitingForSecondStage = false;
+
+        float perCardDelay = Mathf.Max(0f, cardDisplayDelay);
+        for (int i = 0; i < cards.Count; i++)
+        {
+            BaseCard c = cards[i];
+            if (c is EnemyCards)
             {
-                child.gameObject.SetActive(false);
+                perCardDelay = Mathf.Max(perCardDelay, EnemyCardDisplayDelay);
             }
-            Destroy(child.gameObject);
+            else if (c is FavourCards)
+            {
+                perCardDelay = Mathf.Max(perCardDelay, FavourCardDisplayDelay);
+            }
         }
 
-        cardSelectionUI.SetActive(true);
-        isSelectionActive = true;
+        StartCoroutine(DisplayExternalCardsWithOptionalDelay(cards, perCardDelay));
 
-        foreach (BaseCard card in cards)
+        Debug.Log($"<color=cyan>CardSelectionManager: Showing {cards.Count} cards</color>");
+    }
+
+    private IEnumerator DisplayExternalCardsWithOptionalDelay(List<BaseCard> cards, float delay)
+    {
+        if (delay > 0f)
         {
+            yield return new WaitForSecondsRealtime(delay);
+        }
+
+        if (!isSelectionActive)
+        {
+            yield break;
+        }
+
+        if (cardSelectionUI != null)
+        {
+            cardSelectionUI.SetActive(true);
+        }
+
+        for (int i = 0; i < cards.Count; i++)
+        {
+            BaseCard card = cards[i];
+            if (card == null)
+            {
+                continue;
+            }
+
             GameObject prefabToUse = null;
 
             if (card is EnemyCards && enemyCardButtonPrefab != null)
@@ -2127,8 +2552,124 @@ public class CardSelectionManager : MonoBehaviour
                 buttonScript.SetCard(card, this);
             }
         }
+    }
 
-        Debug.Log($"<color=cyan>CardSelectionManager: Showing {cards.Count} cards</color>");
+    private void ShowCombinedCardsImmediate(List<CombinedCard> cards)
+    {
+        if (cards == null || cards.Count == 0)
+        {
+            return;
+        }
+
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            return;
+        }
+
+        if (cardSelectionUI == null || cardContainer == null)
+        {
+            return;
+        }
+
+        foreach (Transform child in cardContainer)
+        {
+            Destroy(child.gameObject);
+        }
+
+        if (pauseGameOnSelection)
+        {
+            Time.timeScale = 0f;
+        }
+
+        cardSelectionUI.SetActive(true);
+        isSelectionActive = true;
+        isFirstStage = false;
+        waitingForSecondStage = false;
+
+        DisplayCombinedCards(cards);
+    }
+
+    private IEnumerator ProcessExternalCombinedSelectionQueue()
+    {
+        processingExternalCombinedQueue = true;
+
+        while (pendingExternalCombinedSelections.Count > 0)
+        {
+            while (processingLevelUpQueue || pendingLevelUps.Count > 0 ||
+                   processingVariantQueue || pendingVariantSelections.Count > 0 ||
+                   processingExternalCardQueue || pendingExternalCardSelections.Count > 0 ||
+                   isSelectionActive)
+            {
+                if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+                {
+                    pendingExternalCombinedSelections.Clear();
+                    processingExternalCombinedQueue = false;
+                    yield break;
+                }
+
+                yield return null;
+            }
+
+            List<CombinedCard> cards = pendingExternalCombinedSelections.Dequeue();
+            if (cards == null || cards.Count == 0)
+            {
+                continue;
+            }
+
+            if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+            {
+                continue;
+            }
+
+            ShowCombinedCardsImmediate(cards);
+
+            while (isSelectionActive)
+            {
+                if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+                {
+                    ForceCloseSelectionUI();
+                    pendingExternalCombinedSelections.Clear();
+                    processingExternalCombinedQueue = false;
+                    yield break;
+                }
+
+                yield return null;
+            }
+        }
+
+        processingExternalCombinedQueue = false;
+    }
+
+    public void SelectExternalCard(BaseCard card)
+    {
+        if (player == null)
+        {
+            player = GameObject.FindGameObjectWithTag("Player");
+        }
+
+        if (player == null)
+        {
+            return;
+        }
+
+        if (card != null)
+        {
+            card.ApplyEffect(player);
+        }
+
+        if (cardSelectionUI != null)
+        {
+            cardSelectionUI.SetActive(false);
+        }
+
+        if (pauseGameOnSelection)
+        {
+            Time.timeScale = 1f;
+        }
+
+        isSelectionActive = false;
+        isFirstStage = false;
+        waitingForSecondStage = false;
     }
 
     /// <summary>
@@ -2149,12 +2690,12 @@ public class CardSelectionManager : MonoBehaviour
 
     public void ShowPassiveProjectileChoiceWithMinRarity(int count, CardRarity minRarity)
     {
-        if (projectileCardPool == null || projectileCardPool.Count == 0)
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
         {
             return;
         }
 
-        if (isSelectionActive)
+        if (projectileCardPool == null || projectileCardPool.Count == 0)
         {
             return;
         }
@@ -2237,27 +2778,11 @@ public class CardSelectionManager : MonoBehaviour
             return;
         }
 
-        if (cardSelectionUI == null || cardContainer == null)
+        pendingExternalCombinedSelections.Enqueue(combinedCards);
+        if (!processingExternalCombinedQueue)
         {
-            return;
+            StartCoroutine(ProcessExternalCombinedSelectionQueue());
         }
-
-        foreach (Transform child in cardContainer)
-        {
-            Destroy(child.gameObject);
-        }
-
-        if (pauseGameOnSelection)
-        {
-            Time.timeScale = 0f;
-        }
-
-        cardSelectionUI.SetActive(true);
-        isSelectionActive = true;
-        isFirstStage = false;
-        waitingForSecondStage = false;
-
-        DisplayCombinedCards(combinedCards);
     }
 
     // Replace your existing GetRarityForSoulLevel(int soulLevel) with this entire method.
@@ -2366,6 +2891,11 @@ public class CardSelectionManager : MonoBehaviour
 
     public void ShowSoulFavourCardsForSoulLevel(int soulLevel, int count)
     {
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            return;
+        }
+
         if (soulLevel < 1)
         {
             return;

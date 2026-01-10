@@ -26,15 +26,9 @@ public class PlayerStats : MonoBehaviour
     [HideInInspector]
     public float moveSpeedMultiplier = 1f;
 
-
-
-
     [Header("Favour Stats")]
     [Tooltip("Global damage multiplier applied by Favour effects (1 = no change).")]
     public float favourDamageMultiplier = 1f;
-
-
-
 
     [Header("Level Stats - Synced with PlayerLevel")]
     [Tooltip("These are synced from PlayerLevel component - don't modify directly!")]
@@ -44,6 +38,15 @@ public class PlayerStats : MonoBehaviour
 
     [HideInInspector]
     public bool lastHitWasCrit = false;
+
+    [HideInInspector]
+    public bool burnImmolationCanCrit = false;
+
+    [HideInInspector]
+    public float burnImmolationCritChanceBonus = 0f;
+
+    [HideInInspector]
+    public float burnImmolationCritDamageBonusPercent = 0f;
 
     [Header("Projectile Stats")]
     [HideInInspector]
@@ -100,22 +103,63 @@ public class PlayerStats : MonoBehaviour
     public float projectileCritDamage = 150f;
     [HideInInspector]
     public bool hasProjectileStatusEffect = false;
+
+    // Global bonus chance (0-100) applied to BOTH passive + active projectiles.
     [HideInInspector]
     public float statusEffectChance = 0f;
 
+    // Extra status effect chance (0-100) that applies ONLY to ACTIVE projectile cards.
+    // This prevents ACTIVE-only buffs (like ActiveElementalChanceFavour) from also buffing PASSIVE projectiles.
+    [HideInInspector]
+    public float activeProjectileStatusEffectChanceBonus = 0f;
+
     [HideInInspector]
     public float burnTotalDamageMultiplier = 0f;
+
     [HideInInspector]
     public float burnDurationBonus = 0f;
+
     [HideInInspector]
     public float slowStrengthBonus = 0f;
+
     [HideInInspector]
     public float slowDurationBonus = 0f;
 
-
+    [HideInInspector]
     // NOTE: Experience and leveling is now handled by PlayerLevel component!
     // This PlayerStats component only stores the multipliers and synced values.
     // To add experience, use: GetComponent<PlayerLevel>().GainExperience(amount)
+
+    private PlayerHealth cachedPlayerHealth;
+    private PlayerMana cachedPlayerMana;
+    private PlayerLevel cachedPlayerLevel;
+
+    private void Awake()
+    {
+        cachedPlayerHealth = GetComponent<PlayerHealth>();
+        cachedPlayerMana = GetComponent<PlayerMana>();
+        cachedPlayerLevel = GetComponent<PlayerLevel>();
+    }
+
+    private void Update()
+    {
+        if (cachedPlayerHealth != null)
+        {
+            maxHealth = cachedPlayerHealth.MaxHealth;
+        }
+
+        if (cachedPlayerMana != null)
+        {
+            maxMana = cachedPlayerMana.MaxManaExact;
+        }
+
+        if (cachedPlayerLevel != null)
+        {
+            currentLevel = cachedPlayerLevel.CurrentLevel;
+            currentExperience = cachedPlayerLevel.CurrentExp;
+            experienceToNextLevel = cachedPlayerLevel.ExpToNextLevel;
+        }
+    }
 
     /// <summary>
     /// Calculate final damage with all modifiers
@@ -127,12 +171,23 @@ public class PlayerStats : MonoBehaviour
         // Add flat damage FIRST, then apply multipliers
         float damage = baseDamage;
 
+        StatusController statusController = GetComponent<StatusController>();
+        float furyFlat = 0f;
+        if (statusController != null)
+        {
+            int furyStacks = statusController.GetStacks(StatusId.Fury);
+            if (furyStacks > 0)
+            {
+                furyFlat = Mathf.Max(0, furyStacks);
+            }
+        }
+
         if (isProjectile)
         {
             damage += projectileFlatDamage;
         }
 
-        damage = (damage + flatDamage) * damageMultiplier * favourDamageMultiplier;
+        damage = (damage + flatDamage + furyFlat) * damageMultiplier * favourDamageMultiplier;
 
         if (isProjectile)
         {
@@ -142,6 +197,15 @@ public class PlayerStats : MonoBehaviour
         // Check for crit
         float critRoll = Random.Range(0f, 100f);
         float totalCritChance = critChance + (isProjectile ? projectileCritChance : 0f);
+
+        if (statusController != null && StatusControllerManager.Instance != null)
+        {
+            int frenzyStacks = statusController.GetStacks(StatusId.Frenzy);
+            if (frenzyStacks > 0)
+            {
+                totalCritChance += StatusControllerManager.Instance.CritPerStack * frenzyStacks;
+            }
+        }
 
         if (critRoll < totalCritChance)
         {

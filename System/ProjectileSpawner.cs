@@ -112,12 +112,21 @@ public class ProjectileSpawner : MonoBehaviour
         }
 
         float baseInterval = card.runtimeSpawnInterval > 0f ? card.runtimeSpawnInterval : card.spawnInterval;
-        float reduction = 0f;
+        float finalInterval = baseInterval;
         if (playerStats != null && playerStats.projectileCooldownReduction > 0f)
         {
-            reduction = Mathf.Clamp01(playerStats.projectileCooldownReduction);
+            float totalCdr = Mathf.Max(0f, playerStats.projectileCooldownReduction);
+            finalInterval = baseInterval / (1f + totalCdr);
         }
-        float finalInterval = baseInterval * (1f - reduction);
+
+        if (MinCooldownManager.Instance != null)
+        {
+            finalInterval = MinCooldownManager.Instance.ClampCooldown(card, finalInterval);
+        }
+        else
+        {
+            finalInterval = Mathf.Max(0.1f, finalInterval);
+        }
 
         float now = Time.time;
         const float minDelay = 0.05f;
@@ -144,7 +153,7 @@ public class ProjectileSpawner : MonoBehaviour
             // Preserve remaining cooldown (don't insta-spawn) but allow it to
             // become sooner if the new interval is shorter.
             float remaining = Mathf.Max(0f, data.nextSpawnTime - now);
-            float cappedRemaining = Mathf.Min(remaining, Mathf.Max(0.1f, finalInterval));
+            float cappedRemaining = Mathf.Min(remaining, finalInterval);
             data.nextSpawnTime = now + Mathf.Max(minDelay, cappedRemaining);
         }
     }
@@ -262,13 +271,21 @@ public class ProjectileSpawner : MonoBehaviour
                     playerStats = GetComponent<PlayerStats>();
                 }
 
-                float reduction = 0f;
+                float finalInterval = interval;
                 if (playerStats != null && playerStats.projectileCooldownReduction > 0f)
                 {
-                    reduction = Mathf.Clamp01(playerStats.projectileCooldownReduction);
+                    float totalCdr = Mathf.Max(0f, playerStats.projectileCooldownReduction);
+                    finalInterval = interval / (1f + totalCdr);
                 }
 
-                float finalInterval = interval * (1f - reduction);
+                if (MinCooldownManager.Instance != null)
+                {
+                    finalInterval = MinCooldownManager.Instance.ClampCooldown(data.card, finalInterval);
+                }
+                else
+                {
+                    finalInterval = Mathf.Max(0.1f, finalInterval);
+                }
 
                 // After first spawn (ever), just log that we now use the normal/enhanced interval
                 if (data.isFirstSpawn)
@@ -841,29 +858,6 @@ public class ProjectileSpawner : MonoBehaviour
             }
         }
 
-        // SPECIAL CASE: ElementalBeam + Variant 3 doubles the projectileCount bonus.
-        // We treat the card as Variant 3 as soon as the UI-selected enhanced
-        // variant is 3 OR history reports that Variant 3 has ever been chosen,
-        // so the very first enhanced spawn already benefits from the doubling.
-        if (ProjectileCardLevelSystem.Instance != null && data.card.projectilePrefab != null && projModifiers.projectileCount > 0)
-        {
-            ElementalBeam beamForCount = data.card.projectilePrefab.GetComponent<ElementalBeam>();
-            if (beamForCount != null)
-            {
-                int currentVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(data.card);
-                bool hasVariant3History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 3);
-                bool treatAsVariant3 = (currentVariant == 3) || hasVariant3History;
-
-                if (treatAsVariant3)
-                {
-                    int originalBonus = projModifiers.projectileCount;
-                    int doubledBonus = originalBonus * 2;
-                    projCount = 1 + doubledBonus;
-                    Debug.Log($"<color=magenta>ElementalBeam Variant 3: Doubling projectileCount bonus {originalBonus} → {doubledBonus}, total primaries {projCount} (currentVariant={currentVariant}, hasHistory={hasVariant3History})</color>");
-                }
-            }
-        }
-
         Debug.Log($"<color=lime>╔═══════════════════════════════════════════════════════════╗</color>");
         Debug.Log($"<color=lime>║   PROJECTILE COUNT DEBUG - {data.card.cardName}</color>");
         Debug.Log($"<color=lime>╚═══════════════════════════════════════════════════════════╝</color>");
@@ -1212,7 +1206,15 @@ public class ProjectileSpawner : MonoBehaviour
         // (e.g., 2 beams every 6s -> one beam every 3s) even when cooldown
         // reduction is active.
         CardModifierStats modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(data.card);
-        float internalCooldown = Mathf.Max(0.01f, baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f));
+        float internalCooldown = baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f);
+        if (MinCooldownManager.Instance != null)
+        {
+            internalCooldown = MinCooldownManager.Instance.ClampCooldown(data.card, internalCooldown);
+        }
+        else
+        {
+            internalCooldown = Mathf.Max(0.01f, internalCooldown);
+        }
         
         if (count <= 0 || internalCooldown <= 0f)
         {
@@ -1494,10 +1496,37 @@ public class ProjectileSpawner : MonoBehaviour
                         baseInterval = beamPrefab.variant2BaseCooldown;
                     }
                 }
+
+                // SPECIAL CASE: ThunderBird variants can override the base cooldown.
+                ThunderBird birdPrefab = data.card.projectilePrefab.GetComponent<ThunderBird>();
+                if (birdPrefab != null && ProjectileCardLevelSystem.Instance != null)
+                {
+                    bool hasVariant1 = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 1);
+                    bool hasVariant2 = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 2);
+                    int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(data.card);
+
+                    if (hasVariant1 && hasVariant2 && birdPrefab.variant12BaseCooldown > 0f)
+                    {
+                        baseInterval = birdPrefab.variant12BaseCooldown;
+                    }
+                    else if (enhancedVariant == 2)
+                    {
+                        baseInterval = birdPrefab.variant2BaseCooldown;
+                    }
+                }
             }
             
             // Apply reduction
             float reducedInterval = baseInterval * (1f - reductionPercent);
+
+            if (MinCooldownManager.Instance != null)
+            {
+                reducedInterval = MinCooldownManager.Instance.ClampCooldown(data.card, reducedInterval);
+            }
+            else
+            {
+                reducedInterval = Mathf.Max(0.1f, reducedInterval);
+            }
             
             // Set next spawn time to current time + reduced interval
             data.nextSpawnTime = currentTime + reducedInterval;

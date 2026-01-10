@@ -7,4 +7,6 @@ using UnityEngine;
 public class EnemyCardTag : MonoBehaviour
 {
     public CardRarity rarity = CardRarity.Common;
+
+    public float damageMultiplier = 1f;
 }

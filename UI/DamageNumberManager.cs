@@ -106,6 +106,9 @@ public class DamageNumberManager : MonoBehaviour
     [Tooltip("Maximum number of damage numbers that can be spawned per frame. 0 or negative = unlimited.")]
     public int DamageNumbersPerFrame = 60;
 
+    [Tooltip("Maximum number of Thunderbird V2 strike hits processed per frame. 0 or negative = unlimited.")]
+    public int ThunderbirdV2MaxStrikesPerFrame = 0;
+
     [Header("Camera Scaling")]
     [Tooltip("If true, damage number font size will be scaled inversely with Camera.main.orthographicSize so they keep a consistent apparent size as the camera zooms.")]
     [SerializeField] private bool scaleWithCameraSize = true;
@@ -419,13 +422,13 @@ public class DamageNumberManager : MonoBehaviour
 
         if (damageNumber != null)
         {
-            if (isBurn)
-            {
-                damageNumber.InitializeBurn(damage, color, worldPosition);
-            }
-            else if (isCrit)
+            if (isCrit)
             {
                 damageNumber.InitializeCrit(damage, color, worldPosition);
+            }
+            else if (isBurn)
+            {
+                damageNumber.InitializeBurn(damage, color, worldPosition);
             }
             else
             {

@@ -223,8 +223,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
              AdvancedPlayerController.Instance == null ||
              (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled));
 
-        // IMPORTANT: During the swordin/swordout animations, idle must be false.
-        // Idle should only be true during the actual channel window.
+        // During swordin/swordout animations, idle must be false.
         if (!isChannelingShield)
         {
             animator.SetBool("idle", shouldIdle);
@@ -336,7 +335,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
         animator.SetBool("moving", false);
         animator.SetBool("movingflip", false);
 
-        // IMPORTANT: do NOT force idle here anymore; swordin/swordout must not have idle=true.
         animator.SetBool("idle", false);
 
         ClearAllAttackAnims();
@@ -346,7 +344,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
     {
         rb.velocity = Vector2.zero;
 
-        // Cancel any attack/pre-attack so we stay fully idle while channeling
         if (attackRoutine != null)
         {
             StopCoroutine(attackRoutine);
@@ -369,7 +366,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
         animator.SetBool("moving", false);
         animator.SetBool("movingflip", false);
 
-        // Channel idle should be the only time idle is forced true:
         animator.SetBool("idle", true);
 
         ClearAllAttackAnims();
@@ -379,7 +375,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
     {
         isChannelingShield = true;
 
-        // Sword-in phase: idle must be false
         CancelAttackAndPreAttack();
         animator.SetBool("swordout", false);
         animator.SetBool("swordin", true);
@@ -389,7 +384,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
         }
         animator.SetBool("swordin", false);
 
-        // Channel phase: idle must be true
         ForceChannelIdleOnly();
 
         float duration = Mathf.Max(0f, ShieldChannelDuration);
@@ -413,7 +407,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
             elapsed += interval;
         }
 
-        // Sword-out phase: idle must be false
         CancelAttackAndPreAttack();
         animator.SetBool("swordin", false);
         animator.SetBool("swordout", true);
@@ -425,7 +418,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         animator.SetBool("swordout", false);
 
-        // Return control to normal AI; idle will be set by normal Update() logic next frame.
         isChannelingShield = false;
         shieldChannelRoutine = null;
     }
@@ -536,7 +528,6 @@ public class GhostWarrior4Enemy : MonoBehaviour
             return;
         }
 
-        // While any part of shield sequence is running, do not move.
         if (isChannelingShield)
         {
             rb.velocity = Vector2.zero;
@@ -618,7 +609,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         if (attackIndex == 1)
         {
-            animator.SetBool(normal, true); // always play attack1 regardless of flip
+            animator.SetBool(normal, true);
             return;
         }
 
@@ -644,6 +635,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
         float originalSpeed = animator.speed;
         animator.speed = attackAnimSpeed;
 
+        // FIRST ATTACK
         SetAttackAnim(1, true);
 
         if (firstAttackDamageDelayV2 > 0f)
@@ -695,6 +687,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         SetAttackAnim(1, false);
 
+        // SECOND ATTACK
         SetAttackAnim(2, true);
 
         if (secondAttackDamageDelayV2 > 0f)
@@ -745,6 +738,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         SetAttackAnim(2, false);
 
+        // THIRD ATTACK (AOE)
         SetAttackAnim(3, true);
 
         if (thirdAttackDamageDelayV2 > 0f)
@@ -767,7 +761,11 @@ public class GhostWarrior4Enemy : MonoBehaviour
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
+
+            // NEW: GhostWarrior4 third attack is AOE-type damage (cannot be reflected/nullified by HolyShield variants).
+            DamageAoeScope.BeginAoeDamage();
             playerDamageable.TakeDamage(thirdAttackDamageV2, hitPoint, hitNormal);
+            DamageAoeScope.EndAoeDamage();
         }
         else
         {

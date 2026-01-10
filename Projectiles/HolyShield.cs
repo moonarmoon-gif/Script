@@ -23,18 +23,8 @@ public class HolyShield : MonoBehaviour, IDamageable
     [Header("Fade In")]
     [SerializeField] private float fadeInDuration = 0.5f;
 
-    [Header("Variant Settings")]
-    [SerializeField] private float reflectRechargeDuration = 30f;
-    [SerializeField] private float nullifyRechargeDuration = 30f;
-    [SerializeField] private float colorTransitionDelay = 1f;
-
-    [Header("Variant Colors")]
-    [SerializeField] private Color reflectVariantColor = Color.cyan;
-    [SerializeField] private Color nullifyVariantColor = Color.magenta;
-
-    [Header("Variant Visual Options")]
-    [SerializeField] private bool useReflectVariantColor = true;
-    [SerializeField] private bool useNullifyVariantColor = true;
+    [SerializeField] private GameObject reflectShieldPrefab;
+    [SerializeField] private GameObject nullifyShieldPrefab;
     [SerializeField] private Animator animator;
 
     private float currentHealth;
@@ -42,22 +32,13 @@ public class HolyShield : MonoBehaviour, IDamageable
     private bool isBroken;
     private SpriteRenderer[] spriteRenderers;
     private Collider2D shieldCollider;
+    private Collider2D ownerCollider;
     private float baseMaxHealth;
     private float baseRespawnDelay;
     private Vector3 baseScale;
     private Color[] originalColors;
 
-    private enum ShieldVariantMode
-    {
-        Base,
-        Reflect,
-        Nullify
-    }
-
-    private ShieldVariantMode variantMode = ShieldVariantMode.Base;
-    private bool variantPropertyActive;
-    private float variantPropertyReenableTime;
-    private Coroutine colorTransitionRoutine;
+    private int activeVariantMask;
 
     private static HolyShield activeShield;
     private static float lastDestroyedTime = -1f;
@@ -133,6 +114,10 @@ public class HolyShield : MonoBehaviour, IDamageable
         }
 
         respawnDelay = Mathf.Max(0.1f, baseRespawnDelay * (1f - modifiers.cooldownReductionPercent / 100f));
+        if (MinCooldownManager.Instance != null)
+        {
+            respawnDelay = MinCooldownManager.Instance.ClampCooldown(card, Mathf.Max(0.1f, baseRespawnDelay * (1f - modifiers.cooldownReductionPercent / 100f)));
+        }
 
         if (modifiers.sizeMultiplier != 1f)
         {
@@ -147,28 +132,26 @@ public class HolyShield : MonoBehaviour, IDamageable
             transform.SetParent(playerCollider.transform);
         }
 
-        variantMode = ShieldVariantMode.Base;
-        variantPropertyActive = false;
-        variantPropertyReenableTime = 0f;
+        ownerCollider = playerCollider;
 
+        activeVariantMask = 0;
         if (card != null && ProjectileCardLevelSystem.Instance != null)
         {
             int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
-            if (enhancedVariant == 1)
+
+            int level = ProjectileCardLevelSystem.Instance.GetLevel(card);
+            if (level < 1)
             {
-                variantMode = ShieldVariantMode.Reflect;
-                variantPropertyActive = true;
+                level = 1;
             }
-            else if (enhancedVariant == 2)
-            {
-                variantMode = ShieldVariantMode.Nullify;
-                variantPropertyActive = true;
-            }
+
+            ApplyVariantFromIndex(enhancedVariant, level);
         }
 
         isBroken = false;
         lastDamageTime = Time.time;
         activeShield = this;
+
         hasEverSpawned = true;
 
         if (fadeInDuration > 0f && spriteRenderers != null && spriteRenderers.Length > 0)
@@ -178,7 +161,8 @@ public class HolyShield : MonoBehaviour, IDamageable
 
         if (spriteRenderers != null && spriteRenderers.Length > 0)
         {
-            StartCoroutine(ApplyVariantVisualStateAfterFadeIn());
+            // No variant visuals remain on HolyShield; ReflectShield/NullifyShield
+            // handle their own visuals independently.
         }
     }
 
@@ -190,117 +174,118 @@ public class HolyShield : MonoBehaviour, IDamageable
     /// </summary>
     public void ApplyVariantFromIndex(int variantIndex)
     {
-        ShieldVariantMode newMode = ShieldVariantMode.Base;
-        bool newPropertyActive = false;
-
-        if (variantIndex == 1)
+        int level = 1;
+        ProjectileCards card = ProjectileCardModifiers.Instance != null
+            ? ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject)
+            : null;
+        if (card != null && ProjectileCardLevelSystem.Instance != null)
         {
-            newMode = ShieldVariantMode.Reflect;
-            newPropertyActive = true;
-        }
-        else if (variantIndex == 2)
-        {
-            newMode = ShieldVariantMode.Nullify;
-            newPropertyActive = true;
+            level = Mathf.Max(1, ProjectileCardLevelSystem.Instance.GetLevel(card));
         }
 
-        variantMode = newMode;
-        variantPropertyActive = newPropertyActive;
-        variantPropertyReenableTime = 0f;
+        ApplyVariantFromIndex(variantIndex, level);
+    }
 
-        if (spriteRenderers != null && spriteRenderers.Length > 0)
+    private void ApplyVariantFromIndex(int variantIndex, int level)
+    {
+        int newMask = Mathf.Max(0, variantIndex);
+        bool wantsReflect = (newMask & 1) != 0;
+        bool wantsNullify = (newMask & 2) != 0;
+
+        bool hadReflect = (activeVariantMask & 1) != 0;
+        bool hadNullify = (activeVariantMask & 2) != 0;
+
+        if (wantsReflect)
         {
-            if (variantMode == ShieldVariantMode.Reflect || variantMode == ShieldVariantMode.Nullify)
+            EnsureReflectShield(level, hadReflect);
+        }
+        else
+        {
+            DestroyReflectShield();
+        }
+
+        if (wantsNullify)
+        {
+            EnsureNullifyShield(level, hadNullify);
+        }
+        else
+        {
+            DestroyNullifyShield();
+        }
+
+        activeVariantMask = newMask;
+    }
+
+    private void EnsureReflectShield(int level, bool alreadyHad)
+    {
+        if (reflectShieldPrefab == null)
+        {
+            return;
+        }
+
+        if (ReflectShield.ActiveShield == null)
+        {
+            GameObject obj = Instantiate(reflectShieldPrefab, transform.position, Quaternion.identity);
+            ReflectShield shield = obj.GetComponent<ReflectShield>();
+            if (shield != null)
             {
-                if (variantPropertyActive)
-                {
-                    ApplyVariantActiveVisual();
-                }
-                else
-                {
-                    ApplyVariantInactiveVisual();
-                }
+                shield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level));
             }
-            else
-            {
-                ApplyVariantInactiveVisual();
-            }
+            return;
+        }
+
+        if (!alreadyHad || !ReflectShield.ActiveShield.IsAlive)
+        {
+            ReflectShield.ActiveShield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level));
+        }
+        else
+        {
+            ReflectShield.ActiveShield.SetMaxCharges(Mathf.Max(1, level));
         }
     }
 
-    public void HandleIncomingHit(float amount, GameObject attacker, Vector3 hitPoint, Vector3 hitNormal, bool isMeleeLikeHit, bool isRangedLikeHit)
+    private void EnsureNullifyShield(int level, bool alreadyHad)
     {
-        if (isBroken || amount <= 0f)
+        if (nullifyShieldPrefab == null)
         {
             return;
         }
 
-        bool isAoeDamage = DamageAoeScope.IsAoeDamage;
-
-        bool handled = false;
-
-        if (!isAoeDamage && variantMode == ShieldVariantMode.Reflect && variantPropertyActive && isMeleeLikeHit)
+        if (NullifyShield.ActiveShield == null)
         {
-            if (attacker != null)
+            GameObject obj = Instantiate(nullifyShieldPrefab, transform.position, Quaternion.identity);
+            NullifyShield shield = obj.GetComponent<NullifyShield>();
+            if (shield != null)
             {
-                IDamageable attackerDamageable = attacker.GetComponent<IDamageable>() ?? attacker.GetComponentInParent<IDamageable>();
-                if (attackerDamageable != null && attackerDamageable.IsAlive)
-                {
-                    float reflectDamage = amount;
-                    Vector3 attackerPos = attacker.transform.position;
-                    Vector3 normal = (attackerPos - transform.position).normalized;
-
-                    // Tag the attacker EnemyHealth so its own damage pipeline
-                    // renders this hit using the Reflect damage color instead
-                    // of whatever elemental color was last applied.
-                    EnemyHealth enemyHealth = attacker.GetComponent<EnemyHealth>() ?? attacker.GetComponentInParent<EnemyHealth>();
-                    if (enemyHealth != null)
-                    {
-                        enemyHealth.SetLastIncomingDamageType(DamageNumberManager.DamageType.Reflect);
-                    }
-
-                    attackerDamageable.TakeDamage(reflectDamage, attackerPos, normal);
-
-                    if (DamageNumberManager.Instance != null)
-                    {
-                        // Show only the "Reflect" status text at the shield;
-                        // the numeric damage popup comes from EnemyHealth.
-                        DamageNumberManager.Instance.ShowReflect(transform.position);
-                    }
-                }
+                shield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level));
             }
-
-            handled = true;
-        }
-        else if (!isAoeDamage && variantMode == ShieldVariantMode.Nullify && variantPropertyActive && isRangedLikeHit)
-        {
-            if (DamageNumberManager.Instance != null)
-            {
-                DamageNumberManager.Instance.ShowNullify(transform.position);
-            }
-
-            handled = true;
-        }
-
-        if (variantMode == ShieldVariantMode.Nullify && variantPropertyActive && (isMeleeLikeHit || isAoeDamage))
-        {
-            variantPropertyActive = false;
-            variantPropertyReenableTime = Time.time + nullifyRechargeDuration;
-            ApplyVariantInactiveVisual();
-        }
-        else if (variantMode == ShieldVariantMode.Reflect && variantPropertyActive && (isRangedLikeHit || isAoeDamage))
-        {
-            variantPropertyActive = false;
-            variantPropertyReenableTime = Time.time + reflectRechargeDuration;
-            ApplyVariantInactiveVisual();
-        }
-
-        if (handled)
-        {
             return;
         }
 
-        TakeDamage(amount, hitPoint, hitNormal);
+        if (!alreadyHad || !NullifyShield.ActiveShield.IsAlive)
+        {
+            NullifyShield.ActiveShield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level));
+        }
+        else
+        {
+            NullifyShield.ActiveShield.SetMaxCharges(Mathf.Max(1, level));
+        }
+    }
+
+    private void DestroyReflectShield()
+    {
+        if (ReflectShield.ActiveShield != null)
+        {
+            Destroy(ReflectShield.ActiveShield.gameObject);
+        }
+    }
+
+    private void DestroyNullifyShield()
+    {
+        if (NullifyShield.ActiveShield != null)
+        {
+            Destroy(NullifyShield.ActiveShield.gameObject);
+        }
     }
 
     public void TakeDamage(float amount, Vector3 hitPoint, Vector3 hitNormal)
@@ -308,30 +293,6 @@ public class HolyShield : MonoBehaviour, IDamageable
         if (isBroken || amount <= 0f)
         {
             return;
-        }
-
-        if (DamageAoeScope.IsAoeDamage && variantMode == ShieldVariantMode.Nullify && variantPropertyActive)
-        {
-            variantPropertyActive = false;
-            variantPropertyReenableTime = Time.time + nullifyRechargeDuration;
-            ApplyVariantInactiveVisual();
-        }
-
-        if (!DamageAoeScope.IsAoeDamage && variantMode == ShieldVariantMode.Nullify && variantPropertyActive)
-        {
-            if (DamageNumberManager.Instance != null)
-            {
-                DamageNumberManager.Instance.ShowNullify(transform.position);
-            }
-
-            return;
-        }
-
-        if (variantMode == ShieldVariantMode.Reflect && variantPropertyActive)
-        {
-            variantPropertyActive = false;
-            variantPropertyReenableTime = Time.time + reflectRechargeDuration;
-            ApplyVariantInactiveVisual();
         }
 
         float finalAmount = amount;
@@ -385,13 +346,6 @@ public class HolyShield : MonoBehaviour, IDamageable
             return;
         }
 
-        if ((variantMode == ShieldVariantMode.Reflect || variantMode == ShieldVariantMode.Nullify) &&
-            !variantPropertyActive && variantPropertyReenableTime > 0f && Time.time >= variantPropertyReenableTime)
-        {
-            variantPropertyActive = true;
-            ApplyVariantActiveVisual();
-        }
-
         if (currentHealth < maxHealth && Time.time - lastDamageTime >= regenDelay)
         {
             if (maxHealth > 0f && regenPerSecond > 0f)
@@ -402,6 +356,7 @@ public class HolyShield : MonoBehaviour, IDamageable
                 currentHealth = Mathf.Min(maxHealth, currentHealth + heal);
             }
         }
+
     }
 
     private void BreakShield()
@@ -573,234 +528,40 @@ public class HolyShield : MonoBehaviour, IDamageable
 
         activeShield = this;
 
+        ProjectileCards card = ProjectileCardModifiers.Instance != null
+            ? ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject)
+            : null;
+        if (card != null && ProjectileCardLevelSystem.Instance != null)
+        {
+            int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
+            int level = Mathf.Max(1, ProjectileCardLevelSystem.Instance.GetLevel(card));
+            ApplyVariantFromIndex(enhancedVariant, level);
+        }
+
         if (fadeInDuration > 0f && spriteRenderers != null && spriteRenderers.Length > 0)
         {
             StartCoroutine(FadeIn());
-        }
-
-        if (spriteRenderers != null && spriteRenderers.Length > 0)
-        {
-            StartCoroutine(ApplyVariantVisualStateAfterFadeIn());
         }
     }
 
     public static void ResetRunState()
     {
+        HolyShield[] shields = UnityEngine.Object.FindObjectsOfType<HolyShield>();
+        if (shields != null)
+        {
+            for (int i = 0; i < shields.Length; i++)
+            {
+                if (shields[i] != null)
+                {
+                    UnityEngine.Object.Destroy(shields[i].gameObject);
+                }
+            }
+        }
+
         activeShield = null;
         lastDestroyedTime = -1f;
         hasEverSpawned = false;
-    }
-
-    private void ApplyVariantActiveVisual()
-    {
-        if (variantMode == ShieldVariantMode.Reflect)
-        {
-            if (useReflectVariantColor)
-            {
-                StartVariantColorTransitionToVariant();
-            }
-            else if (animator != null)
-            {
-                animator.SetBool("IsHoly", false);
-                animator.SetBool("IsVoid", true);
-                animator.SetBool("IsIce", false);
-            }
-        }
-        else if (variantMode == ShieldVariantMode.Nullify)
-        {
-            if (useNullifyVariantColor)
-            {
-                StartVariantColorTransitionToVariant();
-            }
-            else if (animator != null)
-            {
-                animator.SetBool("IsHoly", false);
-                animator.SetBool("IsIce", true);
-                animator.SetBool("IsVoid", false);
-            }
-        }
-    }
-
-    private void ApplyVariantInactiveVisual()
-    {
-        if (variantMode == ShieldVariantMode.Reflect)
-        {
-            if (useReflectVariantColor)
-            {
-                StartVariantColorTransitionToOriginal();
-            }
-            else if (animator != null)
-            {
-                animator.SetBool("IsHoly", true);
-                animator.SetBool("IsVoid", false);
-                animator.SetBool("IsIce", false);
-            }
-        }
-        else if (variantMode == ShieldVariantMode.Nullify)
-        {
-            if (useNullifyVariantColor)
-            {
-                StartVariantColorTransitionToOriginal();
-            }
-            else if (animator != null)
-            {
-                animator.SetBool("IsHoly", true);
-                animator.SetBool("IsIce", false);
-                animator.SetBool("IsVoid", false);
-            }
-        }
-        else
-        {
-            if (animator != null)
-            {
-                animator.SetBool("IsHoly", true);
-                animator.SetBool("IsVoid", false);
-                animator.SetBool("IsIce", false);
-            }
-        }
-    }
-
-    private void StartVariantColorTransitionToVariant()
-    {
-        if (spriteRenderers == null || spriteRenderers.Length == 0)
-        {
-            return;
-        }
-
-        Color targetTint = variantMode == ShieldVariantMode.Reflect ? reflectVariantColor : nullifyVariantColor;
-        StartVariantColorTransition(targetTint, true);
-    }
-
-    private void StartVariantColorTransitionToOriginal()
-    {
-        if (spriteRenderers == null || spriteRenderers.Length == 0)
-        {
-            return;
-        }
-
-        StartVariantColorTransition(Color.white, false);
-    }
-
-    private void StartVariantColorTransition(Color targetVariantColor, bool toVariant)
-    {
-        if (colorTransitionRoutine != null)
-        {
-            StopCoroutine(colorTransitionRoutine);
-        }
-
-        colorTransitionRoutine = StartCoroutine(VariantColorTransitionCoroutine(targetVariantColor, toVariant));
-    }
-
-    private System.Collections.IEnumerator VariantColorTransitionCoroutine(Color targetVariantColor, bool toVariant)
-    {
-        if (spriteRenderers == null || spriteRenderers.Length == 0)
-        {
-            yield break;
-        }
-
-        int count = spriteRenderers.Length;
-        Color[] startColors = new Color[count];
-        Color[] endColors = new Color[count];
-
-        for (int i = 0; i < count; i++)
-        {
-            if (spriteRenderers[i] == null)
-            {
-                continue;
-            }
-
-            Color current = spriteRenderers[i].color;
-            startColors[i] = current;
-
-            if (toVariant)
-            {
-                Color baseColor = (originalColors != null && i < originalColors.Length) ? originalColors[i] : current;
-                Color target = Color.Lerp(baseColor, targetVariantColor, 1f);
-                target.a = current.a;
-                endColors[i] = target;
-            }
-            else
-            {
-                if (originalColors != null && i < originalColors.Length)
-                {
-                    Color target = originalColors[i];
-                    target.a = current.a;
-                    endColors[i] = target;
-                }
-                else
-                {
-                    endColors[i] = current;
-                }
-            }
-        }
-
-        float duration = Mathf.Max(0f, colorTransitionDelay);
-        if (duration <= 0f)
-        {
-            for (int i = 0; i < count; i++)
-            {
-                if (spriteRenderers[i] != null)
-                {
-                    spriteRenderers[i].color = endColors[i];
-                }
-            }
-            yield break;
-        }
-
-        float elapsed = 0f;
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            float t = Mathf.Clamp01(elapsed / duration);
-
-            for (int i = 0; i < count; i++)
-            {
-                if (spriteRenderers[i] != null)
-                {
-                    Color c = Color.Lerp(startColors[i], endColors[i], t);
-                    spriteRenderers[i].color = c;
-                }
-            }
-
-            yield return null;
-        }
-
-        for (int i = 0; i < count; i++)
-        {
-            if (spriteRenderers[i] != null)
-            {
-                spriteRenderers[i].color = endColors[i];
-            }
-        }
-    }
-
-    private System.Collections.IEnumerator ApplyVariantVisualStateAfterFadeIn()
-    {
-        if (spriteRenderers == null || spriteRenderers.Length == 0)
-        {
-            yield break;
-        }
-
-        if (fadeInDuration > 0f)
-        {
-            yield return new WaitForSeconds(fadeInDuration);
-        }
-
-        if (isBroken)
-        {
-            yield break;
-        }
-
-        if (variantMode == ShieldVariantMode.Reflect || variantMode == ShieldVariantMode.Nullify)
-        {
-            if (variantPropertyActive)
-            {
-                ApplyVariantActiveVisual();
-            }
-            else
-            {
-                ApplyVariantInactiveVisual();
-            }
-        }
+        ReflectShield.ResetRunState();
+        NullifyShield.ResetRunState();
     }
 }

@@ -105,11 +105,16 @@ public class ProjectileCardModifiers : MonoBehaviour
                     stats.lifetimeIncrease += value; // RAW seconds (e.g., 0.75 = +0.75 seconds, 0.1 = +0.1 seconds)
                     break;
                 case ProjectileModifierData.ModifierType.CooldownReduction:
-                    // Support fractional values
-                    float stepFraction = Mathf.Clamp01(value / 100f);
-                    float stepMultiplier = 1f - stepFraction;
-                    stats.cooldownMultiplier *= stepMultiplier;
-                    stats.cooldownReductionPercent = (1f - stats.cooldownMultiplier) * 100f;
+                    // Support fractional values with hyperbolic stacking.
+                    // We store TOTAL CDR as an additive fraction in cooldownMultiplier and
+                    // convert it to an effective percent so existing callers that use
+                    // base * (1 - percent) automatically become hyperbolic:
+                    // effectivePercent = total / (1 + total).
+                    float add = Mathf.Max(0f, value / 100f);
+                    stats.cooldownMultiplier += add;
+                    float totalCdr = Mathf.Max(0f, stats.cooldownMultiplier);
+                    float effectiveFraction = totalCdr / (1f + totalCdr);
+                    stats.cooldownReductionPercent = Mathf.Max(0f, effectiveFraction * 100f);
                     break;
                 case ProjectileModifierData.ModifierType.ManaCostReduction:
                     // Support fractional values
@@ -308,6 +313,12 @@ public class ProjectileCardModifiers : MonoBehaviour
         
         return updated;
     }
+
+    public void ResetRunState()
+    {
+        cardModifiers.Clear();
+        cardModifiersByKey.Clear();
+    }
 }
 
 /// <summary>
@@ -331,7 +342,7 @@ public class CardModifierStats
     public float pierceAccumulator = 0f; // Fractional accumulator for pierce
     public float lifetimeIncrease = 0f; // RAW seconds added to lifetime (supports 0.1s, 0.2s, etc.)
     public float cooldownReductionPercent = 0f; // Percentage reduced from BASE cooldown (supports 0.5%, 1.2%, etc.)
-    public float cooldownMultiplier = 1f;
+    public float cooldownMultiplier = 0f;
     public float manaCostReduction = 0f; // Percentage for mana (supports fractional)
     public float damageFlat = 0f; // Flat damage added per hit (from DamageIncrease modifiers)
     public float damageMultiplier = 1f; // Reserved multiplier for damage (kept for backward compatibility)

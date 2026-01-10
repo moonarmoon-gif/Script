@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-[CreateAssetMenu(fileName = "VulnerableLowHealthFavour", menuName = "Favour Effects/Vulnerable On Low Health")] 
+[CreateAssetMenu(fileName = "VulnerableLowHealthFavour", menuName = "Favour Effects 2/Vulnerable On Low Health")] 
 public class VulnerableLowHealthFavour : FavourEffect
 { 
     [Header("Vulnerable Low Health Settings")] 
@@ -32,6 +32,8 @@ public class VulnerableLowHealthFavour : FavourEffect
         {
             processedEnemies.Clear();
         }
+
+        TryApplyToAllBelowThreshold();
     } 
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard) 
@@ -39,51 +41,80 @@ public class VulnerableLowHealthFavour : FavourEffect
         currentVulnerableStacks += Mathf.Max(0, BonusVulnerableStacks); 
     } 
 
-    public override void OnBeforeDealDamage(GameObject player, GameObject enemy, ref float damage, FavourEffectManager manager) 
-    { 
-        if (enemy == null || damage <= 0f) 
-        { 
-            return; 
-        } 
+    public override void OnEnemyDamageFinalized(GameObject player, GameObject enemy, float finalDamage, bool isStatusTick, FavourEffectManager manager)
+    {
+        if (enemy == null)
+        {
+            return;
+        }
 
-        EnemyHealth enemyHealth = enemy.GetComponent<EnemyHealth>() ?? enemy.GetComponentInParent<EnemyHealth>(); 
-        if (enemyHealth == null) 
-        { 
-            return; 
-        } 
+        EnemyHealth enemyHealth = enemy.GetComponent<EnemyHealth>() ?? enemy.GetComponentInParent<EnemyHealth>();
+        if (enemyHealth == null || !enemyHealth.IsAlive)
+        {
+            return;
+        }
 
-        // Only apply Vulnerable once per enemy for this favour.
+        TryApplyToEnemy(enemyHealth);
+    }
+
+    private void TryApplyToAllBelowThreshold()
+    {
+        EnemyHealth[] enemies = Object.FindObjectsOfType<EnemyHealth>();
+        if (enemies == null || enemies.Length == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < enemies.Length; i++)
+        {
+            EnemyHealth enemy = enemies[i];
+            if (enemy == null || !enemy.IsAlive)
+            {
+                continue;
+            }
+
+            TryApplyToEnemy(enemy);
+        }
+    }
+
+    private void TryApplyToEnemy(EnemyHealth enemyHealth)
+    {
+        if (enemyHealth == null)
+        {
+            return;
+        }
+
         if (processedEnemies != null && processedEnemies.Contains(enemyHealth))
         {
             return;
         }
 
-        float maxHealth = enemyHealth.MaxHealth; 
-        if (maxHealth <= 0f) 
-        { 
-            return; 
-        } 
+        float maxHealth = enemyHealth.MaxHealth;
+        if (maxHealth <= 0f)
+        {
+            return;
+        }
 
-        float normalizedHealth = enemyHealth.CurrentHealth / maxHealth; 
-        float threshold = Mathf.Clamp01(HealthThreshold); 
+        float normalizedHealth = enemyHealth.CurrentHealth / maxHealth;
+        float threshold = Mathf.Clamp01(HealthThreshold);
 
-        if (normalizedHealth > threshold) 
-        { 
-            return; 
-        } 
+        if (normalizedHealth > threshold)
+        {
+            return;
+        }
 
-        if (currentVulnerableStacks <= 0) 
-        { 
-            return; 
-        } 
+        if (currentVulnerableStacks <= 0)
+        {
+            return;
+        }
 
-        StatusController statusController = enemy.GetComponent<StatusController>() ?? enemy.GetComponentInParent<StatusController>(); 
-        if (statusController == null) 
-        { 
-            return; 
-        } 
+        StatusController statusController = enemyHealth.GetComponent<StatusController>() ?? enemyHealth.GetComponentInParent<StatusController>();
+        if (statusController == null)
+        {
+            return;
+        }
 
-        statusController.AddStatus(StatusId.Vulnerable, currentVulnerableStacks, -1f); 
+        statusController.AddStatus(StatusId.Vulnerable, currentVulnerableStacks, -1f);
 
         if (processedEnemies == null)
         {

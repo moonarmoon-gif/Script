@@ -1,5 +1,4 @@
 using UnityEngine;
-using System.Collections;
 
 /// <summary>
 /// Burn effect that deals damage over time to enemies
@@ -19,9 +18,6 @@ public class BurnEffect : MonoBehaviour
     [Tooltip("Damage multiplier per tick (1.0 = 100% of base damage)")]
     public float burnDamageMultiplier = 1.0f;
 
-    [Tooltip("Number of damage ticks per second")]
-    public float burnDamageInstancesPerSecond = 4f;
-
     [Tooltip("How long burn lasts (seconds)")]
     public float burnDuration = 2f;
 
@@ -39,11 +35,12 @@ public class BurnEffect : MonoBehaviour
     private ProjectileType projectileType = ProjectileType.Fire;
 
     /// <summary>
-    /// Initialize burn effect with damage and projectile type
+    /// Initialize burn effect with damage and projectile type.
+    /// NOTE: In your project this is called at HIT TIME (right before TryApplyBurn).
     /// </summary>
     public void Initialize(float damage, ProjectileType type)
     {
-        baseDamage = damage;
+        baseDamage = Mathf.Max(1f, damage);
         projectileType = type;
     }
 
@@ -55,38 +52,90 @@ public class BurnEffect : MonoBehaviour
     {
         if (enemy == null) return false;
 
-        // Check burn chance
-        float roll = Random.Range(0f, 100f);
-        if (roll > burnChance)
+        // NEW: predetermined (pre-rolled) support. For most projectiles this
+        // makes burn application deterministic per projectile instance. For
+        // ElementalBeam and Fire/Ice Talons, we WANT a fresh roll per enemy,
+        // so we deliberately ignore PredeterminedStatusRoll for those.
+        bool ignorePreForThisProjectile =
+            GetComponent<ElementalBeam>() != null ||
+            GetComponent<ProjectileFireTalon>() != null ||
+            GetComponent<ProjectileIceTalon>() != null ||
+            GetComponent<DwarfStar>() != null ||
+            GetComponent<NovaStar>() != null;
+
+        PredeterminedStatusRoll pre = ignorePreForThisProjectile
+            ? null
+            : GetComponent<PredeterminedStatusRoll>();
+
+        if (pre != null)
         {
-            // Burn roll failed (log removed for cleaner console)
-            return false;
+            pre.EnsureRolled();
+
+            if (pre.burnRolled)
+            {
+                if (!pre.burnWillApply)
+                {
+                    return false;
+                }
+
+                // IMPORTANT: stacksPerHit is NOT owned by PredeterminedStatusRoll.
+                // Keep using this BurnEffect's burnStacksPerHit as configured.
+            }
         }
 
-        // Get or add BurnStatus component
-        BurnStatus burnStatus = enemy.GetComponent<BurnStatus>();
-        if (burnStatus == null)
-        {
-            burnStatus = enemy.AddComponent<BurnStatus>();
-        }
+        PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
 
-        burnStatus.SetStacksPerHit(burnStacksPerHit);
-
+        // Determine whether THIS projectile came from an ACTIVE projectile card.
         ProjectileCards sourceCard = null;
         if (ProjectileCardModifiers.Instance != null)
         {
             sourceCard = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
         }
-        if (sourceCard != null)
+        bool isActiveSource =
+            sourceCard != null &&
+            sourceCard.projectileSystem == ProjectileCards.ProjectileSystemType.Active;
+
+        float effectiveChance = burnChance;
+
+        // Global chance bonus applies to both ACTIVE and PASSIVE.
+        // ACTIVE-only chance bonus applies ONLY when the source is ACTIVE.
+        if (stats != null && stats.hasProjectileStatusEffect)
         {
-            burnStatus.SetSourceCard(sourceCard);
+            effectiveChance += Mathf.Max(0f, stats.statusEffectChance);
+
+            if (isActiveSource)
+            {
+                effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
+            }
         }
 
-        // Calculate damage per tick
-        float damagePerTick = baseDamage * burnDamageMultiplier;
+        effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
+
+        // Only roll RNG if we do NOT have a predetermined roll.
+        if (pre == null || !pre.burnRolled)
+        {
+            float roll = Random.Range(0f, 100f);
+            if (roll > effectiveChance)
+            {
+                return false;
+            }
+        }
+
+        // IMPORTANT ROBUSTNESS CHANGE:
+        // Always attach BurnStatus to the SAME GameObject that owns EnemyHealth (if available).
+        // This makes auto-fire checks reliable and prevents "burn exists but can't be found".
+        EnemyHealth ownerHealth = enemy.GetComponent<EnemyHealth>() ?? enemy.GetComponentInParent<EnemyHealth>();
+        GameObject ownerGO = ownerHealth != null ? ownerHealth.gameObject : enemy;
+
+        StatusController immuneCheck = ownerGO.GetComponent<StatusController>() ?? ownerGO.GetComponentInParent<StatusController>();
+        if (immuneCheck != null && immuneCheck.HasStatus(StatusId.Immune))
+        {
+            return false;
+        }
+
+        float damagePerTick = Mathf.Max(1f, baseDamage * burnDamageMultiplier);
         float duration = burnDuration;
 
-        PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
         if (stats != null)
         {
             float totalMultiplier = 1f + Mathf.Max(0f, stats.burnTotalDamageMultiplier);
@@ -101,15 +150,11 @@ public class BurnEffect : MonoBehaviour
             }
         }
 
-        // Compute VFX spawn position with optional left/right offsets based on
-        // enemy position relative to the camera. This position will be passed
-        // via hitPoint into BurnStatus so the VFX can spawn offset but still be
-        // parented to and move with the enemy.
-        Vector3 vfxPosition = enemy.transform.position;
+        Vector3 vfxPosition = ownerGO.transform.position;
         Camera mainCam = Camera.main;
         if (mainCam != null)
         {
-            bool enemyOnLeftSide = enemy.transform.position.x < mainCam.transform.position.x;
+            bool enemyOnLeftSide = ownerGO.transform.position.x < mainCam.transform.position.x;
             Vector2 offset = enemyOnLeftSide ? burnVFXOffsetLeft : burnVFXOffsetRight;
             vfxPosition += (Vector3)offset;
         }
@@ -118,40 +163,23 @@ public class BurnEffect : MonoBehaviour
             vfxPosition = hitPoint;
         }
 
-        // Apply burn
-        burnStatus.ApplyBurn(damagePerTick, burnDamageInstancesPerSecond, duration, projectileType, burnVFXPrefab, vfxPosition);
+        StatusController statusController = ownerGO.GetComponent<StatusController>() ?? ownerGO.GetComponentInParent<StatusController>();
+        if (statusController == null)
+        {
+            statusController = ownerGO.AddComponent<StatusController>();
+        }
 
-        // Show BURN status popup at enemy position
+        statusController.AddStatus(StatusId.Burn, burnStacksPerHit, duration, damagePerTick, sourceCard);
+
         if (DamageNumberManager.Instance != null)
         {
-            Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(enemy, enemy.transform.position);
+            Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(ownerGO, ownerGO.transform.position);
             DamageNumberManager.Instance.ShowBurn(anchor);
         }
 
-        // If the enemy was actually killed by the same hit that applied this
-        // burn (e.g., FireMine base damage), EnemyHealth.OnDeath may have
-        // already been raised BEFORE BurnStatus subscribed to it. In that
-        // case, ensure Immolation still triggers by explicitly invoking the
-        // death handler once when the owner is already dead.
-        EnemyHealth appliedHealth = enemy.GetComponent<EnemyHealth>() ?? enemy.GetComponentInParent<EnemyHealth>();
-        if (appliedHealth != null && !appliedHealth.IsAlive)
-        {
-            burnStatus.HandleOwnerDeath();
-        }
-
-        // Inform favour effects that the player has successfully inflicted
-        // the BURN status on this enemy so they can react (e.g., by adding
-        // Scorched stacks via StatusEffectsDebuffFavour).
-        FavourEffectManager favourManager = Object.FindObjectOfType<FavourEffectManager>();
-        if (favourManager != null)
-        {
-            favourManager.NotifyStatusApplied(enemy, StatusId.Burn);
-        }
-
-        Debug.Log($"<color=orange>🔥 BURN APPLIED! Damage/tick: {damagePerTick:F1}, Duration: {duration}s, Ticks/sec: {burnDamageInstancesPerSecond}</color>");
-
         return true;
     }
+
     /// <summary>
     /// Component attached to enemies that are burning
     /// Handles damage over time and visual effects
@@ -159,39 +187,70 @@ public class BurnEffect : MonoBehaviour
     public class BurnStatus : MonoBehaviour
     {
         private float baseDamagePerTick = 0f;
-        private float ticksPerSecond = 1f;
+
+        // burn tick is interval-based (seconds per tick), globally enforced.
+        private float tickIntervalSeconds = 0.25f;
+
         private float remainingDuration = 0f;
         private float nextTickTime = 0f;
+
         private ProjectileType damageType = ProjectileType.Fire;
         private GameObject burnVFX;
         private bool isBurning = false;
+
         private ProjectileCards sourceCard;
         private int stacks = 0;
         private bool hasImmolation = false;
 
         [SerializeField, Range(1, 4)]
         private int stacksPerHit = 1;
+
         private EnemyHealth ownerHealth;
         private bool subscribedToDeath = false;
+
+        // Getters used by auto-fire targeting logic
+        public bool IsBurning => isBurning;
+        public bool HasImmolation => hasImmolation;
+        public float RemainingDuration => remainingDuration;
+        public float TickIntervalSeconds => Mathf.Max(0.01f, tickIntervalSeconds);
+
+        // NEW: expose tick scheduling info so auto-fire can compute "ticks remaining" correctly.
+        public float NextTickTime => nextTickTime;
+
+        /// <summary>
+        /// Burn tick damage INCLUDING stack scaling (but BEFORE mitigation).
+        /// Mirrors DealBurnDamage() logic.
+        /// </summary>
+        public float GetRawTickDamageWithScaling()
+        {
+            float scaling = 1f + 0.5f * Mathf.Max(0, stacks - 1);
+            return Mathf.Max(0f, baseDamagePerTick * scaling);
+        }
 
         public void SetStacksPerHit(int stacks)
         {
             stacksPerHit = Mathf.Clamp(stacks, 1, 4);
         }
 
-        /// <summary>
-        /// Apply or refresh burn effect
-        /// </summary>
-        public void ApplyBurn(float damage, float tickRate, float duration, ProjectileType type, GameObject vfxPrefab, Vector3 hitPoint)
+        public void ApplyBurn(float damage, float tickInterval, float duration, ProjectileType type, GameObject vfxPrefab, Vector3 hitPoint)
         {
+            if (StatusControllerManager.Instance != null)
+            {
+                tickIntervalSeconds = StatusControllerManager.Instance.BurnTickIntervalSeconds;
+            }
+            else
+            {
+                tickIntervalSeconds = Mathf.Max(0.01f, tickInterval);
+            }
+
             if (!isBurning)
             {
                 baseDamagePerTick = damage;
-                ticksPerSecond = tickRate;
                 remainingDuration = duration;
                 damageType = type;
                 isBurning = true;
-                nextTickTime = Time.time + (1f / ticksPerSecond);
+
+                nextTickTime = Time.time + tickIntervalSeconds;
                 stacks = Mathf.Clamp(stacksPerHit, 1, 4);
 
                 if (vfxPrefab != null)
@@ -205,13 +264,19 @@ public class BurnEffect : MonoBehaviour
                     burnVFX = Instantiate(vfxPrefab, spawnPos, Quaternion.identity, transform);
                 }
 
-                Debug.Log($"<color=orange>🔥 Burn STARTED! Stacks={stacks}, BaseDamage={baseDamagePerTick:F1}/tick, Duration: {duration}s, Ticks/sec: {ticksPerSecond}</color>");
+                Debug.Log($"<color=orange>🔥 Burn STARTED! Stacks={stacks}, BaseDamage={baseDamagePerTick:F1}/tick, Duration: {duration}s, TickInterval: {tickIntervalSeconds:F2}s</color>");
             }
             else
             {
                 stacks = Mathf.Clamp(stacks + stacksPerHit, 1, 4);
                 remainingDuration = Mathf.Max(remainingDuration, duration);
-                Debug.Log($"<color=orange>🔥 Burn STACK ADDED! Stacks={stacks}, Duration now={remainingDuration:F1}s</color>");
+
+                if (StatusControllerManager.Instance != null)
+                {
+                    tickIntervalSeconds = StatusControllerManager.Instance.BurnTickIntervalSeconds;
+                }
+
+                Debug.Log($"<color=orange>🔥 Burn STACK ADDED! Stacks={stacks}, Duration now={remainingDuration:F1}s, TickInterval={tickIntervalSeconds:F2}s</color>");
             }
 
             if (stacks >= 4 && !hasImmolation)
@@ -219,8 +284,6 @@ public class BurnEffect : MonoBehaviour
                 stacks = 4;
                 hasImmolation = true;
 
-                // IMMOLATION just became active on this enemy – spawn the
-                // configured OnApply VFX at the collider center.
                 if (StatusControllerManager.Instance != null)
                 {
                     GameObject prefab = StatusControllerManager.Instance.ImmolationOnApplyEffectPrefab;
@@ -245,18 +308,22 @@ public class BurnEffect : MonoBehaviour
             sourceCard = card;
         }
 
-        void Update()
+        private void Update()
         {
             if (!isBurning) return;
 
-            // Tick damage
+            if (StatusControllerManager.Instance != null)
+            {
+                tickIntervalSeconds = StatusControllerManager.Instance.BurnTickIntervalSeconds;
+            }
+            tickIntervalSeconds = Mathf.Max(0.01f, tickIntervalSeconds);
+
             if (Time.time >= nextTickTime)
             {
                 DealBurnDamage();
-                nextTickTime = Time.time + (1f / ticksPerSecond);
+                nextTickTime = Time.time + tickIntervalSeconds;
             }
 
-            // Update duration
             remainingDuration -= Time.deltaTime;
             if (remainingDuration <= 0f)
             {
@@ -264,11 +331,12 @@ public class BurnEffect : MonoBehaviour
             }
         }
 
-        void DealBurnDamage()
+        private void DealBurnDamage()
         {
             EnemyHealth health = GetComponent<EnemyHealth>();
             if (health != null && health.IsAlive)
             {
+                // Preserve last-hit attribution for favour and on-death logic.
                 if (sourceCard != null)
                 {
                     EnemyLastHitSource marker = health.GetComponent<EnemyLastHitSource>();
@@ -279,120 +347,110 @@ public class BurnEffect : MonoBehaviour
                     marker.lastProjectileCard = sourceCard;
                 }
 
-                float scaling = 1f + 0.5f * Mathf.Max(0, stacks - 1);
-                float tickDamage = baseDamagePerTick * scaling;
+                float tickDamage = GetRawTickDamageWithScaling();
 
-                StatusDamageScope.BeginStatusTick();
+                // Apply DemonSlime-specific FireResistance (or vulnerability) to
+                // burn ticks so ALL Fire-type damage follows the same rules as
+                // direct Fire/NovaStar hits in PlayerDamageHelper.
+                DemonSlimeEnemy slime = health.GetComponent<DemonSlimeEnemy>() ?? health.GetComponentInParent<DemonSlimeEnemy>();
+                if (slime != null)
+                {
+                    float fireResist = slime.FireResistance;
+                    // Positive FireResistance reduces damage; negative values
+                    // increase it. However, status effects must always be able
+                    // to chip for at least 1 via the core status-tick min-1
+                    // rule, so we never allow the resistance factor to reach
+                    // exactly 0.
+                    float factor = 1f - (fireResist / 100f);
+                    if (factor <= 0f)
+                    {
+                        factor = 0.01f;
+                    }
+                    tickDamage *= factor;
+                }
+
+                bool isCrit = false;
+                PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
+                if (stats != null && stats.burnImmolationCanCrit)
+                {
+                    float chance = Mathf.Clamp(stats.critChance + Mathf.Max(0f, stats.burnImmolationCritChanceBonus), 0f, 100f);
+                    if (chance > 0f)
+                    {
+                        float roll = Random.Range(0f, 100f);
+                        if (roll < chance)
+                        {
+                            float critDamage = stats.critDamage + Mathf.Max(0f, stats.burnImmolationCritDamageBonusPercent);
+                            tickDamage *= Mathf.Max(0f, critDamage / 100f);
+                            isCrit = true;
+                        }
+                    }
+                }
+
+                StatusDamageScope.BeginStatusTick(DamageNumberManager.DamageType.Fire, true);
+
                 Vector3 anchor = DamageNumberManager.Instance != null
                     ? DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position)
                     : transform.position;
+
                 health.TakeDamage(tickDamage, anchor, Vector3.zero);
+
+                float resolved = StatusDamageScope.LastResolvedDamage;
                 StatusDamageScope.EndStatusTick();
 
-                if (DamageNumberManager.Instance != null)
+                if (DamageNumberManager.Instance != null && resolved > 0f)
                 {
-                    DamageNumberManager.Instance.ShowDamage(tickDamage, anchor, DamageNumberManager.DamageType.Fire, false, true);
+                    DamageNumberManager.Instance.ShowDamage(resolved, anchor, DamageNumberManager.DamageType.Fire, isCrit, true);
                 }
 
-                Debug.Log($"<color=orange>🔥 Burn tick: {tickDamage:F1} damage (stacks={stacks}, base={baseDamagePerTick:F1})</color>");
+                Debug.Log($"<color=orange>🔥 Burn tick: {resolved:F1} damage (raw={tickDamage:F1}, stacks={stacks}, base={baseDamagePerTick:F1}, interval={tickIntervalSeconds:F2}s)</color>");
             }
             else
             {
-                // Enemy dead, end burn
                 EndBurn();
             }
         }
 
-        void EndBurn()
+        private void EndBurn()
         {
+            if (!isBurning)
+            {
+                return;
+            }
+
             isBurning = false;
             remainingDuration = 0f;
+            stacks = 0;
+            hasImmolation = false;
 
-            // Destroy VFX
             if (burnVFX != null)
             {
                 Destroy(burnVFX);
+                burnVFX = null;
             }
 
-            Debug.Log("<color=orange>🔥 Burn ENDED</color>");
-
-            // Remove component
-            Destroy(this);
+            if (subscribedToDeath && ownerHealth != null)
+            {
+                ownerHealth.OnDeath -= HandleOwnerDeath;
+            }
+            subscribedToDeath = false;
         }
 
-        void OnDestroy()
+        private void HandleOwnerDeath()
         {
-            // Clean up VFX if component is destroyed
-            if (burnVFX != null)
-            {
-                Destroy(burnVFX);
-            }
+            EndBurn();
+        }
 
-            if (ownerHealth != null && subscribedToDeath)
+        private void OnDestroy()
+        {
+            if (subscribedToDeath && ownerHealth != null)
             {
                 ownerHealth.OnDeath -= HandleOwnerDeath;
             }
         }
 
-        public void HandleOwnerDeath()
-        {
-            if (!hasImmolation || baseDamagePerTick <= 0f || ticksPerSecond <= 0f)
-            {
-                return;
-            }
-
-            float scaling = 1f + 0.5f * Mathf.Max(0, stacks - 1);
-            float tickDamage = baseDamagePerTick * scaling;
-            float remainingTicks = Mathf.Max(0f, remainingDuration) * ticksPerSecond;
-            float totalDamage = tickDamage * remainingTicks;
-            if (totalDamage <= 0f)
-            {
-                return;
-            }
-
-            float radius = 3f;
-            if (StatusControllerManager.Instance != null)
-            {
-                radius = StatusControllerManager.Instance.ImmolationRadius;
-
-                // Spawn the Immolation OnDeath effect at the collider center
-                // of the dying owner before applying damage.
-                GameObject deathPrefab = StatusControllerManager.Instance.ImmolationOnDeathEffectPrefab;
-                float deathSizeMult = StatusControllerManager.Instance.ImmolationOnDeathEffectSizeMultiplier;
-                SpawnImmolationEffect(deathPrefab, deathSizeMult);
-            }
-
-            Collider2D[] hits = Physics2D.OverlapCircleAll(transform.position, radius, LayerMask.GetMask("Enemy"));
-            if (hits == null || hits.Length == 0)
-            {
-                return;
-            }
-
-            foreach (Collider2D col in hits)
-            {
-                if (col == null) continue;
-                GameObject target = col.gameObject;
-                if (target == gameObject) continue;
-
-                EnemyHealth eh = target.GetComponent<EnemyHealth>() ?? target.GetComponentInParent<EnemyHealth>();
-                if (eh != null && eh.IsAlive)
-                {
-                    Vector3 pos = col.bounds.center;
-                    StatusDamageScope.BeginStatusTick();
-                    eh.TakeDamage(totalDamage, pos, Vector3.zero);
-                    StatusDamageScope.EndStatusTick();
-
-                    if (DamageNumberManager.Instance != null)
-                    {
-                        DamageNumberManager.Instance.ShowDamage(totalDamage, pos, DamageNumberManager.DamageType.Fire, false, true);
-                    }
-                }
-            }
-        }
-
         private void SpawnImmolationEffect(GameObject prefab, float sizeMultiplier)
         {
-            if (prefab == null || sizeMultiplier <= 0f)
+            if (prefab == null)
             {
                 return;
             }
@@ -407,7 +465,7 @@ public class BurnEffect : MonoBehaviour
             GameObject instance = Instantiate(prefab, pos, Quaternion.identity);
             if (instance != null)
             {
-                instance.transform.localScale *= sizeMultiplier;
+                instance.transform.localScale *= Mathf.Max(0f, sizeMultiplier);
             }
         }
     }

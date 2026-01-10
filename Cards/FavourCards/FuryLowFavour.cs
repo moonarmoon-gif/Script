@@ -12,32 +12,112 @@ public class FuryLowFavour : FavourEffect
     public int BonusFury = 2;
 
     private int currentFuryAmount = 0;
+    private PlayerHealth playerHealth;
+    private StatusController statusController;
+    private int furyStacksGranted;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        currentFuryAmount = Mathf.Max(0, FuryAmount);
-        ApplyFury(player, currentFuryAmount);
-    }
-
-    public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
-    {
-        int bonus = Mathf.Max(0, BonusFury);
-        currentFuryAmount += bonus;
-        ApplyFury(player, bonus);
-    }
-
-    private void ApplyFury(GameObject player, int stacksToAdd)
-    {
-        if (player == null || stacksToAdd <= 0)
+        if (player == null)
         {
             return;
         }
 
-        StatusController status = player.GetComponent<StatusController>();
-        if (status != null)
+        if (playerHealth == null)
         {
-            // Fury is a permanent buff: grant stacks with infinite duration (0f).
-            status.AddStatus(StatusId.Fury, stacksToAdd, -1f);
+            playerHealth = player.GetComponent<PlayerHealth>();
+        }
+
+        if (statusController == null)
+        {
+            statusController = player.GetComponent<StatusController>();
+        }
+
+        if (playerHealth == null || statusController == null)
+        {
+            return;
+        }
+
+        currentFuryAmount = Mathf.Max(0, FuryAmount);
+        furyStacksGranted = 0;
+
+        UpdateFuryStacks();
+    }
+
+    public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
+    {
+        if (playerHealth == null || statusController == null)
+        {
+            OnApply(player, manager, sourceCard);
+        }
+
+        int bonus = Mathf.Max(0, BonusFury);
+        currentFuryAmount += bonus;
+
+        UpdateFuryStacks();
+    }
+
+    public override void OnUpdate(GameObject player, FavourEffectManager manager, float deltaTime)
+    {
+        if (playerHealth == null || statusController == null || !playerHealth.IsAlive)
+        {
+            return;
+        }
+
+        UpdateFuryStacks();
+    }
+
+    public override void OnRemove(GameObject player, FavourEffectManager manager)
+    {
+        if (statusController != null && furyStacksGranted > 0)
+        {
+            statusController.ConsumeStacks(StatusId.Rage, furyStacksGranted);
+        }
+
+        furyStacksGranted = 0;
+        playerHealth = null;
+        statusController = null;
+    }
+
+    private void UpdateFuryStacks()
+    {
+        if (playerHealth == null || statusController == null || currentFuryAmount <= 0)
+        {
+            return;
+        }
+
+        float max = playerHealth.MaxHealth;
+        if (max <= 0f)
+        {
+            return;
+        }
+
+        float current = playerHealth.CurrentHealth;
+        float fraction = current / max;
+
+        float thresholdFraction = 0.5f;
+        if (StatusControllerManager.Instance != null)
+        {
+            thresholdFraction = StatusControllerManager.Instance.RageLowHealthThresholdPercent / 100f;
+        }
+
+        if (fraction <= thresholdFraction)
+        {
+            int desiredStacks = currentFuryAmount;
+            int delta = desiredStacks - furyStacksGranted;
+            if (delta > 0)
+            {
+                statusController.AddStatus(StatusId.Rage, delta, -1f);
+                furyStacksGranted += delta;
+            }
+        }
+        else
+        {
+            if (furyStacksGranted > 0)
+            {
+                statusController.ConsumeStacks(StatusId.Rage, furyStacksGranted);
+                furyStacksGranted = 0;
+            }
         }
     }
 }

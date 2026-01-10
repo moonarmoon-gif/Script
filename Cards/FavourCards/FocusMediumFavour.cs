@@ -23,6 +23,7 @@ public class FocusMediumFavour : FavourEffect
     private int currentFocusStack;
     private int currentMaxStacks;
     private int stacksGranted;
+    private bool hadShieldLastFrame;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
@@ -52,6 +53,7 @@ public class FocusMediumFavour : FavourEffect
         // Reset and clamp our internal counter so it never exceeds the max for
         // this run. We only track stacks granted by this favour instance.
         stacksGranted = 0;
+        hadShieldLastFrame = HasAnyShield();
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -80,12 +82,24 @@ public class FocusMediumFavour : FavourEffect
             return;
         }
 
-        if (stacksGranted >= currentMaxStacks)
+        bool hasShieldNow = HasAnyShield();
+
+        // If we no longer have any shield but previously did, consume all
+        // Focus stacks granted by this favour instance.
+        if (!hasShieldNow && hadShieldLastFrame && stacksGranted > 0 && statusController != null)
+        {
+            statusController.ConsumeStacks(StatusId.Focus, stacksGranted);
+            stacksGranted = 0;
+        }
+
+        hadShieldLastFrame = hasShieldNow;
+
+        if (!hasShieldNow)
         {
             return;
         }
 
-        if (!HasAnyShield())
+        if (stacksGranted >= currentMaxStacks)
         {
             return;
         }
@@ -122,6 +136,12 @@ public class FocusMediumFavour : FavourEffect
     {
         // Treat an active HolyShield as a valid shield source.
         if (HolyShield.ActiveShield != null && HolyShield.ActiveShield.IsAlive)
+        {
+            return true;
+        }
+
+        if ((ReflectShield.ActiveShield != null && ReflectShield.ActiveShield.IsAlive) ||
+            (NullifyShield.ActiveShield != null && NullifyShield.ActiveShield.IsAlive))
         {
             return true;
         }

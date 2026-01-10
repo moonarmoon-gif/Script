@@ -18,10 +18,10 @@ public class NecromancerProjectile : MonoBehaviour
     [Header("Visual Effects")]
     public GameObject hitEffectPrefab;
     public float hitEffectLifetime = 0.5f;
-    
+
     [Tooltip("Hit effect offset when projectile is moving left")]
     public Vector2 hitEffectOffsetRight = Vector2.zero;
-    
+
     [Tooltip("Hit effect offset when projectile is moving right")]
     public Vector2 hitEffectOffsetLeft = Vector2.zero;
 
@@ -41,6 +41,9 @@ public class NecromancerProjectile : MonoBehaviour
     private bool isInTimedDamageMode;
     private bool isDestroying;
 
+    // NEW: If owner has EnemyHealth and dies, projectile is destroyed and can never deal damage.
+    private EnemyHealth ownerEnemyHealth;
+
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
@@ -54,15 +57,20 @@ public class NecromancerProjectile : MonoBehaviour
             rb.interpolation = RigidbodyInterpolation2D.Interpolate;
             rb.bodyType = RigidbodyType2D.Dynamic;
         }
-
     }
 
     public void Initialize(float projectileDamage, Vector2 direction, Collider2D spawner = null)
     {
-        damage = projectileDamage;
+        damage = Mathf.Max(1f, projectileDamage);
         moveDirection = direction.normalized;
         spawnerCollider = spawner;
         owner = spawner != null ? spawner.gameObject : null;
+
+        ownerEnemyHealth = owner != null ? (owner.GetComponent<EnemyHealth>() ?? owner.GetComponentInParent<EnemyHealth>()) : null;
+        if (ownerEnemyHealth != null)
+        {
+            ownerEnemyHealth.OnDeath += HandleOwnerDeath;
+        }
 
         if (spawnerCollider != null && projectileCollider != null)
         {
@@ -89,6 +97,17 @@ public class NecromancerProjectile : MonoBehaviour
             float angle = Mathf.Atan2(moveDirection.y, moveDirection.x) * Mathf.Rad2Deg;
             transform.rotation = Quaternion.Euler(0f, 0f, angle);
         }
+    }
+
+    private void HandleOwnerDeath()
+    {
+        if (ownerEnemyHealth != null)
+        {
+            ownerEnemyHealth.OnDeath -= HandleOwnerDeath;
+        }
+
+        ownerEnemyHealth = null;
+        owner = null;
     }
 
     void Update()
@@ -408,15 +427,23 @@ public class NecromancerProjectile : MonoBehaviour
         if (hitPlayer && hitEffectPrefab != null)
         {
             Vector3 effectPosition = hitPoint != default ? hitPoint : transform.position;
-            
+
             // Determine offset based on projectile direction
             Vector2 offset = moveDirection.x < 0 ? hitEffectOffsetLeft : hitEffectOffsetRight;
             effectPosition += (Vector3)offset;
-            
+
             GameObject effect = Instantiate(hitEffectPrefab, effectPosition, Quaternion.identity);
             Destroy(effect, hitEffectLifetime);
         }
 
         Destroy(gameObject, 0.05f);
+    }
+
+    private void OnDestroy()
+    {
+        if (ownerEnemyHealth != null)
+        {
+            ownerEnemyHealth.OnDeath -= HandleOwnerDeath;
+        }
     }
 }

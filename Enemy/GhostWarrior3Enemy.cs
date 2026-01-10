@@ -624,7 +624,7 @@ public class GhostWarrior3Enemy : MonoBehaviour
 
         SetAttackAnim(2, false);
 
-        // THIRD ATTACK
+        // THIRD ATTACK (AOE)
         SetAttackAnim(3, true);
 
         if (thirdAttackDamageDelayV2 > 0f)
@@ -647,7 +647,11 @@ public class GhostWarrior3Enemy : MonoBehaviour
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
+
+            // NEW: GhostWarrior3 third attack is classified as AOE-type damage.
+            DamageAoeScope.BeginAoeDamage();
             playerDamageable.TakeDamage(thirdAttackDamageV2, hitPoint, hitNormal);
+            DamageAoeScope.EndAoeDamage();
         }
         else
         {

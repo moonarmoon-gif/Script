@@ -164,42 +164,46 @@ public class ProjectileModifierCoreCards : BaseCard
         {
             float primaryVal = GetPrimaryValue();
             float secondaryVal = GetSecondaryValue();
-            return description.Replace("?", primaryVal.ToString("F0")).Replace("??", secondaryVal.ToString("F0"));
+            string primaryStr = primaryVal.ToString("0.##");
+            string secondaryStr = secondaryVal.ToString("0.##");
+            return description.Replace("??", secondaryStr).Replace("?", primaryStr);
         }
         
         float primaryVal2 = GetPrimaryValue();
         float secondaryVal2 = GetSecondaryValue();
+        string primaryStr2 = primaryVal2.ToString("0.##");
+        string secondaryStr2 = secondaryVal2.ToString("0.##");
         
         switch (modType)
         {
             case ProjectileModType.IncreasedSpeed:
-                return $"Projectiles move {primaryVal2}% faster";
+                return $"Projectiles move {primaryStr2}% faster";
             case ProjectileModType.IncreasedSize:
-                return $"Projectiles are {primaryVal2}% larger";
+                return $"Projectiles are {primaryStr2}% larger";
             case ProjectileModType.Piercing:
                 return $"Projectiles pierce through {(int)primaryVal2} enemies";
             case ProjectileModType.Homing:
-                return $"Projectiles home towards enemies (strength: {primaryVal2})";
+                return $"Projectiles home towards enemies (strength: {primaryStr2})";
             case ProjectileModType.Multishot:
                 return $"Fire {(int)primaryVal2} additional projectiles";
             case ProjectileModType.Explosive:
-                return $"Projectiles explode ({primaryVal2} radius, {secondaryVal2} damage)";
+                return $"Projectiles explode ({primaryStr2} radius, {secondaryStr2} damage)";
             case ProjectileModType.Bouncing:
                 return $"Projectiles bounce {(int)primaryVal2} times";
             case ProjectileModType.Splitting:
                 return $"Projectiles split into {(int)primaryVal2} on impact";
             case ProjectileModType.ChainReaction:
-                return $"Projectiles trigger chain reactions ({primaryVal2} radius)";
+                return $"Projectiles trigger chain reactions ({primaryStr2} radius)";
             case ProjectileModType.LifetimeIncrease:
-                return $"Projectiles last {primaryVal2}% longer";
+                return $"Projectiles last {primaryStr2}% longer";
             case ProjectileModType.CooldownReduction:
-                return $"Reduce projectile cooldown by {primaryVal2}%";
+                return $"Reduce projectile cooldown by {primaryStr2}%";
             case ProjectileModType.ManaCostReduction:
-                return $"Reduce projectile mana cost by {primaryVal2}%";
+                return $"Reduce projectile mana cost by {primaryStr2}%";
             case ProjectileModType.DamageIncrease:
-                return $"Increase projectile damage by +{primaryVal2:F0}";
+                return $"Increase projectile damage by +{primaryStr2}";
             case ProjectileModType.StatusEffect:
-                return $"{primaryVal2}% chance to apply status effects";
+                return $"{primaryStr2}% chance to apply status effects";
             default:
                 return description;
         }

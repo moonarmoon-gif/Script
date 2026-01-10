@@ -7,10 +7,6 @@ public class ArmorIncreaseFavour : FavourEffect
     [Tooltip("Flat armor gained each time this favour is taken.")]
     public float ArmorGain = 2f;
 
-    [Header("Thorn Settings")]
-    [Tooltip("Thorn stacks gained each time this favour is taken.")]
-    public int ThornGain = 5;
-
     private PlayerStats playerStats;
     private PlayerLevel playerLevel;
     private StatusController statusController;

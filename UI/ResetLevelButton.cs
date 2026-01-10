@@ -45,6 +45,29 @@ public class ResetLevelButton : MonoBehaviour
 
     void ResetLevel()
     {
+        if (CardSelectionManager.Instance != null)
+        {
+            CardSelectionManager.Instance.ForceCloseSelectionUI();
+        }
+
+        Time.timeScale = 1f;
+
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.ResetRunState();
+        }
+
+        FavourEffect.ResetPickCounts();
+
+        if (EnemyScalingSystem.Instance != null)
+        {
+            EnemyScalingSystem.Instance.ResetScaling();
+        }
+
+        HolyShield.ResetRunState();
+        ReflectShield.ResetRunState();
+        NullifyShield.ResetRunState();
+
         Debug.Log("<color=red>═══════════════════════════════════════</color>");
         Debug.Log("<color=red>RESETTING PLAYER TO LEVEL 1</color>");
         Debug.Log("<color=red>═══════════════════════════════════════</color>");
@@ -66,6 +89,8 @@ public class ResetLevelButton : MonoBehaviour
         
         // 6. Reset ProjectileCardModifiers
         ResetProjectileCardModifiers();
+
+        ResetFavours();
         
         // 7. Optionally destroy existing projectiles in scene
         if (destroyExistingProjectiles)
@@ -89,8 +114,8 @@ public class ResetLevelButton : MonoBehaviour
             var expToNextField = typeof(PlayerLevel).GetField("expToNextLevel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             
             if (levelField != null) levelField.SetValue(playerLevel, 1);
-            if (expField != null) expField.SetValue(playerLevel, 0);
-            if (expToNextField != null) expToNextField.SetValue(playerLevel, 100);
+            if (expField != null) expField.SetValue(playerLevel, 0f);
+            if (expToNextField != null) expToNextField.SetValue(playerLevel, 100f);
             
             // Trigger the OnExpChanged event to update UI
             var onExpChangedEvent = typeof(PlayerLevel).GetField("OnExpChanged", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
@@ -320,5 +345,19 @@ public class ResetLevelButton : MonoBehaviour
         }
         
         Debug.Log($"<color=yellow>Destroyed {uniqueProjectiles.Count} existing projectiles</color>");
+    }
+
+    void ResetFavours()
+    {
+        FavourEffectManager favourManager = FindObjectOfType<FavourEffectManager>();
+        if (favourManager != null)
+        {
+            favourManager.ClearAllEffects();
+            Debug.Log("<color=yellow>Favour effects cleared</color>");
+        }
+        else
+        {
+            Debug.LogWarning("ResetLevelButton: FavourEffectManager not found!");
+        }
     }
 }

@@ -185,6 +185,28 @@ public class PlayerController : MonoBehaviour
         }
 
         // Reload the current scene
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.ResetRunState();
+        }
+
+        FavourEffect.ResetPickCounts();
+
+        if (EnemyScalingSystem.Instance != null)
+        {
+            EnemyScalingSystem.Instance.ResetScaling();
+        }
+
+        if (ProjectileCardLevelSystem.Instance != null)
+        {
+            ProjectileCardLevelSystem.Instance.ResetAllLevels();
+        }
+
+        if (ProjectileCardModifiers.Instance != null)
+        {
+            ProjectileCardModifiers.Instance.ResetRunState();
+        }
+
         HolyShield.ResetRunState();
         SceneManager.LoadScene(SceneManager.GetActiveScene().name);
     }

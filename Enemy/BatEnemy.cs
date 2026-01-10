@@ -83,6 +83,19 @@ public class BatEnemy : MonoBehaviour
         {
             attackDamageDelayV2 = attackDamageDelay;
         }
+
+        float referenceX = transform.position.x;
+        if (AdvancedPlayerController.Instance != null)
+        {
+            referenceX = AdvancedPlayerController.Instance.transform.position.x;
+        }
+        else if (Camera.main != null)
+        {
+            referenceX = Camera.main.transform.position.x;
+        }
+
+        bool shouldFlipLeft = transform.position.x >= referenceX;
+        spriteRenderer.flipX = invertFlip ? !shouldFlipLeft : shouldFlipLeft;
     }
 
     private int BeginAttackAction()

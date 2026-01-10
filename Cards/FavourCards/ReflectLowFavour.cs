@@ -1,72 +1,75 @@
 using UnityEngine;
 
-[CreateAssetMenu(fileName = "ReflectLowFavour", menuName = "Favour Effects/Reflect Low")]
+[CreateAssetMenu(fileName = "ReflectLowFavour", menuName = "Favour Effects 2/Reflect Low")]
 public class ReflectLowFavour : FavourEffect
 {
     [Header("Reflect Low Settings")]
     [Tooltip("Base number of Reflect stacks granted each recharge.")]
     public int ReflectGain = 1;
 
-    [Tooltip("Time in seconds between automatic Reflect stack gains.")]
-    public float RechargeTimer = 30f;
-
-    [Tooltip("Maximum Reflect stacks that can be maintained by this favour.")]
-    public int MaxStacks = 2;
+    [Tooltip("Number of melee-like enemy hits required to grant Reflect stacks.")]
+    public int NumberOfHits = 3;
 
     [Header("Enhanced")]
     [Tooltip("Additional Reflect stacks gained each recharge when enhanced.")]
     public int BonusReflectGain = 1;
 
-    [Tooltip("Additional maximum Reflect stacks granted when enhanced.")]
-    public int BonusMaxStacks = 1;
-
-    private float rechargeTimerRemaining = 0f;
-    private int currentMaxStacks = 0;
+    private const float MeleeRangeThreshold = 4f;
     private int currentGainPerTick = 0;
+    private int hitCount = 0;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
         currentGainPerTick = Mathf.Max(0, ReflectGain);
-        currentMaxStacks = Mathf.Max(0, MaxStacks);
-
-        // Start with max stacks the first time this favour is obtained.
-        if (player != null && currentMaxStacks > 0)
-        {
-            StatusController status = player.GetComponent<StatusController>();
-            if (status != null)
-            {
-                int existing = status.GetStacks(StatusId.Reflect);
-                int toAdd = Mathf.Max(0, currentMaxStacks - existing);
-                if (toAdd > 0)
-                {
-                    status.AddStatus(StatusId.Reflect, toAdd, -1f);
-                }
-            }
-        }
-
-        rechargeTimerRemaining = RechargeTimer;
+        hitCount = 0;
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
         currentGainPerTick += Mathf.Max(0, BonusReflectGain);
-        currentMaxStacks += Mathf.Max(0, BonusMaxStacks);
     }
 
-    public override void OnUpdate(GameObject player, FavourEffectManager manager, float deltaTime)
+    public override void OnPlayerHit(GameObject player, GameObject attacker, ref float damage, FavourEffectManager manager)
     {
-        if (player == null || RechargeTimer <= 0f || currentGainPerTick <= 0 || currentMaxStacks <= 0)
+        return;
+    }
+
+    public override void OnPlayerDamageFinalized(GameObject player, GameObject attacker, float finalDamage, bool isStatusTick, bool isAoeDamage, FavourEffectManager manager)
+    {
+        if (player == null || attacker == null)
         {
             return;
         }
 
-        rechargeTimerRemaining -= deltaTime;
-        if (rechargeTimerRemaining > 0f)
+        if (isStatusTick || isAoeDamage)
         {
             return;
         }
 
-        rechargeTimerRemaining += RechargeTimer;
+        if (finalDamage < 1f)
+        {
+            return;
+        }
+
+        float distance = Vector3.Distance(attacker.transform.position, player.transform.position);
+        if (distance > MeleeRangeThreshold)
+        {
+            return;
+        }
+
+        int required = Mathf.Max(1, NumberOfHits);
+        hitCount++;
+        if (hitCount < required)
+        {
+            return;
+        }
+
+        hitCount = 0;
+
+        if (currentGainPerTick <= 0)
+        {
+            return;
+        }
 
         StatusController status = player.GetComponent<StatusController>();
         if (status == null)
@@ -74,17 +77,6 @@ public class ReflectLowFavour : FavourEffect
             return;
         }
 
-        int existing = status.GetStacks(StatusId.Reflect);
-        if (existing >= currentMaxStacks)
-        {
-            return;
-        }
-
-        int room = currentMaxStacks - existing;
-        int toAdd = Mathf.Min(room, currentGainPerTick);
-        if (toAdd > 0)
-        {
-            status.AddStatus(StatusId.Reflect, toAdd, -1f);
-        }
+        status.AddStatus(StatusId.Reflect, currentGainPerTick, -1f);
     }
 }

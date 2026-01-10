@@ -63,6 +63,15 @@ public class EnemyCardSpawner : MonoBehaviour
 
     [Tooltip("Duration in seconds that the first card spawn boost stays active")]
     public float firstCardBoostDuration = 5f;
+
+    [Header("First Enemy Off-Camera Speed Boost")]
+    [Tooltip("Move-speed multiplier applied to enemies spawned from the very first non-boss enemy card while they are off-camera. 1 = no boost.")]
+    public float firstEnemyOffCameraSpeedMultiplier = 2f;
+
+    [Tooltip("Maximum duration in seconds that the off-camera speed boost can stay active for a spawned enemy.")]
+    public float firstEnemyOffCameraBoostDuration = 3f;
+
+    public float MoveSpeedOffCamersOffset = 0.15f;
     
     [Header("Card Count Spawn Scaling")]
     [Tooltip("Additional spawn interval multiplier per extra enemy card (e.g., 0.5 = +50% per extra card)")]
@@ -115,6 +124,9 @@ public class EnemyCardSpawner : MonoBehaviour
     
     [Tooltip("Menace timer - boss is immune and projectiles don't spawn (seconds)")]
     public float bossMenaceTimer = 5.5f;
+
+    [Tooltip("Duration over which player projectiles should fade away at boss event start.")]
+    public float FadeAwayDuration = 0.5f;
     
     [Tooltip("Projectile cooldown reduction after menace timer ends (0.5 = 50% reduction)")]
     [Range(0f, 1f)]
@@ -164,6 +176,7 @@ public class EnemyCardSpawner : MonoBehaviour
     private float currentBossExpMultiplier = 1f;
     private float currentBossDamageMultiplier = 1f;
     private float currentBossMenaceTimer = 0f;
+    private float currentBossDeathRewardTimer = 0f;
     private float bossEventTimer = 0f;
     private bool cardSelectionTimerPaused = false;
     private bool showingPostBossCards = false; // Prevent boss timer during post-boss card selection
@@ -171,7 +184,7 @@ public class EnemyCardSpawner : MonoBehaviour
     private float pausedCardSelectionTimer = 0f;
     
     // EXP from the boss itself (queued so level-up cards appear after cleanup)
-    private int queuedBossExpReward = 0;
+    private float queuedBossExpReward = 0f;
 
     // Track boss menace and death state
     private bool bossMenaceActive = false;   // True while boss menace timer is running (no enemy spawns allowed)
@@ -221,6 +234,8 @@ public class EnemyCardSpawner : MonoBehaviour
     private float firstCardBoostEndTime = 0f;
     private bool initialSelectionPhaseActive = false;
     private bool firstCardBoostAssigned = false;
+
+    private float firstEnemyOffCameraBoostWindowEndTime = -1f;
     
     // Game start time and rarity-scaling elapsed time (excludes time spent in boss events)
     private float gameStartTime = 0f;
@@ -960,6 +975,7 @@ public class EnemyCardSpawner : MonoBehaviour
                 firstRegisteredCard = card;
                 firstCardBoostEndTime = Time.time + firstCardBoostDuration;
                 firstCardBoostAssigned = true;
+                firstEnemyOffCameraBoostWindowEndTime = -1f;
                 Debug.Log($"<color=magenta>First INITIAL enemy card '{card.cardName}' registered - applying {firstCardSpawnIntervalReduction * 100f:F0}% spawn interval reduction for {firstCardBoostDuration:F1}s</color>");
             }
             
@@ -1072,6 +1088,32 @@ public class EnemyCardSpawner : MonoBehaviour
             tag = spawnedEnemy.AddComponent<EnemyCardTag>();
         }
         tag.rarity = card.rarity;
+
+        // Optional: give the very first non-boss enemy-card enemies an off-camera
+        // move-speed boost so they reach the battlefield faster. The boost is
+        // removed automatically once the enemy enters the damageable camera
+        // area (OffscreenDamageChecker) or the per-enemy duration expires.
+        if (card.rarity != CardRarity.Boss &&
+            firstRegisteredCard != null &&
+            card == firstRegisteredCard &&
+            firstEnemyOffCameraSpeedMultiplier > 1f &&
+            firstEnemyOffCameraBoostDuration > 0f)
+        {
+            StatusController status = spawnedEnemy.GetComponent<StatusController>() ?? spawnedEnemy.GetComponentInChildren<StatusController>();
+            if (status != null)
+            {
+                if (firstEnemyOffCameraBoostWindowEndTime < 0f)
+                {
+                    firstEnemyOffCameraBoostWindowEndTime = Time.time + firstEnemyOffCameraBoostDuration;
+                }
+
+                float remaining = firstEnemyOffCameraBoostWindowEndTime - Time.time;
+                if (remaining > 0f)
+                {
+                    status.ApplyOffCameraSpeedBoost(firstEnemyOffCameraSpeedMultiplier, remaining, MoveSpeedOffCamersOffset);
+                }
+            }
+        }
 
         Debug.Log($"<color=green>EnemyCardSpawner: Spawned {card.enemyPrefab.name} from card '{card.cardName}' (Rarity: {card.rarity}) at {spawnPosition}</color>");
     }
@@ -1361,12 +1403,24 @@ public class EnemyCardSpawner : MonoBehaviour
             ForceImmediateEnemySpawnsAfterMenace();
         }
         
-        // STEP 11: Wait for boss death (GameObject destroyed after its own death animation)
+        // STEP 11: Wait for boss death and an optional reward timer window.
         Debug.Log("<color=yellow>Waiting for boss to be defeated...</color>");
-        
-        while (currentBossEnemy != null)
+
+        // First wait until the boss EnemyHealth death event fires.
+        while (!bossDeathTriggered)
         {
-            yield return new WaitForSeconds(0.5f);
+            yield return new WaitForSeconds(0.1f);
+        }
+
+        float rewardWindow = currentBossDeathRewardTimer;
+        if (rewardWindow > 0f)
+        {
+            float elapsedReward = 0f;
+            while (elapsedReward < rewardWindow)
+            {
+                elapsedReward += Time.deltaTime;
+                yield return null;
+            }
         }
         
         Debug.Log("<color=lime>╔═══════════════════════════════════════════════════════════╗</color>");
@@ -1376,15 +1430,7 @@ public class EnemyCardSpawner : MonoBehaviour
         // STEP 11.5: Wait until ALL remaining enemies (killed on boss death) finish their death animations
         // and are fully destroyed before showing post-boss enemy cards.
         Debug.Log("<color=yellow>Waiting for all remaining enemies to finish death animations...</color>");
-        while (true)
-        {
-            GameObject[] enemiesAfterBoss = GameObject.FindGameObjectsWithTag("Enemy");
-            if (enemiesAfterBoss == null || enemiesAfterBoss.Length == 0)
-            {
-                break; // No enemies left in the scene
-            }
-            yield return new WaitForSeconds(0.25f);
-        }
+        yield return null;
         
         // Grant any EXP queued from the boss itself now that all death
         // animations are finished, while bossDeathCleanupInProgress is still
@@ -1403,6 +1449,7 @@ public class EnemyCardSpawner : MonoBehaviour
         // the boss behaves like a fresh run.
         firstRegisteredCard = null;
         firstCardBoostEndTime = 0f;
+        firstEnemyOffCameraBoostWindowEndTime = -1f;
         
         // STEP 13: Resume enemy scaling and apply any post-boss bonuses
         if (EnemyScalingSystem.Instance != null)
@@ -1594,13 +1641,18 @@ public class EnemyCardSpawner : MonoBehaviour
     
     public void QueueBossExperience(int amount)
     {
-        if (amount <= 0) return;
+        QueueBossExperience((float)amount);
+    }
+
+    public void QueueBossExperience(float amount)
+    {
+        if (amount <= 0f) return;
         queuedBossExpReward += amount;
     }
 
     private void GrantQueuedBossExperience()
     {
-        if (queuedBossExpReward <= 0) return;
+        if (queuedBossExpReward <= 0f) return;
 
         PlayerLevel playerLevel = null;
 
@@ -1619,7 +1671,7 @@ public class EnemyCardSpawner : MonoBehaviour
             Debug.Log($"<color=cyan>Granted queued boss EXP: {queuedBossExpReward}</color>");
         }
 
-        queuedBossExpReward = 0;
+        queuedBossExpReward = 0f;
     }
 
     private void RefillPlayerHealthAndMana()
@@ -1779,6 +1831,12 @@ public class EnemyCardSpawner : MonoBehaviour
         }
 
         Debug.Log($"<color=magenta>Boss menace timer for {bossCard.cardName}: {currentBossMenaceTimer:F2}s</color>");
+
+        currentBossDeathRewardTimer = bossCard.BossDeathRewardTimer;
+        if (currentBossDeathRewardTimer < 0f)
+        {
+            currentBossDeathRewardTimer = 0f;
+        }
     }
 
     private void SpawnBossEnemy(GameObject bossPrefab)
@@ -1921,37 +1979,36 @@ public class EnemyCardSpawner : MonoBehaviour
     
     private void DestroyAllPlayerProjectiles()
     {
-        // Find and destroy all active TornadoController instances
+        float duration = Mathf.Max(0.01f, FadeAwayDuration);
+        int fadedCount = 0;
+
         TornadoController[] tornadoes = FindObjectsOfType<TornadoController>();
-        int destroyedCount = 0;
         for (int i = 0; i < tornadoes.Length; i++)
         {
             if (tornadoes[i] != null && tornadoes[i].gameObject != null)
             {
-                Destroy(tornadoes[i].gameObject);
-                destroyedCount++;
+                BeginFadeOutForProjectile(tornadoes[i].gameObject, duration);
+                fadedCount++;
             }
         }
-        // Also destroy any active Collapse projectiles (in case they are not tagged as "Projectile")
+
         Collapse[] collapses = FindObjectsOfType<Collapse>();
         for (int i = 0; i < collapses.Length; i++)
         {
             if (collapses[i] != null && collapses[i].gameObject != null)
             {
-                Destroy(collapses[i].gameObject);
-                destroyedCount++;
+                BeginFadeOutForProjectile(collapses[i].gameObject, duration);
+                fadedCount++;
             }
         }
 
-        // Destroy any active NovaStar / DwarfStar instances explicitly, since they
-        // are managed by OrbitalStarManager and may not use the generic Projectile tag.
         NovaStar[] novaStars = FindObjectsOfType<NovaStar>();
         for (int i = 0; i < novaStars.Length; i++)
         {
             if (novaStars[i] != null && novaStars[i].gameObject != null)
             {
-                Destroy(novaStars[i].gameObject);
-                destroyedCount++;
+                BeginFadeOutForProjectile(novaStars[i].gameObject, duration);
+                fadedCount++;
             }
         }
 
@@ -1960,27 +2017,89 @@ public class EnemyCardSpawner : MonoBehaviour
         {
             if (dwarfStars[i] != null && dwarfStars[i].gameObject != null)
             {
-                Destroy(dwarfStars[i].gameObject);
-                destroyedCount++;
+                BeginFadeOutForProjectile(dwarfStars[i].gameObject, duration);
+                fadedCount++;
             }
         }
 
-        // Find all projectiles with "Projectile" tag
         GameObject[] projectiles = GameObject.FindGameObjectsWithTag("Projectile");
-        
         for (int i = 0; i < projectiles.Length; i++)
         {
             GameObject proj = projectiles[i];
+            if (proj == null) continue;
+
             HolyShield shield = proj.GetComponent<HolyShield>();
             if (shield != null)
             {
                 continue;
             }
-            Destroy(proj);
-            destroyedCount++;
+
+            BeginFadeOutForProjectile(proj, duration);
+            fadedCount++;
         }
-        
-        Debug.Log($"<color=lime>Destroyed {destroyedCount} player projectiles!</color>");
+
+        Debug.Log($"<color=lime>Fading out {fadedCount} player projectiles over {duration:F2}s!</color>");
+    }
+
+    private void BeginFadeOutForProjectile(GameObject obj, float duration)
+    {
+        if (obj == null) return;
+
+        Collider2D[] colliders = obj.GetComponentsInChildren<Collider2D>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            if (colliders[i] != null)
+            {
+                colliders[i].enabled = false;
+            }
+        }
+
+        StartCoroutine(FadeOutAndDestroyProjectile(obj, duration));
+    }
+
+    private IEnumerator FadeOutAndDestroyProjectile(GameObject obj, float duration)
+    {
+        if (obj == null) yield break;
+
+        SpriteRenderer[] sprites = obj.GetComponentsInChildren<SpriteRenderer>(true);
+        if (sprites.Length == 0)
+        {
+            yield return new WaitForSeconds(duration);
+            if (obj != null)
+            {
+                Destroy(obj);
+            }
+            yield break;
+        }
+
+        Color[] originalColors = new Color[sprites.Length];
+        for (int i = 0; i < sprites.Length; i++)
+        {
+            originalColors[i] = sprites[i].color;
+        }
+
+        float elapsed = 0f;
+        while (elapsed < duration && obj != null)
+        {
+            float t = Mathf.Clamp01(elapsed / duration);
+            float alpha = 1f - t;
+
+            for (int i = 0; i < sprites.Length; i++)
+            {
+                if (sprites[i] == null) continue;
+                Color c = originalColors[i];
+                c.a *= alpha;
+                sprites[i].color = c;
+            }
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        if (obj != null)
+        {
+            Destroy(obj);
+        }
     }
     
     private void SetProjectilesSpawnable(bool spawnable)

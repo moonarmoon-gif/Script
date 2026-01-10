@@ -72,7 +72,12 @@ public class DamageNumber : MonoBehaviour
             // without a fully initialized material.
         }
         
-        textMesh.text = Mathf.CeilToInt(damage).ToString();
+        float displayDamage = damage;
+        if (StatusControllerManager.Instance != null)
+        {
+            displayDamage = StatusControllerManager.Instance.RoundDamage(displayDamage);
+        }
+        textMesh.text = Mathf.RoundToInt(displayDamage).ToString();
         textMesh.color = color;
         startColor = color;
 

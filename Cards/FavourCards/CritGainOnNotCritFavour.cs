@@ -1,18 +1,16 @@
-using System.Collections.Generic;
 using UnityEngine;
 
-[CreateAssetMenu(fileName = "CritGainOnNotCritFavour", menuName = "Favour Effects/Crit Gain On Not Crit")] 
+[CreateAssetMenu(fileName = "CritGainOnNotCritFavour", menuName = "Favour Effects 2/Crit Gain On Not Crit")] 
 public class CritGainOnNotCritFavour : FavourEffect
 {
     [Header("Crit Gain On Not Crit Settings")]
-    [Tooltip("Crit chance gain (in percent) added to the current ACTIVE projectile when it fails to crit.")]
-    public float CritGain = 5f;
+    [Tooltip("FRENZY stacks gained when damage that can crit does NOT crit.")]
+    public float FrenzyGain = 1f;
 
     private PlayerStats playerStats;
-
-    // Track extra crit chance per ACTIVE projectile card. Keyed by the
-    // runtime ProjectileCards instance currently firing.
-    private readonly Dictionary<ProjectileCards, float> bonusCritByCard = new Dictionary<ProjectileCards, float>();
+    private StatusController playerStatus;
+    private int sourceKey;
+    private int lastProcessedNuclearStrikeFrame = -1;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
@@ -21,7 +19,18 @@ public class CritGainOnNotCritFavour : FavourEffect
             playerStats = player.GetComponent<PlayerStats>();
         }
 
-        bonusCritByCard.Clear();
+        if (player != null)
+        {
+            playerStatus = player.GetComponent<StatusController>();
+        }
+
+        sourceKey = Mathf.Abs(GetInstanceID());
+        if (sourceKey == 0)
+        {
+            sourceKey = 1;
+        }
+
+        lastProcessedNuclearStrikeFrame = -1;
 
         // One-time favour: prevent this card from appearing again this run.
         if (sourceCard != null && CardSelectionManager.Instance != null)
@@ -32,7 +41,6 @@ public class CritGainOnNotCritFavour : FavourEffect
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        // No explicit enhanced parameters; upgrades simply re-run setup.
         OnApply(player, manager, sourceCard);
     }
 
@@ -53,72 +61,77 @@ public class CritGainOnNotCritFavour : FavourEffect
             return;
         }
 
+        if (playerStatus == null && player != null)
+        {
+            playerStatus = player.GetComponent<StatusController>();
+        }
+        if (playerStatus == null)
+        {
+            return;
+        }
+
         ProjectileCards currentCard = manager.CurrentProjectileCard;
-        if (currentCard == null)
+        if (!StatusDamageScope.IsStatusTick && currentCard != null && currentCard.projectileType == ProjectileCards.ProjectileType.NuclearStrike)
         {
-            return;
-        }
-
-        // Only affect ACTIVE projectile systems; passive projectiles should
-        // never receive this crit chance bonus.
-        if (currentCard.projectileSystem != ProjectileCards.ProjectileSystemType.Active)
-        {
-            return;
-        }
-
-        float gain = Mathf.Max(0f, CritGain);
-        if (gain <= 0f)
-        {
-            return;
-        }
-
-        if (!bonusCritByCard.TryGetValue(currentCard, out float accumulated))
-        {
-            accumulated = 0f;
-        }
-
-        // If the base damage pipeline already produced a crit, treat this as a
-        // successful crit and reset the accumulated bonus for this card.
-        if (playerStats.lastHitWasCrit)
-        {
-            if (accumulated > 0f)
+            if (lastProcessedNuclearStrikeFrame == Time.frameCount)
             {
-                bonusCritByCard[currentCard] = 0f;
+                return;
             }
-            return;
+            lastProcessedNuclearStrikeFrame = Time.frameCount;
         }
 
-        // Base hit was NOT a crit: increase this ACTIVE projectile's stored
-        // crit chance for future hits.
-        accumulated = Mathf.Clamp(accumulated + gain, 0f, 100f);
-        bonusCritByCard[currentCard] = accumulated;
+        bool didCrit = playerStats.lastHitWasCrit;
+        if (didCrit)
+        {
+            while (playerStatus.ConsumeStacks(StatusId.Frenzy, 1, sourceKey)) { }
+        }
+        else
+        {
+            int stacksToAdd = Mathf.RoundToInt(Mathf.Max(0f, FrenzyGain));
+            if (stacksToAdd > 0)
+            {
+                playerStatus.AddStatus(StatusId.Frenzy, stacksToAdd, -1f, 0f, null, sourceKey);
+            }
+        }
 
-        // Optional overlay: allow this same non-crit hit to "convert" into a
-        // bonus crit using the accumulated chance, without affecting any other
-        // projectiles. This simulates the increased crit chance for this card
-        // only.
-        if (accumulated <= 0f)
+    }
+
+    public override void OnCritResolved(GameObject player, ProjectileCards sourceCard, bool canCrit, bool didCrit, FavourEffectManager manager)
+    {
+        if (!canCrit || manager == null)
         {
             return;
         }
 
-        float roll = Random.Range(0f, 100f);
-        if (roll >= accumulated)
+        if (playerStats == null && player != null)
+        {
+            playerStats = player.GetComponent<PlayerStats>();
+        }
+        if (playerStats == null)
         {
             return;
         }
 
-        // Convert this hit into a crit for this ACTIVE projectile only.
-        float critDamagePercent = playerStats.projectileCritDamage;
-        if (critDamagePercent <= 0f)
+        if (playerStatus == null && player != null)
         {
-            critDamagePercent = 150f;
+            playerStatus = player.GetComponent<StatusController>();
+        }
+        if (playerStatus == null)
+        {
+            return;
         }
 
-        damage *= critDamagePercent / 100f;
-        playerStats.lastHitWasCrit = true;
-
-        // After a successful crit, reset the accumulated bonus for this card.
-        bonusCritByCard[currentCard] = 0f;
+        if (didCrit)
+        {
+            while (playerStatus.ConsumeStacks(StatusId.Frenzy, 1, sourceKey)) { }
+        }
+        else
+        {
+            int stacksToAdd = Mathf.RoundToInt(Mathf.Max(0f, FrenzyGain));
+            if (stacksToAdd > 0)
+            {
+                playerStatus.AddStatus(StatusId.Frenzy, stacksToAdd, -1f, 0f, null, sourceKey);
+            }
+        }
     }
 }

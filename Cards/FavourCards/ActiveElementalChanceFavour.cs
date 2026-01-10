@@ -9,6 +9,7 @@ public class ActiveElementalChanceFavour : FavourEffect
 
     private PlayerStats playerStats;
     private int stacks = 0;
+    private float appliedBonusPercent = 0f;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
@@ -52,8 +53,10 @@ public class ActiveElementalChanceFavour : FavourEffect
             return;
         }
 
-        float delta = Mathf.Max(0f, IncreasedChance) * stacks * 100f;
-        playerStats.statusEffectChance = Mathf.Max(0f, playerStats.statusEffectChance - delta);
+        float delta = Mathf.Max(0f, appliedBonusPercent);
+        playerStats.activeProjectileStatusEffectChanceBonus = Mathf.Max(0f, playerStats.activeProjectileStatusEffectChanceBonus - delta);
+        appliedBonusPercent = 0f;
+        stacks = 0;
     }
 
     private void ApplyBonus()
@@ -63,10 +66,19 @@ public class ActiveElementalChanceFavour : FavourEffect
             return;
         }
 
-        // statusEffectChance in PlayerStats is 0-100. We treat IncreasedChance
-        // as a raw fraction (0.05 = +5%).
-        float totalBonusPercent = Mathf.Max(0f, IncreasedChance) * stacks * 100f;
+        // activeProjectileStatusEffectChanceBonus in PlayerStats is 0-100.
+        // We treat IncreasedChance as a raw fraction (0.05 = +5%) and apply
+        // only the DELTA from the last applied bonus so stacking/upgrade math
+        // stays correct.
+        float newTotalBonusPercent = Mathf.Max(0f, IncreasedChance) * stacks * 100f;
+        float delta = newTotalBonusPercent - appliedBonusPercent;
+        if (Mathf.Approximately(delta, 0f))
+        {
+            return;
+        }
+
         playerStats.hasProjectileStatusEffect = true;
-        playerStats.statusEffectChance += totalBonusPercent;
+        playerStats.activeProjectileStatusEffectChanceBonus += delta;
+        appliedBonusPercent = newTotalBonusPercent;
     }
 }

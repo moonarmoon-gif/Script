@@ -8,18 +8,16 @@ using UnityEngine;
 public class DamagePerKillFavour : FavourEffect
 {
     [Header("Damage Per Kill Settings")]
-    [Tooltip("Damage increase per stack, expressed as a fraction (0.01 = +1%).")]
-    public float damageIncreasePerStack = 0.01f;
+    public int FuryGainPerKill = 1;
 
-    [Tooltip("Maximum number of stacks that can be accumulated.")]
     public int maxStacks = 25;
 
-    [Tooltip("Time window in seconds to gain a new stack before all stacks reset.")]
-    public float stackResetTimer = 2f;
+    public float stackResetTimer = 5f;
 
     private int currentStacks = 0;
     private float lastStackTime = 0f;
-    private PlayerStats playerStats;
+    private StatusController statusController;
+    private int sourceKey;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
@@ -28,32 +26,31 @@ public class DamagePerKillFavour : FavourEffect
             return;
         }
 
-        playerStats = player.GetComponent<PlayerStats>();
-        if (playerStats == null)
+        statusController = player.GetComponent<StatusController>();
+        if (statusController == null)
         {
-            Debug.LogWarning($"<color=yellow>DamagePerKillFavour could not find PlayerStats on {player.name}.</color>");
             return;
+        }
+
+        sourceKey = Mathf.Abs(GetInstanceID());
+        if (sourceKey == 0)
+        {
+            sourceKey = 1;
         }
 
         currentStacks = 0;
         lastStackTime = Time.time;
-        ApplyBonus();
     }
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)
     {
-        if (playerStats == null)
-        {
-            return;
-        }
-
-        currentStacks = 0;
-        ApplyBonus();
+        ResetStacks();
+        statusController = null;
     }
 
     public override void OnEnemyKilled(GameObject player, GameObject enemy, FavourEffectManager manager)
     {
-        if (playerStats == null)
+        if (statusController == null)
         {
             return;
         }
@@ -62,46 +59,48 @@ public class DamagePerKillFavour : FavourEffect
 
         if (now - lastStackTime > stackResetTimer)
         {
-            currentStacks = 0;
+            ResetStacks();
         }
 
         lastStackTime = now;
 
-        if (currentStacks < maxStacks)
+        int cap = Mathf.Max(0, maxStacks);
+        if (currentStacks < cap)
         {
-            currentStacks++;
+            int gain = Mathf.Max(0, FuryGainPerKill);
+            if (gain > 0)
+            {
+                int allowed = cap - currentStacks;
+                int toAdd = Mathf.Min(gain, allowed);
+                if (toAdd > 0)
+                {
+                    statusController.AddStatus(StatusId.Fury, toAdd, -1f, 0f, null, sourceKey);
+                    currentStacks += toAdd;
+                }
+            }
         }
-
-        ApplyBonus();
     }
 
     public override void OnUpdate(GameObject player, FavourEffectManager manager, float deltaTime)
     {
-        if (playerStats == null || currentStacks <= 0)
+        if (statusController == null || currentStacks <= 0)
         {
             return;
         }
 
         if (Time.time - lastStackTime > stackResetTimer)
         {
-            currentStacks = 0;
-            ApplyBonus();
+            ResetStacks();
         }
     }
 
-    private void ApplyBonus()
+    private void ResetStacks()
     {
-        if (playerStats == null)
+        if (statusController != null && currentStacks > 0)
         {
-            return;
+            statusController.ConsumeStacks(StatusId.Fury, currentStacks, sourceKey);
         }
 
-        float multiplier = 1f + currentStacks * damageIncreasePerStack;
-        if (multiplier < 0f)
-        {
-            multiplier = 0f;
-        }
-
-        playerStats.favourDamageMultiplier = multiplier;
+        currentStacks = 0;
     }
 }

@@ -121,6 +121,9 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     {
         if (amount < 0f || !IsAlive) return;
 
+        bool isStatusTickLocal = StatusDamageScope.IsStatusTick;
+        bool hadIncomingDamage = amount > 0f || !isStatusTickLocal;
+
         // Check if player is dead - enemies are immune
         if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
         {
@@ -138,18 +141,26 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             return;
         }
 
-        // Check if enemy is on camera (if required)
-        if (requireOnCameraForDamage && !IsOnCamera())
+        bool isOnCameraNow = IsOnCamera();
+
+        // Preserve the original gameplay rule: if enabled, enemies cannot take damage while off-camera.
+        // (We still separately suppress off-camera damage popups below for any sources that call into
+        // TakeDamage while off-camera.)
+        if (requireOnCameraForDamage && !isOnCameraNow)
         {
-            return; // Don't take damage when off-camera
+            if (isStatusTickLocal)
+            {
+                StatusDamageScope.LastResolvedDamage = 0f;
+            }
+            return;
         }
 
         float finalAmount = amount;
         float woundBonusDamage = 0f;
 
         StatusController statusController = GetComponent<StatusController>();
+        bool hasImmuneStatus = statusController != null && statusController.HasStatus(StatusId.Immune);
 
-        bool isStatusTickLocal = StatusDamageScope.IsStatusTick;
         bool isPlayerProjectile = !isStatusTickLocal;
 
         if (statusController != null)
@@ -185,7 +196,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                 // IMMUNE takes priority over NULLIFY for fully negated hits.
                 if (statusController.HasStatus(StatusId.Immune))
                 {
-                    if (DamageNumberManager.Instance != null)
+                    if (isOnCameraNow && DamageNumberManager.Instance != null)
                     {
                         Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
                         DamageNumberManager.Instance.ShowImmune(anchor);
@@ -199,7 +210,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                 int nullifyStacksAfter = statusController.GetStacks(StatusId.Nullify);
                 if (!DamageAoeScope.IsAoeDamage && isPlayerProjectile && nullifyStacksBefore > 0 && nullifyStacksAfter < nullifyStacksBefore)
                 {
-                    if (DamageNumberManager.Instance != null)
+                    if (isOnCameraNow && DamageNumberManager.Instance != null)
                     {
                         Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
                         DamageNumberManager.Instance.ShowNullify(anchor);
@@ -216,8 +227,12 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                 finalAmount = statusController.ApplyAbsorption(finalAmount);
             }
 
-            // DoT ticks (burn, poison, bleed) should always deal at least 1
-            // damage after all reductions, unless they are fully negated.
+            // DoT ticks (burn, poison, bleed, future statuses) should always
+            // deal at least 1 damage after all reductions, UNLESS they are
+            // explicitly fully negated by a status such as IMMUNE or
+            // NULLIFY+shield. At this point ModifyIncomingDamage may already
+            // have zeroed out damage for such statuses; honor that by only
+            // clamping strictly-positive nonzero values.
             if (isStatusTickLocal && finalAmount > 0f && finalAmount < 1f)
             {
                 finalAmount = 1f;
@@ -229,6 +244,30 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             {
                 statusController.ApplyFinalIncomingDamageMitigation(ref finalAmount, isStatusTickLocal);
             }
+        }
+
+        if (finalAmount > 0f && StatusControllerManager.Instance != null)
+        {
+            if (isStatusTickLocal)
+            {
+                finalAmount = StatusControllerManager.Instance.RoundDamage(finalAmount);
+                if (finalAmount > 0f && finalAmount < 1f)
+                {
+                    finalAmount = 1f;
+                }
+            }
+            else
+            {
+                finalAmount = StatusControllerManager.Instance.RoundDamage(finalAmount);
+            }
+        }
+
+        // Global minimum damage rule: if this was a real damage instance (incoming amount > 0)
+        // but normal mitigation reduced it to 0, clamp to 1.
+        // Do NOT override complete negation systems like Immune.
+        if (isStatusTickLocal && hadIncomingDamage && finalAmount <= 0f && !hasImmuneStatus)
+        {
+            finalAmount = 1f;
         }
 
         if (!StatusDamageScope.IsStatusTick)
@@ -256,10 +295,18 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                                 // simplified Damage path so it does not trigger
                                 // player-side statuses twice, and show a
                                 // Thorn-colored damage number at the player.
-                                playerHealth.Damage(reflectDamage);
-                                if (DamageNumberManager.Instance != null)
+                                if (StatusControllerManager.Instance != null)
                                 {
-                                    DamageNumberManager.Instance.ShowDamage(reflectDamage, playerHealth.transform.position, DamageNumberManager.DamageType.Thorn);
+                                    reflectDamage = StatusControllerManager.Instance.RoundDamage(reflectDamage);
+                                }
+
+                                if (reflectDamage > 0f)
+                                {
+                                    playerHealth.Damage(reflectDamage);
+                                    if (DamageNumberManager.Instance != null)
+                                    {
+                                        DamageNumberManager.Instance.ShowDamage(reflectDamage, playerHealth.transform.position, DamageNumberManager.DamageType.Thorn);
+                                    }
                                 }
                             }
                         }
@@ -268,25 +315,33 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             }
 
             GameObject execPlayer = GameObject.FindGameObjectWithTag("Player");
-            if (execPlayer != null && StatusControllerManager.Instance != null)
+            if (execPlayer != null)
             {
                 StatusController playerStatus = execPlayer.GetComponent<StatusController>();
                 if (playerStatus != null && playerStatus.GetStacks(StatusId.Execute) > 0)
                 {
-                    float thresholdPercent = StatusControllerManager.Instance.ExecuteThresholdPercent;
+                    FavourEffectManager favourManager = execPlayer.GetComponent<FavourEffectManager>();
+                    float thresholdPercent = favourManager != null
+                        ? favourManager.GetExecuteThresholdPercentForEnemy(gameObject)
+                        : 0f;
+
                     if (thresholdPercent > 0f && MaxHealth > 0f)
                     {
-                        float hpPercent = (CurrentHealth / MaxHealth) * 100f;
-                        if (hpPercent <= thresholdPercent)
+                        EnemyCardTag tag = GetComponent<EnemyCardTag>() ?? GetComponentInParent<EnemyCardTag>();
+                        if (tag == null || tag.rarity != CardRarity.Boss)
                         {
-                            float killDamage = MaxHealth * 1000f;
-                            finalAmount = killDamage;
-                            playerStatus.ConsumeStacks(StatusId.Execute, 1);
-
-                            if (DamageNumberManager.Instance != null)
+                            float hpAfter = Mathf.Max(0f, CurrentHealth - finalAmount);
+                            float hpPercentAfter = (hpAfter / MaxHealth) * 100f;
+                            if (hpPercentAfter <= thresholdPercent)
                             {
-                                Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
-                                DamageNumberManager.Instance.ShowExecuted(anchor);
+                                float killDamage = MaxHealth * 1000f;
+                                finalAmount = killDamage;
+
+                                if (isOnCameraNow && DamageNumberManager.Instance != null)
+                                {
+                                    Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
+                                    DamageNumberManager.Instance.ShowExecuted(anchor);
+                                }
                             }
                         }
                     }
@@ -297,13 +352,32 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         // At this point, finalAmount is the fully resolved damage after all
         // mitigation (Defense, Armor, Vulnerable, Condemn, DeathMark, etc.)
         // AND after shield absorption.
-        if (DamageNumberManager.Instance != null && !StatusDamageScope.IsStatusTick)
+        if (isOnCameraNow && DamageNumberManager.Instance != null && !StatusDamageScope.IsStatusTick)
         {
             float baseDamageForPopup = finalAmount;
 
             if (woundBonusDamage > 0f && finalAmount > 0f)
             {
-                baseDamageForPopup = Mathf.Max(0f, finalAmount - woundBonusDamage);
+                float woundRounded = woundBonusDamage;
+                if (StatusControllerManager.Instance != null)
+                {
+                    woundRounded = StatusControllerManager.Instance.RoundDamage(woundBonusDamage);
+                }
+
+                if (woundRounded < 0f)
+                {
+                    woundRounded = 0f;
+                }
+
+                if (woundRounded > finalAmount)
+                {
+                    woundRounded = finalAmount;
+                }
+
+                float baseRounded = Mathf.Max(0f, finalAmount - woundRounded);
+
+                baseDamageForPopup = baseRounded;
+                woundBonusDamage = woundRounded;
             }
 
             Vector3 popupAnchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, hitPoint);
@@ -317,11 +391,30 @@ public class EnemyHealth : MonoBehaviour, IDamageable
 
         if (finalAmount <= 0f)
         {
+            if (isStatusTickLocal)
+            {
+                StatusDamageScope.LastResolvedDamage = 0f;
+            }
             return;
+        }
+
+        if (isStatusTickLocal)
+        {
+            StatusDamageScope.LastResolvedDamage = finalAmount;
         }
 
         currentHealth = Mathf.Clamp(currentHealth - finalAmount, 0f, MaxHealth);
         OnDamageTaken?.Invoke(finalAmount, hitPoint, hitNormal);
+
+        GameObject dmgPlayer = GameObject.FindGameObjectWithTag("Player");
+        if (dmgPlayer != null)
+        {
+            FavourEffectManager favourManager = dmgPlayer.GetComponent<FavourEffectManager>();
+            if (favourManager != null)
+            {
+                favourManager.NotifyEnemyDamageFinalized(gameObject, finalAmount, isStatusTickLocal);
+            }
+        }
         RaiseChanged();
 
         if (currentHealth <= 0f)

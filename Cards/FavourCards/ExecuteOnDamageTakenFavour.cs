@@ -129,10 +129,24 @@ public class ExecuteOnDamageTakenFavour : FavourEffect
             {
                 bool isBoss = false;
 
-                EnemyCardSpawner spawner = Object.FindObjectOfType<EnemyCardSpawner>();
-                if (spawner != null && spawner.CurrentBossEnemy != null)
+                GameObject boss = null;
+
+                EnemySpawner enemySpawner = Object.FindObjectOfType<EnemySpawner>();
+                if (enemySpawner != null && enemySpawner.CurrentBossEnemy != null)
                 {
-                    GameObject boss = spawner.CurrentBossEnemy;
+                    boss = enemySpawner.CurrentBossEnemy;
+                }
+                else
+                {
+                    EnemyCardSpawner spawner = Object.FindObjectOfType<EnemyCardSpawner>();
+                    if (spawner != null && spawner.CurrentBossEnemy != null)
+                    {
+                        boss = spawner.CurrentBossEnemy;
+                    }
+                }
+
+                if (boss != null)
+                {
                     Transform bossTransform = boss.transform;
                     Transform enemyTransform = enemyHealth.transform;
 

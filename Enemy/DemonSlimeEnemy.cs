@@ -34,6 +34,10 @@ public class DemonSlimeEnemy : MonoBehaviour
 
     [SerializeField] private float attackDamageV2 = -1f;
     [SerializeField] private float attackDamageDelayV2 = -1f;
+
+    [Header("Elemental Resistances")]
+    [Tooltip("Percentage Fire resistance for this Demon Slime. Positive values reduce Fire/NovaStar damage, negative values increase it.")]
+    public float FireResistance = 10f;
     
     [Header("Knockback Settings")]
     [Tooltip("Knockback force when hit by projectiles")]

@@ -122,6 +122,26 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         isVariant23SecondaryBeam = true;
     }
 
+    public void SetProjectileElement(ProjectileType type)
+    {
+        projectileType = type;
+
+        // If this beam is configured as Ice, immediately flag all animators
+        // with the IceBeam bool so Ice-specific animation states can react as
+        // early as possible (before any BeamStart delay).
+        if (projectileType == ProjectileType.Ice)
+        {
+            Animator[] animators = GetComponentsInChildren<Animator>(true);
+            for (int i = 0; i < animators.Length; i++)
+            {
+                if (animators[i] != null)
+                {
+                    animators[i].SetBool("IceBeam", true);
+                }
+            }
+        }
+    }
+
     [Tooltip("Smart targeting algorithm to use")]
     [SerializeField] private SmartTargetingMode targetingMode = SmartTargetingMode.RaycastSampling;
 
@@ -134,6 +154,8 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     [SerializeField] private float variant1Damage = 0f;
     [Tooltip("Base cooldown for Enhanced Variant 1 (seconds)")]
     public float variant1BaseCooldown = 8f;
+
+    public float variant1BurnSlowChance = 0.5f;
 
     [Header("Enhanced Variant 1+2 - Rotating Smart Beam")]
     [Tooltip("Fraction of core lifetime (excluding start delay and end duration) before switching from V2-style static beam to V1-style opposite rotation (0.5 = halfway)")]
@@ -208,6 +230,12 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     private bool isVariant12Stacked = false;
     private bool variant12RotationEnabled = false;
     private float variant12RotationStartTime = 0f;
+
+    private bool isStackedVariant13Context = false;
+    private bool isStackedVariant23Context = false;
+    private bool hasVariant1History = false;
+    private bool hasVariant2History = false;
+    private bool hasVariant3History = false;
 
     // Variant 3 secondary beam flag
     private bool isVariant3SecondaryBeam = false;
@@ -374,6 +402,9 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         {
             _animator.SetBool("BeamStart", false);
             _animator.SetBool("BeamEnd", false);
+            _animator.SetBool("IceBeam", false);
+            _animator.SetBool("IceBeamStart", false);
+            _animator.SetBool("IceBeamEnd", false);
         }
 
         // CRITICAL FIX: Hide beam until Launch() sets proper position
@@ -702,6 +733,27 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=gold>ElementalBeam using ProjectileCards spawnInterval: {baseCooldown:F2}s (overriding script cooldown: {cooldown:F2}s)</color>");
         }
 
+        // Apply Variant 1 burn chance to the attached BurnEffect whenever this
+        // card has EVER chosen Variant 1, including stacked cases (1+2, 1+3).
+        // The field is configured as 0–1 so convert to the 0–100% range used
+        // by BurnEffect.
+        BurnEffect beamBurn = GetComponent<BurnEffect>();
+        SlowEffect beamSlow = GetComponent<SlowEffect>();
+        if (hasVariant1)
+        {
+            float burnSlowPercent = Mathf.Clamp01(variant1BurnSlowChance) * 100f;
+
+            if (beamBurn != null)
+            {
+                beamBurn.burnChance = burnSlowPercent;
+            }
+
+            if (beamSlow != null)
+            {
+                beamSlow.slowChance = burnSlowPercent;
+            }
+        }
+
         // Compute final lifetime and cooldown after card modifiers.
         // CRITICAL: Variant 2 uses exchange rate for lifetime modifiers, but this
         // exchange is DISABLED for stacked Variant 1+2 so we can restore the
@@ -717,7 +769,15 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=gold>Variant 2 Lifetime Exchange: Base modifier +{modifiers.lifetimeIncrease:F2}s * {variant2LifetimeExchangeRate:F2} = +{lifetimeModifier:F2}s (Final: {finalLifetime:F2}s)</color>");
         }
 
-        float finalCooldown = Mathf.Max(0.1f, baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f));
+        float finalCooldown = baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f);
+        if (MinCooldownManager.Instance != null)
+        {
+            finalCooldown = MinCooldownManager.Instance.ClampCooldown(card, finalCooldown);
+        }
+        else
+        {
+            finalCooldown = Mathf.Max(0.1f, finalCooldown);
+        }
         int finalManaCost = Mathf.Max(0, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
 
         // CRITICAL: Variant 2 uses its own unique damage value. For all
@@ -900,7 +960,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             float randomAngle = Random.Range(minAngle, maxAngle);
             float randomAngleRad = randomAngle * Mathf.Deg2Rad;
 
-            if (isStackedVariant13 && !skipCooldownCheck)
+            if (isStackedVariant13)
             {
                 // STACKED Variant 1 + 3 primary: allow the PRIMARY beam to fire
                 // at ANY angle (positive or negative) within the configured
@@ -1298,7 +1358,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         if (enhancedVariant > 0)
         {
-            canDealDamage = true;
+            canDealDamage = startupMult > 0f;
             isInStartupOrEndPhase = true;
             isInStartupPhase = true; // Mark as startup phase
             Debug.Log($"<color=gold>ElementalBeam Enhanced: Damage enabled during startup at {startupMult * 100}%</color>");
@@ -1326,12 +1386,24 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         isInStartupPhase = false; // No longer in startup
         Debug.Log($"<color=cyan>ElementalBeam: Full damage enabled after {startDelay}s start delay</color>");
 
-        // Set BeamStart to true for ALL animators (parent + children)
+        // Set BeamStart/IceBeamStart to true for ALL animators (parent + children)
         foreach (Animator anim in allAnimators)
         {
             if (anim != null)
             {
-                anim.SetBool("BeamStart", true);
+                bool isIceBeam = projectileType == ProjectileType.Ice;
+
+                if (isIceBeam)
+                {
+                    anim.SetBool("IceBeamStart", true);
+                    anim.SetBool("IceBeamEnd", false);
+                    anim.SetBool("BeamStart", false);
+                    anim.SetBool("BeamEnd", false);
+                }
+                else
+                {
+                    anim.SetBool("BeamStart", true);
+                }
 
                 // Reset animation speed to normal (1.0) for main phase
                 if (enhancedVariant == 2)
@@ -1351,6 +1423,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         {
             isInStartupOrEndPhase = true;
             isInStartupPhase = false; // Mark as end phase (not startup)
+            canDealDamage = endMult > 0f;
             Debug.Log($"<color=gold>ElementalBeam Enhanced: Damage continues during end phase at {endMult * 100}%</color>");
         }
         else
@@ -1360,13 +1433,25 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=cyan>ElementalBeam: Damage DISABLED for beam end animation</color>");
         }
 
-        // Set BeamEnd to true for ALL animators (parent + children)
+        // Set BeamEnd/IceBeamEnd to true for ALL animators (parent + children)
         foreach (Animator anim in allAnimators)
         {
             if (anim != null)
             {
-                anim.SetBool("BeamStart", false);
-                anim.SetBool("BeamEnd", true);
+                bool isIceBeam = projectileType == ProjectileType.Ice;
+
+                if (isIceBeam)
+                {
+                    anim.SetBool("IceBeamStart", false);
+                    anim.SetBool("IceBeamEnd", true);
+                    anim.SetBool("BeamStart", false);
+                    anim.SetBool("BeamEnd", false);
+                }
+                else
+                {
+                    anim.SetBool("BeamStart", false);
+                    anim.SetBool("BeamEnd", true);
+                }
 
                 // Apply end animation speed for Variant 2
                 if (enhancedVariant == 2)
@@ -1466,17 +1551,18 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                         // Set next damage time for this enemy (shared damageInterval)
                         enemyNextDamageTime[enemy] = Time.time + damageInterval;
 
-                        BurnEffect burnEffect = GetComponent<BurnEffect>();
-                        if (burnEffect != null)
-                        {
-                            burnEffect.Initialize(finalDamage, projectileType);
-                            burnEffect.TryApplyBurn(enemy, hitPoint);
-                        }
-
                         SlowEffect slowEffect = GetComponent<SlowEffect>();
-                        if (slowEffect != null)
+
+                        if (projectileType == ProjectileType.Fire)
                         {
-                            slowEffect.TryApplySlow(enemy, hitPoint);
+                            StatusController.TryApplyBurnFromProjectile(gameObject, enemy, hitPoint, finalDamage);
+                        }
+                        else if (projectileType == ProjectileType.Ice)
+                        {
+                            if (slowEffect != null)
+                            {
+                                slowEffect.TryApplySlow(enemy, hitPoint);
+                            }
                         }
 
                         // Spawn hit effect
@@ -1517,7 +1603,6 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 enemiesInBeam.Add(collision.gameObject);
                 Debug.Log($"<color=green>Enemy {collision.gameObject.name} entered beam</color>");
 
-                BurnEffect burnEffect = GetComponent<BurnEffect>();
                 SlowEffect slowEffect = GetComponent<SlowEffect>();
 
                 // Resolve the concrete enemy GameObject once so both Variant 1 and base/Variant 2
@@ -1593,15 +1678,16 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     // damageInterval seconds after this initial hit.
                     enemyNextDamageTime[collision.gameObject] = Time.time + damageInterval;
 
-                    if (burnEffect != null)
+                    if (projectileType == ProjectileType.Fire)
                     {
-                        burnEffect.Initialize(finalDamage1, projectileType);
-                        burnEffect.TryApplyBurn(collision.gameObject, hitPoint1);
+                        StatusController.TryApplyBurnFromProjectile(gameObject, collision.gameObject, hitPoint1, finalDamage1);
                     }
-
-                    if (slowEffect != null)
+                    else if (projectileType == ProjectileType.Ice)
                     {
-                        slowEffect.TryApplySlow(collision.gameObject, hitPoint1);
+                        if (slowEffect != null)
+                        {
+                            slowEffect.TryApplySlow(collision.gameObject, hitPoint1);
+                        }
                     }
 
                     // Spawn hit effect
@@ -1650,6 +1736,27 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 // BASE BEAM: single instant hit on first contact. Use
                 // baseDamageAfterCards and roll crit PER ENEMY via PlayerStats.
                 float basePerHit = baseDamageAfterCards > 0f ? baseDamageAfterCards : damage;
+
+                // Enhanced beams can have reduced damage during startup/end.
+                float phaseMultiplier = 1f;
+                if (enhancedVariant > 0 && isInStartupOrEndPhase)
+                {
+                    if (enhancedVariant == 3)
+                    {
+                        phaseMultiplier = isInStartupPhase ? variant3StartupDamageMultiplier : variant3EndDamageMultiplier;
+                    }
+                    else
+                    {
+                        phaseMultiplier = isInStartupPhase ? enhancedStartupDamageMultiplier : enhancedEndDamageMultiplier;
+                    }
+                }
+
+                if (phaseMultiplier <= 0f)
+                {
+                    return;
+                }
+
+                basePerHit *= phaseMultiplier;
                 float finalDamage = basePerHit;
                 if (cachedPlayerStats != null)
                 {
@@ -1670,15 +1777,16 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
                 Debug.Log($"<color=orange>ElementalBeam: INSTANT damage {finalDamage:F2} to {collision.gameObject.name} on first contact</color>");
 
-                if (burnEffect != null)
+                if (projectileType == ProjectileType.Fire)
                 {
-                    burnEffect.Initialize(finalDamage, projectileType);
-                    burnEffect.TryApplyBurn(collision.gameObject, hitPoint);
+                    StatusController.TryApplyBurnFromProjectile(gameObject, collision.gameObject, hitPoint, finalDamage);
                 }
-
-                if (slowEffect != null)
+                else if (projectileType == ProjectileType.Ice)
                 {
-                    slowEffect.TryApplySlow(collision.gameObject, hitPoint);
+                    if (slowEffect != null)
+                    {
+                        slowEffect.TryApplySlow(collision.gameObject, hitPoint);
+                    }
                 }
 
                 // Spawn hit effect
@@ -2815,6 +2923,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         if (secondaryBeam != null)
         {
             secondaryBeam.MarkAsVariant3SecondaryBeam();
+            secondaryBeam.SetProjectileElement(ProjectileType.Ice);
             bool skipCheck = true;
             secondaryBeam.Launch(secondaryDir, colliderToIgnore, playerMana, skipCheck, spawnPos);
         }
@@ -2840,6 +2949,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         if (secondaryBeam != null)
         {
             secondaryBeam.MarkAsVariant23SecondaryBeam();
+            secondaryBeam.SetProjectileElement(ProjectileType.Ice);
             bool skipCheck = true;
             secondaryBeam.Launch(secondaryDir, colliderToIgnore, playerMana, skipCheck, spawnPos);
         }
@@ -2865,6 +2975,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         if (secondaryBeam != null)
         {
             secondaryBeam.MarkAsVariant13SecondaryBeam();
+            secondaryBeam.SetProjectileElement(ProjectileType.Ice);
             bool skipCheck = true;
             secondaryBeam.Launch(secondaryDir, colliderToIgnore, playerMana, skipCheck, spawnPos);
         }

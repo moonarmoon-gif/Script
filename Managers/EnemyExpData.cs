@@ -30,6 +30,11 @@ public class EnemyExpData : MonoBehaviour
         }
     }
 
+    public float ExpRewardExact
+    {
+        get { return ExpReward; }
+    }
+
     public float SoulValue
     {
         get { return Mathf.Max(0f, soulValue); }
@@ -43,6 +48,15 @@ public class EnemyExpData : MonoBehaviour
         expReward = Mathf.RoundToInt(expReward * multiplier);
         minExpReward = Mathf.RoundToInt(minExpReward * multiplier);
         maxExpReward = Mathf.RoundToInt(maxExpReward * multiplier);
+    }
+
+    public void AddFlatExpBonus(int bonus)
+    {
+        if (bonus == 0) return;
+
+        expReward = Mathf.Max(0, expReward + bonus);
+        minExpReward = Mathf.Max(0, minExpReward + bonus);
+        maxExpReward = Mathf.Max(0, maxExpReward + bonus);
     }
 
     public void RegisterPostScalingExpMultiplier(float multiplier)
@@ -102,15 +116,35 @@ public class EnemyExpData : MonoBehaviour
             Debug.Log($"<color=yellow>{gameObject.name} died but no EXP granted (player is dead)</color>");
             return;
         }
+
+        int baseExp = ExpReward;
+
+        CardRarity rarity = CardRarity.Common;
+        EnemyCardTag tag = GetComponent<EnemyCardTag>();
+        if (tag != null)
+        {
+            rarity = tag.rarity;
+        }
+
+        int bonusExp = ExtraExpPerRarityFavour.GetBonusExpForRarity(rarity);
+        float totalExp = Mathf.Max(0f, baseExp + bonusExp);
         
         // If a boss event is active and THIS enemy is the current boss, route
-        // its EXP through EnemyCardSpawner so that level-up cards are shown
-        // only after the boss death cleanup window has finished.
+        // its EXP through the spawner so that level-up cards are shown only
+        // after the boss death cleanup window has finished.
+        EnemySpawner waveSpawner = Object.FindObjectOfType<EnemySpawner>();
+        if (waveSpawner != null && waveSpawner.IsBossEventActive && waveSpawner.CurrentBossEnemy == gameObject)
+        {
+            waveSpawner.QueueBossExperience(totalExp);
+            Debug.Log($"<color=cyan>Queued {totalExp:F2} EXP from boss '{gameObject.name}' (EnemySpawner) for post-cleanup grant.</color>");
+            return;
+        }
+
         EnemyCardSpawner bossSpawner = Object.FindObjectOfType<EnemyCardSpawner>();
         if (bossSpawner != null && bossSpawner.IsBossEventActive && bossSpawner.CurrentBossEnemy == gameObject)
         {
-            bossSpawner.QueueBossExperience(ExpReward);
-            Debug.Log($"<color=cyan>Queued {ExpReward} EXP from boss '{gameObject.name}' for post-cleanup grant.</color>");
+            bossSpawner.QueueBossExperience(totalExp);
+            Debug.Log($"<color=cyan>Queued {totalExp:F2} EXP from boss '{gameObject.name}' (EnemyCardSpawner) for post-cleanup grant.</color>");
             return;
         }
 
@@ -122,9 +156,8 @@ public class EnemyExpData : MonoBehaviour
             var playerLevel = AdvancedPlayerController.Instance.GetComponent<PlayerLevel>();
             if (playerLevel != null)
             {
-                int exp = ExpReward;
-                playerLevel.GainExperience(exp);
-                Debug.Log($"<color=cyan>Granted {exp} EXP to player!</color>");
+                playerLevel.GainExperience(totalExp);
+                Debug.Log($"<color=cyan>Granted {totalExp:F2} EXP to player!</color>");
             }
             else
             {
@@ -137,8 +170,8 @@ public class EnemyExpData : MonoBehaviour
             var playerLevel = PlayerController.Instance.GetComponent<PlayerLevel>();
             if (playerLevel != null)
             {
-                playerLevel.GainExperience(ExpReward);
-                Debug.Log($"<color=cyan>Granted {ExpReward} EXP to player!</color>");
+                playerLevel.GainExperience(totalExp);
+                Debug.Log($"<color=cyan>Granted {totalExp:F2} EXP to player!</color>");
             }
             else
             {

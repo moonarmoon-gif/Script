@@ -17,6 +17,18 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
     public float DamageDelay = 0.5f;
     [SerializeField] private float lifetimeSeconds = 1.0f;
 
+    [Header("Hit Effect Offsets - Left Side")]
+    [Tooltip("Offset around the enemy's collider center when the claw strikes from the LEFT at angle ABOVE 45 degrees.")]
+    [SerializeField] private Vector2 hitEffectOffsetLeftAbove45 = Vector2.zero;
+    [Tooltip("Offset around the enemy's collider center when the claw strikes from the LEFT at angle BELOW 45 degrees.")]
+    [SerializeField] private Vector2 hitEffectOffsetLeftBelow45 = Vector2.zero;
+
+    [Header("Hit Effect Offsets - Right Side")]
+    [Tooltip("Offset around the enemy's collider center when the claw strikes from the RIGHT at angle ABOVE 45 degrees.")]
+    [SerializeField] private Vector2 hitEffectOffsetRightAbove45 = Vector2.zero;
+    [Tooltip("Offset around the enemy's collider center when the claw strikes from the RIGHT at angle BELOW 45 degrees.")]
+    [SerializeField] private Vector2 hitEffectOffsetRightBelow45 = Vector2.zero;
+
     [Header("Collider Scaling")]
     [SerializeField] private float colliderSizeOffset = 0f;
 
@@ -73,6 +85,12 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
             Destroy(gameObject);
             return;
         }
+
+        // 50/50: spawn with x scale flipped (mirrored) or not.
+        // This is visual-only and does NOT affect damage.
+        Vector3 s = transform.localScale;
+        s.x = Mathf.Abs(s.x) * (Random.value < 0.5f ? -1f : 1f);
+        transform.localScale = s;
 
         // Resolve card + modifiers for this projectile instance.
         ProjectileCards card = null;
@@ -150,7 +168,12 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
             return;
         }
 
-        Collider2D enemyCollider = target.GetComponent<Collider2D>() ?? target.GetComponentInChildren<Collider2D>();
+        Collider2D enemyCollider =
+            enemyHealth.GetComponent<Collider2D>() ??
+            enemyHealth.GetComponentInChildren<Collider2D>() ??
+            target.GetComponent<Collider2D>() ??
+            target.GetComponentInChildren<Collider2D>();
+
         if (enemyCollider == null)
         {
             Destroy(gameObject);
@@ -159,26 +182,34 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
 
         Vector3 enemyCenter = enemyCollider.bounds.center;
 
-        // Offscreen safety: respect global offscreen damage rules before committing.
+        // Respect offscreen rules when selecting/committing a target.
         if (!OffscreenDamageChecker.CanTakeDamage(enemyCenter))
         {
             Destroy(gameObject);
             return;
         }
 
-        // Reposition the claw directly onto the enemy's collider center and parent
-        // it so any animation stays anchored.
-        transform.position = enemyCenter;
-        transform.SetParent(target, true);
+        // Reposition the claw directly onto the enemy's collider center (plus directional offset)
+        // and parent it so any animation stays anchored.
+        Vector2 directionalOffset = GetHitEffectDirectionalOffset(direction);
+        Vector3 spawnPos = enemyCenter + (Vector3)directionalOffset;
+        transform.position = spawnPos;
+        transform.SetParent(enemyHealth.transform, true);
 
         // Apply size modifier + collider scaling from card.
         if (modifiers.sizeMultiplier != 1f)
         {
-            transform.localScale = baseScale * modifiers.sizeMultiplier;
+            // Preserve random x-sign, but scale magnitude by sizeMultiplier.
+            Vector3 ls = transform.localScale;
+            float xSign = Mathf.Sign(ls.x);
+            float xMag = Mathf.Abs(baseScale.x) * modifiers.sizeMultiplier;
+            float y = baseScale.y * modifiers.sizeMultiplier;
+            float z = baseScale.z * modifiers.sizeMultiplier;
+            transform.localScale = new Vector3(xMag * xSign, y, z);
+
             ColliderScaler.ScaleCollider(_collider2D, modifiers.sizeMultiplier, colliderSizeOffset);
         }
 
-        // Destroy the visual after its lifetime; damage is handled by coroutine.
         Destroy(gameObject, finalLifetime);
 
         StartCoroutine(DelayedStrike(enemyHealth, enemyCollider));
@@ -203,17 +234,21 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
             yield break;
         }
 
-        IDamageable damageable = enemyHealth as IDamageable;
+        // Robust: find the IDamageable on the enemy at strike time.
+        IDamageable damageable =
+            enemyHealth.GetComponent<IDamageable>() ??
+            enemyHealth.GetComponentInParent<IDamageable>();
+
         if (damageable == null || !damageable.IsAlive)
         {
             yield break;
         }
 
-        Vector3 hitPoint = enemyCollider != null ? (Vector3)enemyCollider.bounds.center : enemyHealth.transform.position;
-        if (!OffscreenDamageChecker.CanTakeDamage(hitPoint))
-        {
-            yield break;
-        }
+        Vector3 hitPoint = enemyCollider != null ? enemyCollider.bounds.center : enemyHealth.transform.position;
+
+        // IMPORTANT: don't re-block by offscreen at strike-time; we already committed to this target
+        // at Launch() time and the claw is explicitly a delayed strike effect anchored to the enemy.
+        // If you WANT offscreen to cancel, re-add OffscreenDamageChecker here.
 
         float baseForHit = baseDamageAfterCards > 0f ? baseDamageAfterCards : damage;
         float finalDamage = baseForHit;
@@ -228,65 +263,114 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
             yield break;
         }
 
-        // Tag EnemyHealth so EnemyHealth.TakeDamage renders this hit using the
-        // fire damage color (including when armor/defense reduce it to 0).
-        enemyHealth.SetLastIncomingDamageType(DamageNumberManager.DamageType.Fire);
+        // Tag EnemyHealth so EnemyHealth.TakeDamage renders this hit using the correct damage color.
+        enemyHealth.SetLastIncomingDamageType(
+            projectileType == ProjectileType.Ice
+                ? DamageNumberManager.DamageType.Ice
+                : DamageNumberManager.DamageType.Fire);
 
         Vector3 hitNormal = Vector3.zero;
         damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
         lastDamageTime = Time.time;
 
-        // Apply any attached status effects (Burn/Slow/Static) so ClawProjectile
-        // participates in the same status pipeline as other projectiles.
-        BurnEffect burnEffect = GetComponent<BurnEffect>();
-        if (burnEffect != null)
-        {
-            burnEffect.Initialize(finalDamage, projectileType);
-            burnEffect.TryApplyBurn(enemyHealth.gameObject, hitPoint);
-        }
+        // IMPORTANT FIX FOR "Burn text appears at player":
+        // Many status UI popups anchor to the hitPoint / enemy collider center.
+        // Ensure we use the ENEMY position as the anchor when applying effects.
+        Vector3 statusAnchor = hitPoint;
+
+        StatusController.TryApplyBurnFromProjectile(gameObject, enemyHealth.gameObject, statusAnchor, finalDamage);
 
         SlowEffect slowEffect = GetComponent<SlowEffect>();
         if (slowEffect != null)
         {
-            slowEffect.TryApplySlow(enemyHealth.gameObject, hitPoint);
+            slowEffect.TryApplySlow(enemyHealth.gameObject, statusAnchor);
         }
 
         StaticEffect staticEffect = GetComponent<StaticEffect>();
         if (staticEffect != null)
         {
-            staticEffect.TryApplyStatic(enemyHealth.gameObject, hitPoint);
+            staticEffect.TryApplyStatic(enemyHealth.gameObject, statusAnchor);
         }
     }
 
     public void ApplyInstantModifiers(CardModifierStats mods)
     {
-        Debug.Log("<color=lime>╔ CLAW PROJECTILE ╗</color>");
-
         float newLifetime = baseLifetime + mods.lifetimeIncrease;
         if (!Mathf.Approximately(newLifetime, lifetimeSeconds))
         {
             lifetimeSeconds = newLifetime;
-            Debug.Log($"<color=lime>Lifetime: {baseLifetime:F2} + {mods.lifetimeIncrease:F2} = {lifetimeSeconds:F2}</color>");
         }
 
         float newDamage = baseDamage * mods.damageMultiplier;
         if (!Mathf.Approximately(newDamage, damage))
         {
             damage = newDamage;
-            Debug.Log($"<color=lime>Damage: {baseDamage:F2} * {mods.damageMultiplier:F2}x = {damage:F2}</color>");
+            baseDamageAfterCards = newDamage;
         }
 
         if (!Mathf.Approximately(mods.sizeMultiplier, 1f))
         {
-            transform.localScale = baseScale * mods.sizeMultiplier;
-            Debug.Log($"<color=lime>Size: {baseScale} * {mods.sizeMultiplier:F2}x = {transform.localScale}</color>");
+            // Preserve current x sign (may already be randomized).
+            Vector3 ls = transform.localScale;
+            float xSign = Mathf.Sign(ls.x);
+            transform.localScale = new Vector3(
+                Mathf.Abs(baseScale.x) * mods.sizeMultiplier * xSign,
+                baseScale.y * mods.sizeMultiplier,
+                baseScale.z * mods.sizeMultiplier
+            );
         }
-
-        Debug.Log("<color=lime>╚═══════════════════════════════════════╝</color>");
     }
 
     public float GetCurrentDamage()
     {
         return damage;
+    }
+
+    private Vector2 GetHitEffectDirectionalOffset(Vector2 direction)
+    {
+        if (direction.sqrMagnitude <= 0f)
+        {
+            return Vector2.zero;
+        }
+
+        direction = direction.normalized;
+
+        float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
+        if (angle < 0f)
+        {
+            angle += 360f;
+        }
+
+        if (direction.x > 0f)
+        {
+            // Right side (0-90 or 270-360)
+            if (angle >= 0f && angle <= 90f)
+            {
+                return angle > 45f ? hitEffectOffsetRightAbove45 : hitEffectOffsetRightBelow45;
+            }
+
+            if (angle >= 270f && angle <= 360f)
+            {
+                float relativeAngle = 360f - angle;
+                return relativeAngle > 45f ? hitEffectOffsetRightAbove45 : hitEffectOffsetRightBelow45;
+            }
+        }
+        else
+        {
+            // Left side (90-270)
+            if (angle >= 90f && angle <= 180f)
+            {
+                float relativeAngle = 180f - angle;
+                return relativeAngle > 45f ? hitEffectOffsetLeftAbove45 : hitEffectOffsetLeftBelow45;
+            }
+
+            if (angle >= 180f && angle <= 270f)
+            {
+                float relativeAngle = angle - 180f;
+                return relativeAngle > 45f ? hitEffectOffsetLeftAbove45 : hitEffectOffsetLeftBelow45;
+            }
+        }
+
+        return Vector2.zero;
     }
 }

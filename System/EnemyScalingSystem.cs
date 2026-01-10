@@ -276,6 +276,8 @@ public class EnemyScalingSystem : MonoBehaviour
         currentExpMultiplier = 1f;
         currentDamageMultiplier = 1f;
         currentSpawnIntervalFlatReduction = 0f;
+        completedBossEvents = 0;
+        isPaused = false;
         scalingTier = 0;
         timeSinceLastScale = 0f;
         Debug.Log("<color=yellow>Enemy scaling reset to tier 0</color>");

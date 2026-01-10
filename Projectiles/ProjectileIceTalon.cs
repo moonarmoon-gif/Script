@@ -8,13 +8,17 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
     [Header("Motion")]
     [SerializeField] private float speed = 15f;
     [SerializeField] private float lifetimeSeconds = 5f;
-    
+
+    [Header("Offscreen Destruction")]
+    [Tooltip("Bonus destroy boundary size (world units). If projectile goes outside the camera bounds plus this value, it is destroyed immediately.")]
+    public float DestroyCameraOffset = 0f;
+
     [Header("Spawn Offset - Left Side")]
     [Tooltip("Spawn offset when firing left at angle ABOVE 45 degrees")]
     [SerializeField] private Vector2 offsetLeftAbove45 = Vector2.zero;
     [Tooltip("Spawn offset when firing left at angle BELOW 45 degrees")]
     [SerializeField] private Vector2 offsetLeftBelow45 = Vector2.zero;
-    
+
     [Header("Spawn Offset - Right Side")]
     [Tooltip("Spawn offset when firing right at angle ABOVE 45 degrees")]
     [SerializeField] private Vector2 offsetRightAbove45 = Vector2.zero;
@@ -23,18 +27,50 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
     [Header("Damage Settings")]
     [SerializeField] private float damage = 20f;
-    [SerializeField] private int manaCost = 10;
     [SerializeField] private float cooldown = 0.5f;
-    [Tooltip("Minimum cooldown after all reductions")]
-    [SerializeField] private float minCooldown = 0.2f;
     [SerializeField] private LayerMask enemyLayer;
     [SerializeField] private ProjectileType projectileType = ProjectileType.Ice; // ICE TALON - Always Ice type
 
-    // Instance-based cooldown tracking (per prefab type)
+    [Header("Enhanced Variant 3 - Slow Chance")]
+    [Tooltip("Slow chance for Enhanced Variant 3 (0 = 0%, 0.5 = 50%, 1 = 100%). Applied to SlowEffect.slowChance.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float variant3SlowEffectChance = 0.5f;
+
+    [Header("Y-Axis Enemy Ignore (Left Side)")]
+    [Tooltip("IceTalon cannot damage enemies on the LEFT side of the screen while its own Y position is below this value.")]
+    public float YaxisIgnoreLeftEnemies = -7f;
+
+    [Header("Enhanced Variant 1 - Multi-shot & Pierce")]
+    [Tooltip("Additional pierce count granted by Enhanced Variant 1 (multi-pierce).")]
+    public int enhancedPierceBonus = 0;
+
+    [Tooltip("Additional projectile count granted by Enhanced Variant 1 (multi-shot). Used by ProjectileSpawner.")]
+    public int enhancedProjectileCountBonus = 0;
+
+    [Header("Enhanced Variant 2 - Speed & Pierce")]
+    [Tooltip("Additional pierce count granted by Enhanced Variant 2.")]
+    public int enhancedVariant2PierceBonus = 0;
+
+    [Tooltip("Additional speed granted by Enhanced Variant 2.")]
+    public float enhancedVariant2SpeedBonus = 0f;
+
+    [Tooltip("Optional override cooldown for Variant 2 when it is active. If > 0, Launch will use this instead of the card's runtimeSpawnInterval.")]
+    public float variant2BaseCooldown = 0f;
+
+    [Header("Spread Settings")]
+    [Tooltip("Minimum angular separation (degrees) between Talon projectiles when using custom angles and multi-shot.")]
+    public float minAngleSeparation = 0f;
+
     private static System.Collections.Generic.Dictionary<string, float> lastFireTimes = new System.Collections.Generic.Dictionary<string, float>();
     private string prefabKey;
-    private float baseSpeed; private float baseLifetime; private float baseDamage; private Vector3 baseScale;
+
+    private float baseSpeed;
+    private float baseLifetime;
+    private float baseDamage;
+    private Vector3 baseScale;
+
     public enum SpriteFacing2D { Right = 0, Up = 90, Left = 180, Down = 270 }
+
     [Header("Rotation")]
     [SerializeField] private SpriteFacing2D spriteFacing = SpriteFacing2D.Right;
     [SerializeField] private float additionalRotationOffsetDeg = 0f;
@@ -44,6 +80,9 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
     [SerializeField] private bool keepInitialRotation = false;
 
     [Header("Hit Effect")]
+    [Tooltip("0 = spawn at enemy collider center, 1 = spawn at actual impact point (Collider2D.ClosestPoint).")]
+    [Range(0f, 1f)]
+    [SerializeField] private float hitEffectSpawnBias = 1f;
     [SerializeField] private GameObject hitEffectPrefab;
     [SerializeField] private float hitEffectDuration = 1f;
     [SerializeField] private Vector2 hitEffectOffset = Vector2.zero;
@@ -83,6 +122,7 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
     private Collider2D _collider2D;
     private AudioSource _trailSource;
     private Coroutine _fadeOutRoutine;
+
     private PlayerStats cachedPlayerStats;
     private float baseDamageAfterCards;
 
@@ -96,99 +136,59 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
     private Vector2 initialDirection;
     private bool directionSet = false;
+
+    private bool hasLaunched = false;
+    private Camera mainCamera;
+
     private float lastDamageTime = -999f;
+
     [Header("Damage Cooldown")]
     [Tooltip("Minimum time between damage instances")]
     [SerializeField] private float damageCooldown = 0.1f;
-    
+
     [Header("Collider Scaling")]
     [Tooltip("Offset for collider size relative to visual size (0 = same as visual, -0.2 = 20% smaller, 0.2 = 20% larger)")]
     [SerializeField] private float colliderSizeOffset = 0f;
-    
-    [Header("Enhanced Variant 1 - Multi-Pierce")]
-    [Tooltip("Additional projectile count for Enhanced Variant 1")]
-    public int enhancedProjectileCountBonus = 1;
-    [Tooltip("Additional pierce count for Enhanced Variant 1")]
-    public int enhancedPierceBonus = 5;
-    [Header("Enhanced Variant 2 - Speed & Pierce")]
-    [Tooltip("Additional pierce count for Enhanced Variant 2 (stacks with Variant 1)")]
-    public int enhancedVariant2PierceBonus = 0;
-    [Tooltip("Speed bonus for Enhanced Variant 2 (raw value added, stacks with modifiers)")]
-    [SerializeField] private float enhancedVariant2SpeedBonus = 0f;
-    [Tooltip("Base cooldown used when Talon is in Enhanced Variant 2 (or higher). If 0, falls back to card spawn interval or projectile cooldown.")]
-    [SerializeField] private float variant2BaseCooldown = 0f;
-    
-    [Header("Spawn Together Settings")]
-    [Tooltip("Minimum angle separation between projectiles when spawn together is enabled (in degrees)")]
-    public float minAngleSeparation = 0f;
-    
-    // Flag to track if this is an additional projectile (spawned with skipCooldownCheck = true)
+
     private bool isAdditionalProjectile = false;
     private bool hasPlayedBreakEffect = false;
-    
+
     private void Awake()
     {
         _rigidbody2D = GetComponent<Rigidbody2D>();
-        baseSpeed=speed; baseLifetime=lifetimeSeconds; baseDamage=damage; baseScale=transform.localScale;
-        
-        // Try to get collider from parent first, then check children
+        baseSpeed = speed; baseLifetime = lifetimeSeconds; baseDamage = damage; baseScale = transform.localScale;
+
         _collider2D = GetComponent<Collider2D>();
         if (_collider2D == null)
         {
-            // Collider might be on children (like Talon with split colliders)
             _collider2D = GetComponentInChildren<Collider2D>();
-            if (_collider2D != null)
-            {
-                Debug.Log($"<color=cyan>ProjectileTalon: Using child collider from {_collider2D.gameObject.name}</color>");
-            }
         }
 
-        // ALWAYS use trigger collider for projectiles (prevents bouncing)
-        // Set ALL colliders to trigger (parent and children)
         Collider2D[] allColliders = GetComponentsInChildren<Collider2D>();
         foreach (Collider2D col in allColliders)
         {
             if (!col.isTrigger)
             {
                 col.isTrigger = true;
-                Debug.Log($"<color=cyan>ProjectileTalon: Set {col.gameObject.name} collider to trigger</color>");
             }
         }
 
-        // Configure rigidbody - always Dynamic for proper movement
         if (_rigidbody2D != null)
         {
             _rigidbody2D.bodyType = RigidbodyType2D.Dynamic;
             _rigidbody2D.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
             _rigidbody2D.constraints = RigidbodyConstraints2D.FreezeRotation;
-            _rigidbody2D.gravityScale = 0f; // No gravity
+            _rigidbody2D.gravityScale = 0f;
         }
-        
-        // Ensure no physics material that could cause bouncing
-        if (_collider2D != null && _collider2D.sharedMaterial != null)
-        {
-            if (_collider2D.sharedMaterial.bounciness > 0f)
-            {
-                Debug.LogWarning($"<color=yellow>Projectile {gameObject.name} has bouncy physics material! This will interfere with piercing.</color>");
-            }
-        }
-        
+
         EnsureTrailAudioSource();
     }
-    
-    private void Start()
-    {
-        // Velocity is set in Launch() with modified speed
-        // Lifetime destroy is also handled in Launch() with modified lifetime
-    }
-    
+
+    // RESTORED: ProjectileSpawner expects this to exist.
     public void SetDirection(Vector2 direction)
     {
         initialDirection = direction;
         directionSet = true;
-        
-        // Don't set velocity here - Launch() will set it with modified speed
-        // Setting it here would use the unmodified speed value
     }
 
     private void OnEnable()
@@ -208,10 +208,15 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
     private void Update()
     {
+        if (hasLaunched && IsOutsideCameraBounds())
+        {
+            Destroy(gameObject);
+            return;
+        }
+
         if (keepInitialRotation || _rigidbody2D == null) return;
         if (!rotateToVelocity) return;
 
-        // Get velocity for rotation
         Vector2 v = _rigidbody2D.velocity;
         if (v.sqrMagnitude < (minRotateVelocity * minRotateVelocity)) return;
 
@@ -225,16 +230,41 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
         transform.rotation = Quaternion.Euler(0f, 0f, newAngle);
     }
 
-    /// <summary>
-    /// Get the spawn offset for this projectile type based on firing direction
-    /// </summary>
+    private bool IsOutsideCameraBounds()
+    {
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+        }
+
+        if (mainCamera == null)
+        {
+            return false;
+        }
+
+        float halfHeight = mainCamera.orthographicSize;
+        float halfWidth = halfHeight * mainCamera.aspect;
+
+        Vector3 camPos = mainCamera.transform.position;
+        Vector3 pos = transform.position;
+
+        float offset = Mathf.Max(0f, DestroyCameraOffset);
+
+        float left = camPos.x - halfWidth - offset;
+        float right = camPos.x + halfWidth + offset;
+        float bottom = camPos.y - halfHeight - offset;
+        float top = camPos.y + halfHeight + offset;
+
+        return pos.x < left || pos.x > right || pos.y < bottom || pos.y > top;
+    }
+
     public Vector2 GetSpawnOffset(Vector2 direction)
     {
         direction = direction.normalized;
-        
+
         float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
         if (angle < 0) angle += 360f;
-        
+
         if (direction.x > 0)
         {
             if (angle >= 0f && angle <= 90f)
@@ -260,7 +290,7 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
                 return relativeAngle > 45f ? offsetLeftAbove45 : offsetLeftBelow45;
             }
         }
-        
+
         return Vector2.zero;
     }
 
@@ -304,8 +334,11 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
         return Vector2.zero;
     }
 
+    // NOTE: playerMana is intentionally ignored (mana removed).
     public void Launch(Vector2 direction, Collider2D colliderToIgnore, PlayerMana playerMana = null, bool skipCooldownCheck = false)
     {
+        hasLaunched = true;
+
         if (_rigidbody2D == null)
         {
             Debug.LogWarning("ProjectileTalon missing Rigidbody2D.");
@@ -313,140 +346,103 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             return;
         }
 
-        // Get card-specific modifiers
         ProjectileCards card = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
-        CardModifierStats modifiers = new CardModifierStats(); // Default values
-        
+        CardModifierStats modifiers = new CardModifierStats();
+
         if (card != null)
         {
             modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
         }
-        
-        // Determine which enhanced variants have EVER been chosen for this card.
-        // We want Variant 1 (multi-pierce) and Variant 2 (speed & extra pierce)
-        // to STACK regardless of the order they were picked across tiers.
+
         int enhancedVariant = 0;
         bool hasVariant1 = false;
         bool hasVariant2 = false;
         if (ProjectileCardLevelSystem.Instance != null && card != null)
         {
             enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
-
-            // Use the per-card history so that any tier which granted Variant 1 or 2
-            // keeps its effect permanently for this card.
             hasVariant1 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
             hasVariant2 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
 
-            // Enhanced Variant 3 - guaranteed slow: set SlowEffect chance to 100%
             if (enhancedVariant == 3)
             {
                 SlowEffect slowEffect = GetComponent<SlowEffect>();
                 if (slowEffect != null)
                 {
-                    slowEffect.slowChance = 100f;
+                    // Variant 3 uses an explicit slow chance; interpret the
+                    // field as 0-1 and convert to the 0-100% range used by
+                    // SlowEffect.
+                    slowEffect.slowChance = Mathf.Clamp01(variant3SlowEffectChance) * 100f;
                 }
             }
         }
-        
-        // Apply enhanced variant bonuses
-        // CRITICAL: Don't modify modifiers struct - it's shared across all fires!
-        // Instead, track enhanced bonuses separately and add them to final values.
-        // NOTE: Projectile-count bonuses are applied in ProjectileSpawner so that the
-        // very first enhanced spawn already uses the correct projectile count.
+
         int enhancedPierceAdd = 0;
         float enhancedSpeedAdd = 0f;
 
         if (hasVariant1)
         {
-            // Variant 1: add its pierce bonus only. Projectile-count bonus
-            // is handled centrally in ProjectileSpawner using
-            // enhancedProjectileCountBonus so that the very first enhanced
-            // spawn gets the correct extra projectile(s).
             enhancedPierceAdd += enhancedPierceBonus;
         }
 
         if (hasVariant2)
         {
-            // Variant 2: add ONLY its own pierce and speed bonuses. This ensures
-            // picking Variant 2 also stacks cleanly on top of Variant 1 when both
-            // have been chosen across enhancement tiers.
             enhancedPierceAdd += enhancedVariant2PierceBonus;
             enhancedSpeedAdd += enhancedVariant2SpeedBonus;
         }
 
-        // Apply card modifiers using new RAW value system
-        float baseSpeedLocal = speed + modifiers.speedIncrease; // RAW value added
+        float baseSpeedLocal = speed + modifiers.speedIncrease;
         float finalSpeed = baseSpeedLocal + enhancedSpeedAdd;
-        float finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease; // RAW seconds added
+        float finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease;
 
-        // CRITICAL: Use ProjectileCards spawnInterval if available, otherwise use script cooldown
         float baseCooldown = cooldown;
         if (card != null && card.runtimeSpawnInterval > 0f)
         {
             baseCooldown = card.runtimeSpawnInterval;
         }
 
-        // If Variant 2 has EVER been chosen for this card and a per-variant
-        // base cooldown is configured, treat variant2BaseCooldown as the
-        // canonical base value before applying any other modifiers. This
-        // ensures that when Variant 1 and 2 are stacked together, the unique
-        // Variant 2 base cooldown still drives the timing even if the current
-        // enhancedVariant is 1 or 0 in this frame.
         if (hasVariant2 && variant2BaseCooldown > 0f)
         {
             baseCooldown = variant2BaseCooldown;
         }
 
-        // Sync card runtime interval with the resolved BASE cooldown so that
-        // ProjectileSpawner and boss/enhanced systems use the same canonical value.
         if (card != null)
         {
-            card.runtimeSpawnInterval = Mathf.Max(0.1f, baseCooldown);
+            card.runtimeSpawnInterval = Mathf.Max(0.0001f, baseCooldown);
         }
 
-        // Apply cooldown reduction from card modifiers, calculated from BASE
-        float finalCooldown = Mathf.Max(minCooldown, baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f)); // % from base
-        int finalManaCost = Mathf.Max(0, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
-        float finalDamage = damage + modifiers.damageFlat; // FLAT damage bonus per hit
-        
-        // Apply size multiplier
+        float finalCooldown = baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f);
+        if (MinCooldownManager.Instance != null)
+        {
+            finalCooldown = MinCooldownManager.Instance.ClampCooldown(card, finalCooldown);
+        }
+        else
+        {
+            finalCooldown = Mathf.Max(0.1f, finalCooldown);
+        }
+
+        float finalDamage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
+
         if (modifiers.sizeMultiplier != 1f)
         {
             transform.localScale *= modifiers.sizeMultiplier;
-            
-            // Scale collider using utility with colliderSizeOffset
             ColliderScaler.ScaleCollider(_collider2D, modifiers.sizeMultiplier, colliderSizeOffset);
         }
-        
-        // Pierce count = base modifiers + enhanced bonus (don't modify modifiers struct!)
+
         int totalPierceCount = modifiers.pierceCount + enhancedPierceAdd;
-        
-        // Still get PlayerStats for base damage calculation
+
         PlayerStats stats = null;
         if (colliderToIgnore != null)
         {
             stats = colliderToIgnore.GetComponent<PlayerStats>();
         }
-        
-        // Apply PlayerStats base damage multiplier
-        if (stats != null)
-        {
-            cachedPlayerStats = stats;
-        }
-        else
-        {
-            cachedPlayerStats = FindObjectOfType<PlayerStats>();
-        }
-        
+        cachedPlayerStats = stats != null ? stats : FindObjectOfType<PlayerStats>();
+
         baseDamageAfterCards = finalDamage;
-        
-        // Update variables with modifiers
+
         damage = finalDamage;
         speed = finalSpeed;
         lifetimeSeconds = finalLifetime;
 
-        // Allow the global "enhanced first spawn" reduction system to bypass this
-        // internal cooldown gate exactly once for PASSIVE projectile cards.
         bool bypassEnhancedFirstSpawnCooldown = false;
         if (!skipCooldownCheck && card != null && card.applyEnhancedFirstSpawnReduction && card.pendingEnhancedFirstSpawn)
         {
@@ -457,20 +453,12 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             }
         }
 
-        // Generate key based on projectile type AND element (Fire/Ice have separate cooldowns)
         prefabKey = $"ProjectileTalon_{projectileType}";
-        
-        // Only check cooldown/mana for first projectile in multi-spawn
+
         if (!skipCooldownCheck)
         {
-            // When this projectile is managed by a ProjectileCards instance (card != null),
-            // its cooldown is already controlled by ProjectileSpawner / AdvancedPlayerController.
-            // To avoid double-gating (which can cancel every other shot when global
-            // projectileCooldownReduction favours are applied), only apply this internal
-            // cooldown gate when no card context exists.
             if (card == null)
             {
-                // Check cooldown for this specific projectile type
                 if (!bypassEnhancedFirstSpawnCooldown && lastFireTimes.ContainsKey(prefabKey))
                 {
                     if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
@@ -480,20 +468,11 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
                     }
                 }
 
-                // Record fire time for this projectile type
                 lastFireTimes[prefabKey] = Time.time;
-            }
-
-            // Check mana with modified cost
-            if (playerMana != null && !playerMana.Spend(finalManaCost))
-            {
-                Destroy(gameObject);
-                return;
             }
         }
         else
         {
-            // CRITICAL: Mark as additional projectile to prevent independent firing
             isAdditionalProjectile = true;
         }
 
@@ -502,145 +481,106 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             Physics2D.IgnoreCollision(_collider2D, colliderToIgnore, true);
         }
 
-        Vector2 dir = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector2.right;
-        _rigidbody2D.velocity = dir * finalSpeed;
+        Vector2 chosenDir = direction.sqrMagnitude > 0.0001f
+            ? direction.normalized
+            : (directionSet && initialDirection.sqrMagnitude > 0.0001f ? initialDirection.normalized : Vector2.right);
+
+        _rigidbody2D.velocity = chosenDir * finalSpeed;
 
         if (!keepInitialRotation)
         {
-            float baseAngle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+            float baseAngle = Mathf.Atan2(chosenDir.y, chosenDir.x) * Mathf.Rad2Deg;
             float facingCorrection = (int)spriteFacing;
             float finalAngle = baseAngle + facingCorrection + additionalRotationOffsetDeg;
             transform.rotation = Quaternion.Euler(0f, 0f, finalAngle);
         }
-        
-        // CRITICAL: Always setup ProjectilePiercing component (even if count is 0)
-        // This ensures the component is properly initialized with modifier values
+
         ProjectilePiercing piercing = gameObject.GetComponent<ProjectilePiercing>();
-        bool wasAdded = false;
-        int existingPierceCount = 0;
         int prefabDefaultPierceCount = 0;
-        
+
         if (piercing == null)
         {
             piercing = gameObject.AddComponent<ProjectilePiercing>();
-            wasAdded = true;
-            Debug.Log($"<color=yellow>ProjectileTalon: Added ProjectilePiercing component</color>");
-            
-            // CRITICAL: Manually set colliders to trigger since Awake() already ran
+
             Collider2D[] allColliders = GetComponentsInChildren<Collider2D>(true);
             foreach (Collider2D col in allColliders)
             {
                 if (!col.isTrigger)
                 {
                     col.isTrigger = true;
-                    Debug.Log($"<color=magenta>ProjectileTalon: Manually set {col.gameObject.name} collider to trigger</color>");
                 }
             }
         }
         else
         {
-            existingPierceCount = piercing.pierceCount;
-            prefabDefaultPierceCount = piercing.pierceCount; // Store prefab's default value
-            Debug.Log($"<color=yellow>ProjectileTalon: Found EXISTING ProjectilePiercing component with pierceCount={existingPierceCount}</color>");
+            prefabDefaultPierceCount = piercing.pierceCount;
         }
-        
-        // CRITICAL FIX: If prefab has default pierce count, use it as base and ADD modifiers to it
-        // This prevents resetting the prefab's pierce value when no modifier is picked
+
         int finalPierceCount = totalPierceCount;
         if (prefabDefaultPierceCount > 0 && totalPierceCount == 0)
         {
-            // Prefab has default pierce, but no modifiers picked - use prefab default
             finalPierceCount = prefabDefaultPierceCount;
-            Debug.Log($"<color=yellow>  Using prefab default pierce: {prefabDefaultPierceCount}</color>");
         }
         else if (prefabDefaultPierceCount > 0 && totalPierceCount > 0)
         {
-            // Prefab has default AND modifiers picked - ADD them together
             finalPierceCount = prefabDefaultPierceCount + totalPierceCount;
-            Debug.Log($"<color=yellow>  Combining prefab default ({prefabDefaultPierceCount}) + modifiers ({totalPierceCount}) = {finalPierceCount}</color>");
         }
-        
-        // Set pierce count
+
         piercing.SetMaxPierces(finalPierceCount);
-        Debug.Log($"<color=lime>╔═══════════════════════════════════════════════════════════╗</color>");
-        Debug.Log($"<color=lime>║   TALON PIERCE SETUP COMPLETE                            ║</color>");
-        Debug.Log($"<color=lime>╚═══════════════════════════════════════════════════════════╝</color>");
-        Debug.Log($"  Component: {(wasAdded ? "NEWLY ADDED" : "EXISTING (had " + existingPierceCount + ")")}");
-        Debug.Log($"  Card: {(card != null ? card.cardName + " (ID:" + card.GetInstanceID() + ")" : "NULL")}");
-        Debug.Log($"  prefabDefaultPierceCount: {prefabDefaultPierceCount}");
-        Debug.Log($"  modifiers.pierceCount: {modifiers.pierceCount}");
-        Debug.Log($"  enhancedPierceAdd: {enhancedPierceAdd}");
-        Debug.Log($"  totalPierceCount (modifiers + enhanced): {totalPierceCount}");
-        Debug.Log($"  FINAL pierceCount set: {finalPierceCount}");
-        Debug.Log($"  Component.pierceCount after SetMaxPierces: {piercing.pierceCount}");
-        Debug.Log($"  Component enabled: {piercing.enabled}");
-        Debug.Log($"  GameObject active: {gameObject.activeInHierarchy}");
 
         Destroy(gameObject, finalLifetime);
         StartTrailSfx();
     }
 
-    // OnCollisionEnter2D removed - using triggers only for smooth pierce mechanics
-    
     private void OnTriggerEnter2D(Collider2D other)
     {
-        // This is called when collider is a trigger (pierce mode)
-        // Check for piercing component on parent (not on child colliders)
         ProjectilePiercing piercing = GetComponentInParent<ProjectilePiercing>();
         if (piercing == null)
         {
             piercing = GetComponent<ProjectilePiercing>();
         }
-        
-        Debug.Log($"<color=yellow>═══ TALON OnTriggerEnter2D: {other.gameObject.name} ═══</color>");
-        Debug.Log($"  Piercing component: {(piercing != null ? "FOUND" : "NULL")}");
-        if (piercing != null)
-        {
-            Debug.Log($"  piercing.pierceCount: {piercing.pierceCount}");
-            Debug.Log($"  piercing.GetRemainingPierces(): {piercing.GetRemainingPierces()}");
-        }
-        
+
         if (((1 << other.gameObject.layer) & enemyLayer) != 0)
         {
-            Debug.Log($"  Enemy layer detected: YES");
-            
-            // If has piercing and already hit this enemy, ignore
             if (piercing != null && piercing.HasHitEnemy(other.gameObject))
             {
-                Debug.Log($"  <color=red>Already hit this enemy - IGNORING</color>");
                 return;
             }
-            
-            Debug.Log($"  <color=green>New enemy hit - proceeding with damage</color>");
-            
+
+            Camera cam = Camera.main;
+            bool enemyOnLeftSide;
+            if (cam != null)
+            {
+                enemyOnLeftSide = other.transform.position.x < cam.transform.position.x;
+            }
+            else
+            {
+                enemyOnLeftSide = other.transform.position.x < transform.position.x;
+            }
+
+            if (enemyOnLeftSide && transform.position.y < YaxisIgnoreLeftEnemies)
+            {
+                return;
+            }
+
             IDamageable damageable = other.GetComponent<IDamageable>() ?? other.GetComponentInParent<IDamageable>();
-            
-            // Only damage if target is alive
+
             if (damageable != null && damageable.IsAlive)
             {
-                // Check damage cooldown
                 if (Time.time - lastDamageTime < damageCooldown)
                 {
-                    return; // Too soon to damage again
-                }
-                
-                // Check if enemy is within damageable area (on-screen or slightly offscreen)
-                if (!OffscreenDamageChecker.CanTakeDamage(other.transform.position))
-                {
-                    Debug.Log($"<color=yellow>ProjectileTalon (Trigger): Enemy {other.gameObject.name} too far offscreen, no damage dealt</color>");
                     return;
                 }
-                
+
+                if (!OffscreenDamageChecker.CanTakeDamage(other.transform.position))
+                {
+                    return;
+                }
+
                 Vector3 hitPoint = other.ClosestPoint(transform.position);
                 Vector3 hitNormal = (transform.position - hitPoint).normalized;
-                Vector3 effectBasePosition = hitPoint;
-                Collider2D enemyCollider = other;
-                if (enemyCollider != null)
-                {
-                    effectBasePosition = enemyCollider.bounds.center;
-                }
-                
-                // Use damage value that was already modified by cards; apply PlayerStats per hit for crit
+                Vector3 effectBasePosition = Vector3.Lerp(other.bounds.center, hitPoint, hitEffectSpawnBias);
+
                 float baseDamageForEnemy = baseDamageAfterCards > 0f ? baseDamageAfterCards : damage;
                 float finalDamage = baseDamageForEnemy;
 
@@ -652,9 +592,6 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
                     finalDamage = PlayerDamageHelper.ComputeProjectileDamage(cachedPlayerStats, enemyObject, baseDamageForEnemy, gameObject);
                 }
 
-                // Tag EnemyHealth so IceTalon hits always use the ice damage
-                // color in EnemyHealth's damage-number pipeline instead of
-                // inheriting a random previous elemental color.
                 if (enemyObject != null)
                 {
                     EnemyHealth enemyHealth = enemyObject.GetComponent<EnemyHealth>() ?? enemyObject.GetComponentInParent<EnemyHealth>();
@@ -666,9 +603,6 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
                 damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
 
-                // Apply SlowEffect (if present) so IceTalon can slow enemies.
-                // Variant 3 sets SlowEffect.slowChance = 100%, making slow
-                // guaranteed on hit, mirroring DwarfStar's slow behaviour.
                 SlowEffect slowEffect = GetComponent<SlowEffect>();
                 if (slowEffect != null)
                 {
@@ -681,39 +615,22 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
                     staticEffect.TryApplyStatic(other.gameObject, hitPoint);
                 }
 
-                lastDamageTime = Time.time; // Update last damage time
-                
-                // Play hit effect on EVERY successful enemy hit
+                lastDamageTime = Time.time;
+
                 TryPlayHitEffect(effectBasePosition);
 
-                // Register pierce hit
                 if (piercing != null)
                 {
-                    Debug.Log($"<color=cyan>  Registering pierce hit on {other.gameObject.name}</color>");
                     bool shouldContinue = piercing.OnEnemyHit(other.gameObject);
-                    int remaining = piercing.GetRemainingPierces();
-                    
-                    Debug.Log($"<color=cyan>  OnEnemyHit returned: {shouldContinue}</color>");
-                    Debug.Log($"<color=cyan>  Remaining pierces: {remaining}</color>");
-
-                    // ProjectilePiercing.OnEnemyHit returns false when we have exceeded
-                    // the allowed pierceCount (e.g., 1 pierce = hit 2 enemies).
                     if (!shouldContinue)
                     {
-                        Debug.Log($"<color=red>  MAX PIERCES REACHED - DESTROYING PROJECTILE</color>");
                         HandleImpact(hitPoint, hitNormal, other.transform);
                         Destroy(gameObject);
                         return;
                     }
-                    else
-                    {
-                        Debug.Log($"<color=green>  PIERCING THROUGH - {remaining} pierces remaining</color>");
-                    }
                 }
                 else
                 {
-                    // No piercing - destroy projectile
-                    Debug.Log($"<color=red>  NO PIERCING COMPONENT - DESTROYING PROJECTILE</color>");
                     HandleImpact(hitPoint, hitNormal, other.transform);
                     Destroy(gameObject);
                     return;
@@ -721,26 +638,20 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             }
             else if (damageable != null && !damageable.IsAlive)
             {
-                // Target is already dead, check if we should pierce through
                 if (piercing != null && piercing.GetRemainingPierces() > 0)
                 {
-                    // Continue through dead enemy
                     return;
                 }
-                
-                // No piercing - destroy
-                Debug.Log($"<color=yellow>ProjectileTalon (Trigger) hit dead enemy {other.gameObject.name}, destroying</color>");
+
                 Destroy(gameObject);
                 return;
             }
         }
         else
         {
-            // Hit non-enemy object (wall, etc) - always destroy
             Vector3 hitPoint = other.ClosestPoint(transform.position);
             Vector3 hitNormal = (transform.position - hitPoint).normalized;
-            
-            // Play hit effect on impact with environment
+
             TryPlayHitEffect(hitPoint);
 
             HandleImpact(hitPoint, hitNormal, other.transform);
@@ -834,24 +745,6 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
         }
     }
 
-    private Quaternion ComputeImpactRotation(Vector3 surfaceNormal)
-    {
-        switch (impactOrientation)
-        {
-            case ImpactOrientationMode.SurfaceNormal:
-                return Quaternion.LookRotation(Vector3.forward, surfaceNormal);
-            case ImpactOrientationMode.Opposite:
-                return Quaternion.LookRotation(Vector3.forward, -surfaceNormal);
-            case ImpactOrientationMode.ProjectileVelocity:
-                Vector2 v = _rigidbody2D != null ? _rigidbody2D.velocity : Vector2.right;
-                if (v.sqrMagnitude < 0.0001f) v = Vector2.right;
-                return Quaternion.LookRotation(Vector3.forward, v.normalized);
-            case ImpactOrientationMode.None:
-            default:
-                return Quaternion.identity;
-        }
-    }
-
     private void EnsureTrailAudioSource()
     {
         if (_trailSource == null)
@@ -936,13 +829,35 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
         _fadeOutRoutine = null;
     }
 
-    private IEnumerator RestoreVelocityAfterFrame(Rigidbody2D rb, Vector2 originalVelocity)
+    public void ApplyInstantModifiers(CardModifierStats mods)
     {
-        yield return null; // Wait one frame
-        if (rb != null)
+        Debug.Log($"<color=lime>╔ ICETALON ╗</color>");
+        float ns = baseSpeed + mods.speedIncrease;
+        if (ns != speed)
         {
-            rb.velocity = originalVelocity;
+            speed = ns;
+            if (_rigidbody2D != null)
+                _rigidbody2D.velocity = _rigidbody2D.velocity.normalized * speed;
+            Debug.Log($"<color=lime>Speed:{baseSpeed:F2}+{mods.speedIncrease:F2}={speed:F2}</color>");
         }
+        float nl = baseLifetime + mods.lifetimeIncrease;
+        if (nl != lifetimeSeconds)
+        {
+            lifetimeSeconds = nl;
+            Debug.Log($"<color=lime>Lifetime:{baseLifetime:F2}+{mods.lifetimeIncrease:F2}={lifetimeSeconds:F2}</color>");
+        }
+        float nd = (baseDamage + mods.damageFlat) * mods.damageMultiplier;
+        if (nd != damage)
+        {
+            damage = nd;
+            baseDamageAfterCards = nd;
+            Debug.Log($"<color=lime>Damage:{baseDamage:F2}*{mods.damageMultiplier:F2}x={damage:F2}</color>");
+        }
+        if (mods.sizeMultiplier != 1f)
+        {
+            transform.localScale = baseScale * mods.sizeMultiplier;
+            Debug.Log($"<color=lime>Size:{baseScale}*{mods.sizeMultiplier:F2}x={transform.localScale}</color>");
+        }
+        Debug.Log($"<color=lime>╚═══════════════════════════════════════╝</color>");
     }
-    public void ApplyInstantModifiers(CardModifierStats mods) { Debug.Log($"<color=lime>╔ ICETALON ╗</color>"); float ns=baseSpeed+mods.speedIncrease; if(ns!=speed){speed=ns; if(_rigidbody2D!=null)_rigidbody2D.velocity=_rigidbody2D.velocity.normalized*speed; Debug.Log($"<color=lime>Speed:{baseSpeed:F2}+{mods.speedIncrease:F2}={speed:F2}</color>");} float nl=baseLifetime+mods.lifetimeIncrease; if(nl!=lifetimeSeconds){lifetimeSeconds=nl; Debug.Log($"<color=lime>Lifetime:{baseLifetime:F2}+{mods.lifetimeIncrease:F2}={lifetimeSeconds:F2}</color>");} float nd=baseDamage*mods.damageMultiplier; if(nd!=damage){damage=nd; baseDamageAfterCards=nd; Debug.Log($"<color=lime>Damage:{baseDamage:F2}*{mods.damageMultiplier:F2}x={damage:F2}</color>");} if(mods.sizeMultiplier!=1f){transform.localScale=baseScale*mods.sizeMultiplier; Debug.Log($"<color=lime>Size:{baseScale}*{mods.sizeMultiplier:F2}x={transform.localScale}</color>");} Debug.Log($"<color=lime>╚═══════════════════════════════════════╝</color>"); }
 }

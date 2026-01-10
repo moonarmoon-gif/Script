@@ -11,7 +11,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     [SerializeField] private float lifetimeSeconds = 5f;
 
     public int SpawnLimit = 50;
-    
+
     [Header("Explosion")]
     [SerializeField] private float explosionRadius = 3f;
     [Tooltip("Offset for explosion detection area in X and Y coordinates")]
@@ -19,14 +19,14 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     [SerializeField] private float damage = 40f;
     [SerializeField] private LayerMask enemyLayer;
     [SerializeField] private ProjectileType projectileType = ProjectileType.Fire;
-    
+
     [Header("Explosion Timing")]
     [Tooltip("Delay before explosion deals damage after enemy contact (in seconds)")]
     public float explosionDelay = 0.2f;
     [Tooltip("Delay before showing damage numbers after explosion (in seconds)")]
     public float damageNumberDelay = 0f;
     public float ExplosionDamageDelay = 0f;
-    
+
     [Header("Spawn Area - 6 Point System")]
     [Tooltip("Tag for point A (top-left): determines polygon vertex A")]
     [SerializeField] private string pointATag = "FireMine_PointA";
@@ -40,22 +40,22 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     [SerializeField] private string pointETag = "FireMine_PointE";
     [Tooltip("Tag for point F (optional extra vertex)")]
     [SerializeField] private string pointFTag = "FireMine_PointF";
-    
+
     [Header("Overlap Prevention")]
     [Tooltip("Minimum distance allowed between FireMines (multiplier of collider radius)")]
     [SerializeField] private float minDistanceBetweenMines = 2f;
-    
+
     [Header("Collider Scaling")]
     [Tooltip("Offset for collider size relative to visual size (0 = same as visual, -0.2 = 20% smaller, 0.2 = 20% larger)")]
     [SerializeField] private float colliderSizeOffset = 0f;
-    
+
     private Transform pointA;
     private Transform pointB;
     private Transform pointC;
     private Transform pointD;
     private Transform pointE;
     private Transform pointF;
-    
+
     [Header("Visual Effects")]
     [SerializeField] private GameObject explosionEffectPrefab;
     [SerializeField] private float explosionEffectDuration = 2f;
@@ -73,17 +73,17 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     [SerializeField] private GameObject armingEffectPrefab;
     [SerializeField] private float fadeInDuration = 0.5f;
     [SerializeField] private SpriteRenderer spriteRenderer;
-    
+
     [Header("Audio")]
     [SerializeField] private AudioClip explosionClip;
     [Range(0f, 1f)][SerializeField] private float explosionVolume = 1f;
     [SerializeField] private AudioClip armingClip;
     [Range(0f, 1f)][SerializeField] private float armingVolume = 0.5f;
-    
+
     [Header("Mana & Cooldown")]
     [SerializeField] private int manaCost = 15;
     [SerializeField] private float cooldown = 1f;
-    
+
     [Header("Multi-Tier Enhancement System")]
     [Tooltip("Enhanced prefab for Tier 1 (e.g., level 10) - will swap to this prefab when enhanced")]
     [SerializeField] private GameObject enhancedTier1Prefab;
@@ -91,7 +91,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     [SerializeField] private GameObject enhancedTier2Prefab;
     [Tooltip("Level multiplier for tier thresholds (e.g., 2 means Tier 2 = Tier 1 level * 2)")]
     [SerializeField] private float tierLevelMultiplier = 2;
-    
+
     [Header("Enhanced Variant 1 - Mega Mine")]
     [Tooltip("Size increase for Enhanced Variant 1 (0.25 = +25%)")]
     [SerializeField] private float enhancedSizeIncrease = 0.25f;
@@ -101,7 +101,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     [SerializeField] private float enhancedCooldownReduction = 0.25f;
     [Tooltip("Additional projectile count for Enhanced Variant 1 (e.g., 1 = spawn 1 extra)")]
     [SerializeField] public int enhancedProjectileCountBonus = 1;
-    
+
     [Header("Enhanced Variant 2 - Ultra Mine")]
     [Tooltip("Size increase for Enhanced Variant 2 (0.5 = +50%)")]
     [SerializeField] private float enhancedTier2SizeIncrease = 0.5f;
@@ -118,23 +118,21 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
     [Tooltip("Base cooldown used when FireMine is in Enhanced Variant 2 (Ultra Mine). If 0, falls back to ProjectileCards.runtimeSpawnInterval or script cooldown.")]
     [SerializeField] private float variant2BaseCooldown = 0f;
-    
+
     private Rigidbody2D _rigidbody2D;
     private Collider2D _collider2D;
     private bool isArmed = false;
     private bool hasExploded = false;
     private bool isExploding = false;
-    
+
     // Enhanced system
     private int enhancedVariant = 0; // 0 = basic, 1 = mega mine, 2-3 = future variants
     private float explosionRadiusForEffect = 0f; // Store radius BEFORE modifiers for effect scaling
-    
-    // Track if enhanced bonus has been added to card modifiers (legacy, unused)
-    
+
     // Instance-based cooldown tracking
     private static System.Collections.Generic.Dictionary<string, float> lastFireTimes = new System.Collections.Generic.Dictionary<string, float>();
     private string prefabKey;
-    
+
     // Base values for instant modifier recalculation
     private float baseLifetimeSeconds;
     private float baseExplosionRadius;
@@ -146,18 +144,24 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     private float scheduledDespawnTime = -1f;
     private bool registeredInSpawnLimit = false;
     private static System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<FireMine>> activeMinesByKey = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<FireMine>>();
-    
+
     private void Awake()
     {
         _rigidbody2D = GetComponent<Rigidbody2D>();
         _collider2D = GetComponent<Collider2D>();
-        
+
+        if (_collider2D != null)
+        {
+            _collider2D.isTrigger = true;
+        }
+
         // Store base values
         baseLifetimeSeconds = lifetimeSeconds;
         baseExplosionRadius = explosionRadius;
         baseDamage = damage;
+
         baseScale = transform.localScale;
-        
+
         // Make mine stationary
         if (_rigidbody2D != null)
         {
@@ -264,7 +268,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             Destroy(candidate.gameObject);
         }
     }
-    
+
     /// <summary>
     /// Initialize enhanced mine with transferred stats (skips enhancement check to prevent recursion)
     /// </summary>
@@ -272,16 +276,16 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     {
         // Set enhanced variant to prevent re-enhancement
         this.enhancedVariant = tier;
-        
+
         // Continue with normal initialization but skip enhancement check
         InitializeInternal(spawnPosition, playerCollider, true, skipCooldownCheck);
     }
-    
+
     public void Initialize(Vector3 spawnPosition, Collider2D playerCollider, bool skipCooldownCheck = false)
     {
         InitializeInternal(spawnPosition, playerCollider, false, skipCooldownCheck);
     }
-    
+
     private void InitializeInternal(Vector3 spawnPosition, Collider2D playerCollider, bool skipEnhancementCheck, bool skipCooldownCheck = false)
     {
         // Find spawn area GameObjects by tag (supports up to 6 points: A-F)
@@ -290,19 +294,19 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             GameObject pointAObj = GameObject.FindGameObjectWithTag(pointATag);
             if (pointAObj != null) pointA = pointAObj.transform;
         }
-        
+
         if (!string.IsNullOrEmpty(pointBTag))
         {
             GameObject pointBObj = GameObject.FindGameObjectWithTag(pointBTag);
             if (pointBObj != null) pointB = pointBObj.transform;
         }
-        
+
         if (!string.IsNullOrEmpty(pointCTag))
         {
             GameObject pointCObj = GameObject.FindGameObjectWithTag(pointCTag);
             if (pointCObj != null) pointC = pointCObj.transform;
         }
-        
+
         if (!string.IsNullOrEmpty(pointDTag))
         {
             GameObject pointDObj = GameObject.FindGameObjectWithTag(pointDTag);
@@ -396,33 +400,33 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             transform.position = spawnPosition;
             Debug.LogWarning("<color=yellow>FireMine: Not enough spawn points found (need at least 3), using default position</color>");
         }
-        
+
         // Get card-specific modifiers FIRST
         ProjectileCards card = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
         CardModifierStats modifiers = new CardModifierStats(); // Default values
-        
+
         if (card != null)
         {
             modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
             Debug.Log($"<color=orange>FireMine using modifiers from {card.cardName}</color>");
         }
-        
+
         // Declare final stat variables early so they can be used in prefab swapping
         float finalLifetime = lifetimeSeconds;
         float finalCooldown = cooldown;
         int finalManaCost = manaCost;
-        
+
         // Check for enhanced variant using CARD-based system with prefab swapping
         if (!skipEnhancementCheck && ProjectileCardLevelSystem.Instance != null && card != null)
         {
             int currentLevel = ProjectileCardLevelSystem.Instance.GetLevel(card);
             int unlockLevel = ProjectileCardLevelSystem.Instance.GetEnhancedUnlockLevel();
             enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
-            
+
             // Check if we should swap to a higher tier prefab
             GameObject targetPrefab = null;
             int targetTier = 0;
-            
+
             // Tier 2: level >= unlockLevel * tierLevelMultiplier (e.g., level 20 if unlock is 10)
             if (enhancedTier2Prefab != null && currentLevel >= unlockLevel * tierLevelMultiplier)
             {
@@ -435,15 +439,15 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                 targetPrefab = enhancedTier1Prefab;
                 targetTier = 1;
             }
-            
+
             // Swap to enhanced prefab if needed
             if (targetPrefab != null && targetTier > 0)
             {
                 Debug.Log($"<color=gold>FireMine TIER {targetTier} UPGRADE: Level {currentLevel} >= threshold, swapping to {targetPrefab.name}</color>");
-                
+
                 // Instantiate the enhanced prefab at current position
                 GameObject enhancedObj = Instantiate(targetPrefab, transform.position, transform.rotation);
-                
+
                 FireMine enhancedMine = enhancedObj.GetComponent<FireMine>();
                 if (enhancedMine != null)
                 {
@@ -456,12 +460,12 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                     enhancedMine.enhancedVariant = targetTier;
                     enhancedMine.InitializeEnhanced(transform.position, playerCollider, modifiers, card, targetTier, skipCooldownCheck);
                 }
-                
+
                 // Destroy this instance and return
                 Destroy(gameObject);
                 return;
             }
-            
+
             Debug.Log($"<color=gold>FireMine ({card.cardName}) Enhanced Variant: {enhancedVariant}, Level: {currentLevel}/{unlockLevel}</color>");
         }
 
@@ -470,16 +474,16 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         float enhancedLifetimeAdd = 0f;
         float enhancedCooldownRed = 0f;
         int enhancedProjectileBonus = 0;
-        
+
         if (enhancedVariant == 1)
         {
             enhancedSizeMult = 1f + enhancedSizeIncrease; // e.g., 1.25 for +25%
             enhancedLifetimeAdd = enhancedLifetimeBonus;
             enhancedCooldownRed = enhancedCooldownReduction;
-            
+
             // Store enhanced projectile count bonus (don't modify modifiers directly!)
             enhancedProjectileBonus = enhancedProjectileCountBonus;
-            
+
             Debug.Log($"<color=gold>Enhanced Tier 1 Mega Mine: Size x{enhancedSizeMult}, Lifetime +{enhancedLifetimeAdd}s, Cooldown -{enhancedCooldownRed * 100}%, Additional Projectiles +{enhancedProjectileBonus}</color>");
         }
         else if (enhancedVariant == 2)
@@ -487,16 +491,16 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             enhancedSizeMult = 1f + enhancedTier2SizeIncrease; // e.g., 1.5 for +50%
             enhancedLifetimeAdd = enhancedTier2LifetimeBonus;
             enhancedCooldownRed = enhancedTier2CooldownReduction;
-            
+
             // Store enhanced projectile count bonus (don't modify modifiers directly!)
             enhancedProjectileBonus = enhancedTier2ProjectileCountBonus;
-            
+
             Debug.Log($"<color=gold>Enhanced Tier 2 Ultra Mine: Size x{enhancedSizeMult}, Lifetime +{enhancedLifetimeAdd}s, Cooldown -{enhancedCooldownRed * 100}%, Additional Projectiles +{enhancedProjectileBonus}</color>");
         }
-        
+
         // Apply card modifiers using new RAW value system
         finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease + enhancedLifetimeAdd; // RAW seconds + enhanced
-        
+
         // CRITICAL: Use ProjectileCards spawnInterval if available, otherwise use script cooldown
         float baseCooldown;
         if (card != null && card.runtimeSpawnInterval > 0f)
@@ -529,62 +533,67 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         {
             card.runtimeSpawnInterval = Mathf.Max(0.1f, baseCooldown);
         }
-        
+
         // Apply cooldown reduction: BOTH card modifiers AND enhanced, calculated from BASE
         float totalCooldownReduction = (modifiers.cooldownReductionPercent / 100f) + enhancedCooldownRed;
-        finalCooldown = Mathf.Max(0.1f, baseCooldown * (1f - totalCooldownReduction));
+        finalCooldown = baseCooldown * (1f - totalCooldownReduction);
+        if (MinCooldownManager.Instance != null)
+        {
+            finalCooldown = MinCooldownManager.Instance.ClampCooldown(card, finalCooldown);
+        }
+        else
+        {
+            finalCooldown = Mathf.Max(0.1f, finalCooldown);
+        }
         Debug.Log($"<color=orange>FireMine Cooldown: Base={baseCooldown:F2}s, Card Reduction={modifiers.cooldownReductionPercent:F1}%, Enhanced Reduction={enhancedCooldownRed * 100f:F1}%, Total Reduction={totalCooldownReduction * 100f:F1}%, Final={finalCooldown:F2}s</color>");
-        
+
         finalManaCost = Mathf.Max(1, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
         damage += modifiers.damageFlat;
-        
+
         // Reset explosion radius to base before applying size and modifiers
         explosionRadius = baseExplosionRadius;
-        
+
         // Apply size multiplier (card + enhanced)
         float totalSizeMultiplier = modifiers.sizeMultiplier * enhancedSizeMult;
-        
+
         Debug.Log($"<color=orange>═══════════════════════════════════════════════════════</color>");
         Debug.Log($"<color=orange>FireMine SCALING:</color>");
         Debug.Log($"<color=orange>  Card Size Multiplier: {modifiers.sizeMultiplier:F2}x</color>");
         Debug.Log($"<color=orange>  Enhanced Size Multiplier: {enhancedSizeMult:F2}x</color>");
         Debug.Log($"<color=orange>  Total Size Multiplier: {totalSizeMultiplier:F2}x</color>");
-        
+
         // Store original values for logging
         float originalExplosionRadius = explosionRadius;
         Vector3 originalScale = transform.localScale;
-        
+
         if (totalSizeMultiplier != 1f)
         {
             // Scale visual (transform)
             transform.localScale *= totalSizeMultiplier;
-            
+
             // CRITICAL: Scale explosion radius by SQUARE of size multiplier
-            // This ensures the explosion AREA scales proportionally with the visual AREA
-            // Example: 1.25x visual = 1.25² = 1.5625x explosion radius
-            // This makes the explosion feel properly scaled with the mine size
             float explosionRadiusMultiplier = totalSizeMultiplier;
             explosionRadius = baseExplosionRadius * explosionRadiusMultiplier;
-            
+
             Debug.Log($"<color=orange>  Visual Scale: {originalScale} → {transform.localScale}</color>");
             Debug.Log($"<color=orange>  Explosion Radius (after size): {originalExplosionRadius:F2} → {explosionRadius:F2}</color>");
             Debug.Log($"<color=orange>  Visual Multiplier: x{totalSizeMultiplier:F2}</color>");
             Debug.Log($"<color=orange>  Explosion Multiplier: x{explosionRadiusMultiplier:F2} (squared for area)</color>");
-            
+
             // Scale explosion offset Y with size (X stays the same)
             explosionRadiusOffset.y *= totalSizeMultiplier;
-            
+
             // Also scale effect offsets Y
             explosionEffectOffsetLeft.y *= totalSizeMultiplier;
             explosionEffectOffsetRight.y *= totalSizeMultiplier;
-            
+
             // Collider scaling: Since transform.localScale already scales the collider automatically,
             // we DON'T need to scale it again. The collider will match the visual size.
             // If colliderSizeOffset is set, apply it as a simple multiplier
             if (colliderSizeOffset != 0f)
             {
                 float colliderScale = 1f + colliderSizeOffset;
-                
+
                 if (_collider2D is CircleCollider2D circle)
                 {
                     circle.radius *= colliderScale;
@@ -597,7 +606,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                 {
                     capsule.size *= colliderScale;
                 }
-                
+
                 Debug.Log($"<color=orange>FireMine Collider Offset Applied: x{colliderScale:F2}</color>");
             }
         }
@@ -608,27 +617,26 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         Vector3 mineScale = transform.localScale;
         mineScale.y = explosionRadiusOffset.y;
         transform.localScale = mineScale;
-        
+
         // CRITICAL: Store explosion radius BEFORE modifiers for effect scaling
         explosionRadiusForEffect = explosionRadius;
-        
+
         // CRITICAL: Apply explosion radius modifiers from ProjectileCardModifiers
-        // This is SEPARATE from size scaling and applies AFTER size scaling
         float explosionRadiusAfterSize = explosionRadius;
         explosionRadius = (explosionRadius + modifiers.explosionRadiusBonus) * modifiers.explosionRadiusMultiplier;
-        
+
         Debug.Log($"<color=orange>  Explosion Radius Modifiers:</color>");
         Debug.Log($"<color=orange>    After Size: {explosionRadiusAfterSize:F2}</color>");
         Debug.Log($"<color=orange>    Bonus: +{modifiers.explosionRadiusBonus:F2}</color>");
         Debug.Log($"<color=orange>    Multiplier: x{modifiers.explosionRadiusMultiplier:F2}</color>");
         Debug.Log($"<color=orange>    Final: {explosionRadius:F2}</color>");
-        
+
         Debug.Log($"<color=orange>FireMine Modifiers Applied: Size={modifiers.sizeMultiplier:F2}x, Damage={modifiers.damageMultiplier:F2}x, Lifetime=+{modifiers.lifetimeIncrease:F2}s, ExplosionRadius={explosionRadius:F2}</color>");
-        
+
         // Still get PlayerStats for base damage calculation
         cachedPlayerStats = FindObjectOfType<PlayerStats>();
         baseDamageAfterCards = damage;
-        
+
         // Allow the global "enhanced first spawn" reduction system to bypass this
         // internal cooldown gate exactly once for PASSIVE projectile cards.
         bool bypassEnhancedFirstSpawnCooldown = false;
@@ -643,7 +651,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
         // Generate key based ONLY on projectile type (so all FireMines share same cooldown)
         prefabKey = GetType().Name;
-        
+
         // Only check cooldown/mana for first projectile in multi-spawn
         if (!skipCooldownCheck)
         {
@@ -657,7 +665,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                     return;
                 }
             }
-            
+
             // Check mana
             PlayerMana playerMana = FindObjectOfType<PlayerMana>();
             if (playerMana != null && !playerMana.Spend(finalManaCost))
@@ -666,7 +674,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                 Destroy(gameObject);
                 return;
             }
-            
+
             // Record fire time
             lastFireTimes[prefabKey] = Time.time;
         }
@@ -674,7 +682,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         {
             Debug.Log($"<color=gold>FireMine: Skipping cooldown/mana check (multi-projectile spawn)</color>");
         }
-        
+
         // Ignore collision with player
         if (_collider2D != null && playerCollider != null)
         {
@@ -683,7 +691,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
         scheduledDespawnTime = Time.time + finalLifetime;
         RegisterAndEnforceSpawnLimit();
-        
+
         // Start arming sequence
         StartCoroutine(ArmingSequence(finalLifetime));
 
@@ -717,63 +725,131 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         color.a = 1f;
         spriteRenderer.color = color;
     }
-    
+
     private IEnumerator ArmingSequence(float lifetime)
     {
         // Wait for arming delay
         yield return new WaitForSeconds(armDelay);
-        
+
         isArmed = true;
-        
+
+        TryTriggerExplosionFromCurrentOverlaps();
+
         // Play arming effect
         if (armingEffectPrefab != null)
         {
             GameObject armEffect = Instantiate(armingEffectPrefab, transform.position, Quaternion.identity, transform);
             Destroy(armEffect, lifetime);
         }
-        
+
         // Play arming sound
         if (armingClip != null)
         {
             AudioSource.PlayClipAtPoint(armingClip, transform.position, armingVolume);
         }
-        
+
         // Mine is now armed; detonation is driven purely by trigger overlap
         // events (OnTriggerEnter2D/OnTriggerStay2D), not by an automatic radius
         // check at the moment of arming.
-        
+
         // Wait for lifetime, then destroy without exploding
         yield return new WaitForSeconds(lifetime - armDelay);
-        
+
         if (!hasExploded && !isExploding)
         {
             Debug.Log("<color=yellow>FireMine lifetime expired - destroying without explosion</color>");
             Destroy(gameObject);
         }
     }
-    
+
     private void OnTriggerEnter2D(Collider2D other)
     {
         if (!isArmed || hasExploded || isExploding) return;
-        
+
         // Explode when enemy enters trigger
-        if (((1 << other.gameObject.layer) & enemyLayer) != 0)
+        if (IsEnemyCollider(other))
         {
             // Start explosion with delay
             StartCoroutine(ExplodeWithDelay());
         }
     }
-    
+
     private void OnTriggerStay2D(Collider2D other)
     {
         if (!isArmed || hasExploded || isExploding) return;
-        
-        if (((1 << other.gameObject.layer) & enemyLayer) != 0)
+
+        if (IsEnemyCollider(other))
         {
             StartCoroutine(ExplodeWithDelay());
         }
     }
-    
+
+    private bool IsEnemyCollider(Collider2D other)
+    {
+        if (other == null)
+        {
+            return false;
+        }
+
+        if (((1 << other.gameObject.layer) & enemyLayer) != 0)
+        {
+            return true;
+        }
+
+        if (other.CompareTag("Enemy"))
+        {
+            return true;
+        }
+
+        EnemyHealth enemyHealth = other.GetComponent<EnemyHealth>() ?? other.GetComponentInParent<EnemyHealth>();
+        return enemyHealth != null && enemyHealth.IsAlive;
+    }
+
+    private void TryTriggerExplosionFromCurrentOverlaps()
+    {
+        if (!isArmed || hasExploded || isExploding)
+        {
+            return;
+        }
+
+        if (_collider2D == null)
+        {
+            return;
+        }
+
+        float overlapRadius = Mathf.Max(_collider2D.bounds.extents.x, _collider2D.bounds.extents.y);
+        if (overlapRadius <= 0f)
+        {
+            overlapRadius = 0.1f;
+        }
+
+        Collider2D[] overlaps = Physics2D.OverlapCircleAll(transform.position, overlapRadius);
+        if (overlaps == null || overlaps.Length == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < overlaps.Length; i++)
+        {
+            Collider2D other = overlaps[i];
+            if (other == null || other == _collider2D)
+            {
+                continue;
+            }
+
+            if (other.transform == transform || other.transform.IsChildOf(transform))
+            {
+                continue;
+            }
+
+            if (IsEnemyCollider(other))
+            {
+                StartCoroutine(ExplodeWithDelay());
+                return;
+            }
+        }
+    }
+
     private IEnumerator ExplodeWithDelay()
     {
         if (hasExploded || isExploding)
@@ -922,9 +998,6 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                     finalDamage = PlayerDamageHelper.ComputeProjectileDamage(cachedPlayerStats, enemyObject, baseDamageForEnemy, gameObject);
                 }
 
-                // Tag EnemyHealth so the mine explosion uses the correct
-                // Fire/Ice damage color when EnemyHealth.TakeDamage renders the
-                // damage number.
                 if (enemyObject != null)
                 {
                     EnemyHealth enemyHealth = enemyObject.GetComponent<EnemyHealth>() ?? enemyObject.GetComponentInParent<EnemyHealth>();
@@ -937,14 +1010,12 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                     }
                 }
 
+                // === AOE DAMAGE CLASSIFICATION (bypasses enemy NULLIFY) ===
+                DamageAoeScope.BeginAoeDamage();
                 damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
+                DamageAoeScope.EndAoeDamage();
 
-                BurnEffect burnEffect = GetComponent<BurnEffect>();
-                if (burnEffect != null)
-                {
-                    burnEffect.Initialize(finalDamage, projectileType);
-                    burnEffect.TryApplyBurn(hitCollider.gameObject, hitPoint);
-                }
+                StatusController.TryApplyBurnFromProjectile(gameObject, hitCollider.gameObject, hitPoint, finalDamage);
 
                 SlowEffect slowEffect = GetComponent<SlowEffect>();
                 if (slowEffect != null)
@@ -963,25 +1034,21 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         // Destroy mine
         Destroy(gameObject);
     }
-    
+
     private void SpawnExplosionEffectImmediate(Vector3 position)
     {
         GameObject explosion = Instantiate(explosionEffectPrefab, position, Quaternion.identity);
-        
-        // Base visual multiplier: how much the mine's X scale has changed from its
-        // prefab/base scale, combined with the inspector explosionEffectSizeMultiplier.
+
         float sizeRatio = 1f;
         if (baseScale.x != 0f)
         {
             sizeRatio = transform.localScale.x / baseScale.x;
         }
 
+        // Base visual multiplier from prefab scale and inspector multiplier.
         float baseVisualMultiplier = sizeRatio * explosionEffectSizeMultiplier;
 
-        // Radius-driven scaling: compare the current (final) explosionRadius to the
-        // original baseExplosionRadius, then blend that ratio using
-        // ExplosionEffectScaling so 1 = full proportional scaling, 0 = no extra
-        // scaling from radius, and >1 exaggerates the effect.
+        // Radius-driven scaling (same logic used by SpawnExplosionEffectImmediate)
         float radiusRatio = 1f;
         if (baseExplosionRadius > 0f)
         {
@@ -993,30 +1060,25 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
         float finalMultiplier = baseVisualMultiplier * radiusScaleFactor;
         explosion.transform.localScale *= finalMultiplier;
-        
+
         Destroy(explosion, explosionEffectDuration);
     }
-    
+
     private IEnumerator SpawnDelayedExplosionEffect(Vector3 position, float delay)
     {
         yield return new WaitForSeconds(delay);
-        
+
         if (explosionEffectPrefab != null)
         {
             SpawnExplosionEffectImmediate(position);
             Debug.Log($"<color=cyan>Explosion effect played {delay}s late</color>");
         }
     }
-    
-    /// <summary>
-    /// Checks if a position would overlap with any existing FireMine colliders
-    /// </summary>
+
     private bool IsOverlappingWithOtherMines(Vector3 testPosition)
     {
-        // Find all FireMine objects in the scene
         FireMine[] allMines = FindObjectsOfType<FireMine>();
-        
-        // Get this mine's collider size (we'll use it as a reference)
+
         float checkRadius = 1f; // Default radius
         if (_collider2D != null)
         {
@@ -1033,24 +1095,23 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                 checkRadius = Mathf.Max(capsule.size.x, capsule.size.y) * 0.5f * transform.localScale.x;
             }
         }
-        
-        // Check distance to all other mines
+
         foreach (FireMine otherMine in allMines)
         {
             if (otherMine == this) continue; // Skip self
-            
+
             float distance = Vector3.Distance(testPosition, otherMine.transform.position);
             float minDistance = checkRadius * minDistanceBetweenMines; // Configurable minimum distance
-            
+
             if (distance < minDistance)
             {
                 return true; // Overlapping!
             }
         }
-        
+
         return false; // No overlap
     }
-    
+
     private bool IsPointInsidePolygon(Vector2 point, System.Collections.Generic.List<Vector2> polygon)
     {
         int count = polygon.Count;
@@ -1081,13 +1142,13 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     {
         // Draw explosion radius in editor with offset
         Vector3 explosionCenter = transform.position + (Vector3)explosionRadiusOffset;
-        
+
         Gizmos.color = new Color(1f, 0.5f, 0f, 0.3f);
         Gizmos.DrawSphere(explosionCenter, explosionRadius);
-        
+
         Gizmos.color = new Color(1f, 0.5f, 0f, 0.8f);
         Gizmos.DrawWireSphere(explosionCenter, explosionRadius);
-        
+
         // Draw spawn area points A, B, C, D
         GameObject pointAObj = GameObject.FindGameObjectWithTag(pointATag);
         GameObject pointBObj = GameObject.FindGameObjectWithTag(pointBTag);
@@ -1166,9 +1227,9 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                 Gizmos.DrawLine(spawnPoints[0], spawnPoints[2 % spawnPoints.Count]);
                 Gizmos.DrawLine(spawnPoints[1 % spawnPoints.Count], spawnPoints[3 % spawnPoints.Count]);
             }
-            
+
             // Draw labels using UnityEditor (only in editor)
-            #if UNITY_EDITOR
+#if UNITY_EDITOR
             if (pointAObj != null)
             {
                 UnityEditor.Handles.Label(posA + Vector3.up * 0.5f, "A (Top-Left)");
@@ -1185,34 +1246,36 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             {
                 UnityEditor.Handles.Label(posD + Vector3.down * 0.5f, "D (Bottom-Right)");
             }
-            #endif
+            if (pointEObj != null)
+            {
+                UnityEditor.Handles.Label(pointEObj.transform.position, "E");
+            }
+            if (pointFObj != null)
+            {
+                UnityEditor.Handles.Label(pointFObj.transform.position, "F");
+            }
+#endif
         }
     }
-    
-    /// <summary>
-    /// Apply modifiers instantly (IInstantModifiable interface)
-    /// </summary>
+
     public void ApplyInstantModifiers(CardModifierStats modifiers)
     {
         Debug.Log($"<color=lime>╔═══ FIREMINE INSTANT MODIFIERS ═══╗</color>");
-        
-        // Recalculate lifetime
+
         float newLifetime = baseLifetimeSeconds + modifiers.lifetimeIncrease;
         if (newLifetime != lifetimeSeconds)
         {
             lifetimeSeconds = newLifetime;
             Debug.Log($"<color=lime>  Lifetime: {baseLifetimeSeconds:F2} + {modifiers.lifetimeIncrease:F2} = {lifetimeSeconds:F2}</color>");
         }
-        
-        // Recalculate explosion radius
+
         float newRadius = (baseExplosionRadius + modifiers.explosionRadiusBonus) * modifiers.explosionRadiusMultiplier;
         if (newRadius != explosionRadius)
         {
             explosionRadius = newRadius;
             Debug.Log($"<color=lime>  Explosion Radius: ({baseExplosionRadius:F2} + {modifiers.explosionRadiusBonus:F2}) * {modifiers.explosionRadiusMultiplier:F2}x = {explosionRadius:F2}</color>");
         }
-        
-        // Recalculate damage
+
         float newDamage = baseDamage * modifiers.damageMultiplier;
         if (newDamage != damage)
         {
@@ -1220,14 +1283,13 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             baseDamageAfterCards = newDamage;
             Debug.Log($"<color=lime>  Damage: {baseDamage:F2} * {modifiers.damageMultiplier:F2}x = {damage:F2}</color>");
         }
-        
-        // Recalculate size
+
         if (modifiers.sizeMultiplier != 1f)
         {
             transform.localScale = baseScale * modifiers.sizeMultiplier;
             Debug.Log($"<color=lime>  Size: {baseScale} * {modifiers.sizeMultiplier:F2}x = {transform.localScale}</color>");
         }
-        
+
         Debug.Log($"<color=lime>╚═══════════════════════════════════╝</color>");
     }
 }

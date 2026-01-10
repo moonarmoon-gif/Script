@@ -53,12 +53,24 @@ public class StaticEffect : MonoBehaviour
             return false;
         }
 
+        // Resolve player stats for shared elemental chance bonuses.
+        PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
+
+        // Compute the effective static chance, including any global
+        // statusEffectChance from projectile modifiers and favours.
+        float effectiveChance = staticChance;
+        if (stats != null && stats.hasProjectileStatusEffect)
+        {
+            effectiveChance += Mathf.Max(0f, stats.statusEffectChance);
+        }
+        effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
+
         StaticStatus staticStatus = enemy.GetComponent<StaticStatus>();
         if (staticStatus == null)
         {
-            // First-time application uses StaticChance
+            // First-time application uses effectiveChance
             float roll = Random.Range(0f, 100f);
-            if (roll > staticChance)
+            if (roll > effectiveChance)
             {
                 return false;
             }
@@ -97,11 +109,11 @@ public class StaticEffect : MonoBehaviour
         }
         else
         {
-            // Re-application path: roll StaticChance again while the effect's
+            // Re-application path: roll effectiveChance again while the effect's
             // duration window is still active. staticReapplyChance is reserved
             // for automatic background pulses inside StaticStatus.
             float roll = Random.Range(0f, 100f);
-            if (roll > staticChance)
+            if (roll > effectiveChance)
             {
                 return false;
             }

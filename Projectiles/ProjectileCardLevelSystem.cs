@@ -152,8 +152,19 @@ public class ProjectileCardLevelSystem : MonoBehaviour
         if (card == null) return;
         
         string cardKey = card.cardName;
-        selectedEnhancedVariants[cardKey] = variantIndex;
-        Debug.Log($"<color=gold>{cardKey} Enhanced Variant set to: {variantIndex}</color>");
+        int storedVariant = variantIndex;
+        if (card.projectileType == ProjectileCards.ProjectileType.HolyShield)
+        {
+            int previous = 0;
+            if (selectedEnhancedVariants.ContainsKey(cardKey))
+            {
+                previous = selectedEnhancedVariants[cardKey];
+            }
+            storedVariant = Mathf.Max(0, previous) | Mathf.Max(0, variantIndex);
+        }
+
+        selectedEnhancedVariants[cardKey] = storedVariant;
+        Debug.Log($"<color=gold>{cardKey} Enhanced Variant set to: {storedVariant}</color>");
 
         // Record this variant in the per-card history so future enhancement tiers
         // can filter it out of the selection UI. Only variants > 0 are meaningful.
@@ -198,7 +209,7 @@ public class ProjectileCardLevelSystem : MonoBehaviour
         // spawn.
         if (card.projectileType == ProjectileCards.ProjectileType.HolyShield && HolyShield.ActiveShield != null)
         {
-            HolyShield.ActiveShield.ApplyVariantFromIndex(variantIndex);
+            HolyShield.ActiveShield.ApplyVariantFromIndex(storedVariant);
         }
     }
     

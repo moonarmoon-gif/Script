@@ -29,6 +29,10 @@ public class FavourEffectManager : MonoBehaviour
             return;
         }
 
+        // Track how many times this favour has been picked so that
+        // MaxPickLimit can be enforced globally during card selection.
+        effectAsset.RegisterPick();
+
         // Look for an existing runtime instance created from this asset
         for (int i = 0; i < activeEffects.Count; i++)
         {
@@ -130,6 +134,52 @@ public class FavourEffectManager : MonoBehaviour
         }
     }
 
+    public void NotifyEnemyDamageFinalized(GameObject enemy, float finalDamage, bool isStatusTick)
+    {
+        for (int i = 0; i < activeEffects.Count; i++)
+        {
+            FavourEffect effect = activeEffects[i].effectInstance;
+            if (effect != null)
+            {
+                effect.OnEnemyDamageFinalized(gameObject, enemy, finalDamage, isStatusTick, this);
+            }
+        }
+    }
+
+    public float GetExecuteThresholdPercentForEnemy(GameObject enemy)
+    {
+        float threshold = 0f;
+
+        for (int i = 0; i < activeEffects.Count; i++)
+        {
+            FavourEffect effect = activeEffects[i].effectInstance;
+            if (effect == null)
+            {
+                continue;
+            }
+
+            float t = effect.GetExecuteThresholdPercent(gameObject, enemy, this);
+            if (t > threshold)
+            {
+                threshold = t;
+            }
+        }
+
+        return Mathf.Clamp(threshold, 0f, 100f);
+    }
+
+    public void NotifyCritResolved(ProjectileCards sourceCard, bool canCrit, bool didCrit)
+    {
+        for (int i = 0; i < activeEffects.Count; i++)
+        {
+            FavourEffect effect = activeEffects[i].effectInstance;
+            if (effect != null)
+            {
+                effect.OnCritResolved(gameObject, sourceCard, canCrit, didCrit, this);
+            }
+        }
+    }
+
     public float PreviewBeforeDealDamage(GameObject enemy, float damage)
     {
         for (int i = 0; i < activeEffects.Count; i++)
@@ -145,18 +195,84 @@ public class FavourEffectManager : MonoBehaviour
     }
 
     /// <summary>
+    /// Remove and clean up all active favour effects. Used when fully
+    /// resetting the run so no runtime state is carried over.
+    /// </summary>
+    public void ClearAllEffects()
+    {
+        for (int i = activeEffects.Count - 1; i >= 0; i--)
+        {
+            var entry = activeEffects[i];
+            if (entry != null && entry.effectInstance != null)
+            {
+                entry.effectInstance.OnRemove(gameObject, this);
+            }
+        }
+
+        activeEffects.Clear();
+        CurrentProjectileCard = null;
+    }
+
+    /// <summary>
     /// Notify all active effects that the player is about to be hit.
     /// Effects can modify the incoming damage value.
-    /// This will be wired into the player damage pipeline later.
+    ///
+    /// Shield-like favours have a defined priority order:
+    /// 1) ShieldOnLowHealthFavour absorbs first
+    /// 2) All other favours modify damage
+    /// 3) ManaShieldFavour absorbs last (and can choose to skip if HolyShield is active)
     /// </summary>
     public void NotifyPlayerHit(GameObject attacker, ref float damage)
     {
+        // Pass 1: run low-health shield first so it always gets the first
+        // chance to absorb incoming damage.
         for (int i = 0; i < activeEffects.Count; i++)
         {
-            if (activeEffects[i] != null)
+            var entry = activeEffects[i];
+            if (entry == null || entry.effectInstance == null) continue;
+
+            if (entry.effectInstance is ShieldOnLowHealthFavour)
             {
-                activeEffects[i].effectInstance.OnPlayerHit(gameObject, attacker, ref damage, this);
+                entry.effectInstance.OnPlayerHit(gameObject, attacker, ref damage, this);
             }
+        }
+
+        // Pass 2: run all other favours EXCEPT the shield-specific ones so
+        // they can react to the partially absorbed damage.
+        for (int i = 0; i < activeEffects.Count; i++)
+        {
+            var entry = activeEffects[i];
+            if (entry == null || entry.effectInstance == null) continue;
+
+            if (entry.effectInstance is ShieldOnLowHealthFavour) continue;
+            if (entry.effectInstance is ManaShieldFavour) continue;
+
+            entry.effectInstance.OnPlayerHit(gameObject, attacker, ref damage, this);
+        }
+
+        // Pass 3: run ManaShield last so it only ever sees the remaining
+        // damage after all other reactions (and can optionally skip if
+        // HolyShield is currently active).
+        for (int i = 0; i < activeEffects.Count; i++)
+        {
+            var entry = activeEffects[i];
+            if (entry == null || entry.effectInstance == null) continue;
+
+            ManaShieldFavour manaShield = entry.effectInstance as ManaShieldFavour;
+            if (manaShield != null)
+            {
+                manaShield.OnPlayerHit(gameObject, attacker, ref damage, this);
+            }
+        }
+    }
+
+    public void NotifyPlayerDamageFinalized(GameObject attacker, float finalDamage, bool isStatusTick, bool isAoeDamage)
+    {
+        for (int i = 0; i < activeEffects.Count; i++)
+        {
+            var entry = activeEffects[i];
+            if (entry == null || entry.effectInstance == null) continue;
+            entry.effectInstance.OnPlayerDamageFinalized(gameObject, attacker, finalDamage, isStatusTick, isAoeDamage, this);
         }
     }
 }

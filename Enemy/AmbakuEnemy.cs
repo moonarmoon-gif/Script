@@ -107,6 +107,9 @@ public class AmbakuEnemy : MonoBehaviour
     private Vector2 knockbackVelocity = Vector2.zero;
     private float knockbackEndTime = 0f;
 
+    // NEW: Track active projectiles spawned by this Ambaku so we can destroy them on death.
+    private readonly System.Collections.Generic.List<GameObject> activeProjectiles = new System.Collections.Generic.List<GameObject>();
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -204,6 +207,10 @@ public class AmbakuEnemy : MonoBehaviour
         {
             playerHealth.OnDeath -= OnPlayerDeath;
         }
+
+        // Safety: if this enemy gets disabled/destroyed by pooling, ensure any
+        // projectiles it spawned are removed so they can never damage after death.
+        EndAllActiveProjectiles();
     }
 
     void Update()
@@ -521,9 +528,19 @@ public class AmbakuEnemy : MonoBehaviour
 
             GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
 
-            if (proj.TryGetComponent<NecromancerProjectile>(out var necroProj))
+            // Track projectile so we can destroy it if Ambaku dies.
+            if (proj != null)
             {
-                necroProj.Initialize(projectileDamageV2, dir, capsuleCollider);
+                activeProjectiles.Add(proj);
+
+                if (proj.TryGetComponent<AmbakuProjectile>(out var ambakuProj))
+                {
+                    ambakuProj.Initialize(projectileDamageV2, dir, capsuleCollider);
+                }
+                else if (proj.TryGetComponent<NecromancerProjectile>(out var necroProj))
+                {
+                    necroProj.Initialize(projectileDamageV2, dir, capsuleCollider);
+                }
             }
         }
 
@@ -668,6 +685,11 @@ public class AmbakuEnemy : MonoBehaviour
         CancelMeleeAction();
         CancelRangedAction();
 
+        if (isShootingProjectile || isInPreRangedDelay)
+        {
+            EndAllActiveProjectiles();
+        }
+
         knockbackVelocity = direction.normalized * force * knockbackIntensity;
         knockbackEndTime = Time.time + knockbackDuration;
 
@@ -695,6 +717,8 @@ public class AmbakuEnemy : MonoBehaviour
         if (isDead) return;
         isDead = true;
 
+        EndAllActiveProjectiles();
+
         CancelMeleeAction();
         CancelRangedAction();
 
@@ -717,6 +741,31 @@ public class AmbakuEnemy : MonoBehaviour
         capsuleCollider.enabled = false;
 
         StartCoroutine(FadeOutAndDestroy());
+    }
+
+    private void EndAllActiveProjectiles()
+    {
+        if (activeProjectiles == null || activeProjectiles.Count == 0) return;
+
+        for (int i = activeProjectiles.Count - 1; i >= 0; i--)
+        {
+            GameObject proj = activeProjectiles[i];
+            if (proj == null)
+            {
+                activeProjectiles.RemoveAt(i);
+                continue;
+            }
+
+            if (proj.TryGetComponent<AmbakuProjectile>(out var ambakuProj))
+            {
+                ambakuProj.ForceEnd(false);
+            }
+            else
+            {
+                Destroy(proj);
+            }
+            activeProjectiles.RemoveAt(i);
+        }
     }
 
     IEnumerator FadeOutAndDestroy()

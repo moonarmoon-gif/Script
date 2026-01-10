@@ -22,6 +22,8 @@ public class EnemyCards : BaseCard
     [Header("Boss Settings")]
     [Tooltip("Menace timer duration for this boss card (seconds). Only used for BOSS rarity cards.")]
     public float bossMenaceTimer = 5.5f;
+    [Tooltip("Time in seconds after the boss's health reaches 0 before ending the boss event and granting rewards. 0 = end immediately on death event.")]
+    public float BossDeathRewardTimer = 3f;
     
     [Header("Modifier Display Formatting")]
     [Tooltip("Header text for modifiers section")]

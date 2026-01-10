@@ -7,6 +7,8 @@ public class BlessingLowHealthFavour : FavourEffect
     [Tooltip("Duration in seconds for the BLESSING status when health falls below the threshold.")]
     public float BlessingDuration = 10f;
 
+    public float HealthRegen = 1f;
+
     [Tooltip("Health threshold fraction 0-1 at which Blessing triggers (0.5 = 50% health).")]
     public float HealthThreshold = 0.5f;
 
@@ -14,12 +16,14 @@ public class BlessingLowHealthFavour : FavourEffect
     public float Cooldown = 60f;
 
     [Header("Enhanced")]
-    [Tooltip("Additional Blessing duration (seconds) when this favour is enhanced.")]
-    public float BonusBlessingDuration = 5f;
+    [Tooltip("Additional health regeneration per second (added on top of the base +1) when this favour is enhanced.")]
+    public float BonusHealthRegen = 1f;
 
     private PlayerHealth playerHealth;
+    private PlayerStats playerStats;
     private StatusController statusController;
-    private float currentBlessingDuration;
+    private float currentAppliedRegenBonus;
+    private float regenBuffEndTime;
     private float lastTriggerTime = -999f;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -34,36 +38,49 @@ public class BlessingLowHealthFavour : FavourEffect
             playerHealth = player.GetComponent<PlayerHealth>();
         }
 
+        if (playerStats == null)
+        {
+            playerStats = player.GetComponent<PlayerStats>();
+        }
+
         if (statusController == null)
         {
             statusController = player.GetComponent<StatusController>();
         }
 
-        if (playerHealth == null || statusController == null)
+        if (playerHealth == null || playerStats == null || statusController == null)
         {
             return;
         }
-
-        currentBlessingDuration = Mathf.Max(0f, BlessingDuration);
+        currentAppliedRegenBonus = 0f;
+        regenBuffEndTime = 0f;
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        if (playerHealth == null || statusController == null)
+        if (playerHealth == null || playerStats == null || statusController == null)
         {
             OnApply(player, manager, sourceCard);
         }
-        else
+
+        HealthRegen += Mathf.Max(0f, BonusHealthRegen);
+
+        if (currentAppliedRegenBonus > 0f && Time.time < regenBuffEndTime)
         {
-            currentBlessingDuration += Mathf.Max(0f, BonusBlessingDuration);
+            ApplyRegenBonus();
         }
     }
 
     public override void OnUpdate(GameObject player, FavourEffectManager manager, float deltaTime)
     {
-        if (playerHealth == null || statusController == null || !playerHealth.IsAlive)
+        if (playerHealth == null || playerStats == null || statusController == null || !playerHealth.IsAlive)
         {
             return;
+        }
+
+        if (currentAppliedRegenBonus > 0f && Time.time >= regenBuffEndTime)
+        {
+            RemoveRegenBonus();
         }
 
         float threshold = Mathf.Clamp01(HealthThreshold);
@@ -79,20 +96,20 @@ public class BlessingLowHealthFavour : FavourEffect
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)
     {
-        // Blessing is handled entirely via StatusController duration; no explicit
-        // cleanup is required when the favour is removed.
+        RemoveRegenBonus();
         playerHealth = null;
+        playerStats = null;
         statusController = null;
     }
 
     private void ActivateBlessing()
     {
-        if (statusController == null)
+        if (statusController == null || playerStats == null)
         {
             return;
         }
 
-        float duration = Mathf.Max(0f, currentBlessingDuration);
+        float duration = Mathf.Max(0f, BlessingDuration);
         if (duration <= 0f)
         {
             return;
@@ -102,6 +119,42 @@ public class BlessingLowHealthFavour : FavourEffect
         // player already has Blessing, this will refresh/extend it according to
         // StatusController's AddStatus stacking rules.
         statusController.AddStatus(StatusId.Blessing, 1, duration);
+
+        ApplyRegenBonus();
+        regenBuffEndTime = Time.time + duration;
         lastTriggerTime = Time.time;
+    }
+
+    private void ApplyRegenBonus()
+    {
+        if (playerStats == null)
+        {
+            return;
+        }
+
+        float targetBonus = Mathf.Max(0f, HealthRegen);
+        float delta = targetBonus - currentAppliedRegenBonus;
+        if (Mathf.Approximately(delta, 0f))
+        {
+            return;
+        }
+
+        playerStats.healthRegenPerSecond += delta;
+        currentAppliedRegenBonus = targetBonus;
+    }
+
+    private void RemoveRegenBonus()
+    {
+        if (playerStats == null)
+        {
+            return;
+        }
+
+        if (!Mathf.Approximately(currentAppliedRegenBonus, 0f))
+        {
+            playerStats.healthRegenPerSecond -= currentAppliedRegenBonus;
+        }
+
+        currentAppliedRegenBonus = 0f;
     }
 }

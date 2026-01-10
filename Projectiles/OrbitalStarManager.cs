@@ -119,6 +119,10 @@ public class OrbitalStarManager : MonoBehaviour
     [Tooltip("Extra degrees below the camera applied to ALL levels. Use this to align orbit guide lines visually.")]
     public float orbitBelowCameraGlobalOffset = 0f;
 
+    [Header("Radius Indicator Fade-In (Y Axis)")]
+    [Tooltip("Y world position at which NovaStar/DwarfStar RadiusIndicator sprites are fully opaque. Below this, they fade out progressively the lower they go.")]
+    public float yAxisRadiusFadeIn = -5f;
+
     [Header("Orbit Tilt Per Level (Right Down / Left Up)")]
     [Tooltip("Level 1: Positive = right side lower, left side higher. Negative = right higher, left lower.")]
     public float level1OrbitTilt = 0f;
@@ -1399,11 +1403,12 @@ public class OrbitalStarManager : MonoBehaviour
                     Debug.Log($"<color=gold>  SpawnNovaStarAtLevel completed!</color>");
                     Debug.Log($"<color=gold>  novaStarsActiveCount after spawn: {novaStarsActiveCount}</color>");
                     
-                    // Wait for NovaStar to complete, with safety timeout
+                    // Wait until all NovaStar instances have despawned before advancing.
                     float novaWaitStart = Time.time;
                     while (true)
                     {
-                        if (novaStarsActiveCount > 0 && novaStarsCompletedCount >= novaStarsActiveCount)
+                        bool anyNova = FindObjectsOfType<NovaStar>().Length > 0;
+                        if (!anyNova)
                         {
                             Debug.Log($"<color=gold>NovaStar completed Level {currentSequentialLevel}!</color>");
                             break;
@@ -1411,10 +1416,9 @@ public class OrbitalStarManager : MonoBehaviour
 
                         if (Time.time - novaWaitStart > enhancedStallTimeout)
                         {
-                            Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for NovaStar sequential completion at Level {currentSequentialLevel}. ({novaStarsCompletedCount}/{novaStarsActiveCount})</color>");
-                            break;
+                            Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for NovaStar instances to despawn at Level {currentSequentialLevel} (sequential solo). Still waiting to avoid overlapping waves.</color>");
                         }
-                        
+
                         yield return new WaitForSeconds(0.5f);
                     }
                 }
@@ -1880,15 +1884,22 @@ public class OrbitalStarManager : MonoBehaviour
                 
                 Debug.Log($"<color=gold>SOLO: DwarfStar spawned at Level {currentSequentialLevel}</color>");
                 
-                // Wait for DwarfStar to complete
+                // Wait until all DwarfStar instances have despawned before advancing.
+                float dwarfWaitStart = Time.time;
                 while (true)
                 {
-                    if (dwarfStarsCompletedCount >= dwarfStarsActiveCount && dwarfStarsActiveCount > 0)
+                    bool anyDwarf = FindObjectsOfType<DwarfStar>().Length > 0;
+                    if (!anyDwarf)
                     {
                         Debug.Log($"<color=gold>DwarfStar completed Level {currentSequentialLevel}!</color>");
                         break;
                     }
-                    
+
+                    if (Time.time - dwarfWaitStart > enhancedStallTimeout)
+                    {
+                        Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for DwarfStar instances to despawn at Level {currentSequentialLevel} (sequential solo). Still waiting to avoid overlapping waves.</color>");
+                    }
+
                     yield return new WaitForSeconds(0.5f);
                 }
                 
@@ -2271,7 +2282,9 @@ public class OrbitalStarManager : MonoBehaviour
         shared.pierceAccumulator = 0.5f * (novaStats.pierceAccumulator + dwarfStats.pierceAccumulator);
         shared.lifetimeIncrease = 0.5f * (novaStats.lifetimeIncrease + dwarfStats.lifetimeIncrease);
         shared.cooldownReductionPercent = 0.5f * (novaStats.cooldownReductionPercent + dwarfStats.cooldownReductionPercent);
+        shared.cooldownMultiplier = 0.5f * (novaStats.cooldownMultiplier + dwarfStats.cooldownMultiplier);
         shared.manaCostReduction = 0.5f * (novaStats.manaCostReduction + dwarfStats.manaCostReduction);
+        shared.damageFlat = 0.5f * (novaStats.damageFlat + dwarfStats.damageFlat);
         shared.damageMultiplier = 0.5f * (novaStats.damageMultiplier + dwarfStats.damageMultiplier);
         shared.projectileCount = Mathf.RoundToInt(0.5f * (novaStats.projectileCount + dwarfStats.projectileCount));
         shared.projectileCountAccumulator = 0.5f * (novaStats.projectileCountAccumulator + dwarfStats.projectileCountAccumulator);
@@ -2280,6 +2293,9 @@ public class OrbitalStarManager : MonoBehaviour
         shared.explosionRadiusMultiplier = 0.5f * (novaStats.explosionRadiusMultiplier + dwarfStats.explosionRadiusMultiplier);
         shared.strikeZoneRadiusBonus = 0.5f * (novaStats.strikeZoneRadiusBonus + dwarfStats.strikeZoneRadiusBonus);
         shared.strikeZoneRadiusMultiplier = 0.5f * (novaStats.strikeZoneRadiusMultiplier + dwarfStats.strikeZoneRadiusMultiplier);
+        shared.shieldHealthBonus = 0.5f * (novaStats.shieldHealthBonus + dwarfStats.shieldHealthBonus);
+        shared.attackSpeedPercent = 0.5f * (novaStats.attackSpeedPercent + dwarfStats.attackSpeedPercent);
+        shared.pullStrengthMultiplier = 0.5f * (novaStats.pullStrengthMultiplier + dwarfStats.pullStrengthMultiplier);
 
         return shared;
     }

@@ -1,87 +1,82 @@
 using UnityEngine;
 
-[CreateAssetMenu(fileName = "NullifyEnemyProjectilesFavour", menuName = "Favour Effects/Nullify Enemy Projectiles")]
+[CreateAssetMenu(fileName = "NullifyEnemyProjectilesFavour", menuName = "Favour Effects 2/Nullify Enemy Projectiles")]
 public class NullifyEnemyProjectilesFavour : FavourEffect
 {
     [Header("Nullify Projectile Settings")]
-    [Tooltip("Base number of charges available.")]
-    public int Charges = 2;
+    [Tooltip("Nullify stacks granted when the condition is met.")]
+    public int NullifyGain = 1;
 
-    [Tooltip("Seconds required for a used charge to recharge.")]
-    public float RechargeTime = 25f;
+    [Tooltip("Number of ranged-like enemy hits required to grant Nullify stacks.")]
+    public int NumberOfHits = 3;
 
-    private float[] nextReadyTimes;
-    private int totalCharges = 0;
+    [Header("Enhanced")]
+    [Tooltip("Additional Nullify stacks granted per enhancement.")]
+    public int BonusNullifyGain = 1;
+
+    private const float MeleeRangeThreshold = 4f;
+    private int currentGainPerTrigger = 0;
+    private int hitCount = 0;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        int baseCharges = Mathf.Max(0, Charges);
-        if (baseCharges <= 0)
-        {
-            return;
-        }
-
-        totalCharges = baseCharges;
-        nextReadyTimes = new float[totalCharges];
-        for (int i = 0; i < totalCharges; i++)
-        {
-            nextReadyTimes[i] = 0f;
-        }
+        currentGainPerTrigger = Mathf.Max(0, NullifyGain);
+        hitCount = 0;
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        int baseCharges = Mathf.Max(0, Charges);
-        if (baseCharges <= 0)
-        {
-            return;
-        }
-
-        int oldTotal = totalCharges;
-        int newTotal = Mathf.Max(totalCharges + baseCharges, baseCharges);
-        float[] newTimes = new float[newTotal];
-
-        for (int i = 0; i < newTotal; i++)
-        {
-            if (i < oldTotal && nextReadyTimes != null)
-            {
-                newTimes[i] = nextReadyTimes[i];
-            }
-            else
-            {
-                newTimes[i] = 0f;
-            }
-        }
-
-        totalCharges = newTotal;
-        nextReadyTimes = newTimes;
+        currentGainPerTrigger += Mathf.Max(0, BonusNullifyGain);
     }
 
     public override void OnPlayerHit(GameObject player, GameObject attacker, ref float damage, FavourEffectManager manager)
     {
-        if (nextReadyTimes == null || totalCharges <= 0)
+        return;
+    }
+
+    public override void OnPlayerDamageFinalized(GameObject player, GameObject attacker, float finalDamage, bool isStatusTick, bool isAoeDamage, FavourEffectManager manager)
+    {
+        if (player == null || attacker == null)
         {
             return;
         }
 
-        if (DamageAoeScope.IsAoeDamage)
+        if (isStatusTick || isAoeDamage)
         {
             return;
         }
 
-        if (damage <= 0f)
+        if (finalDamage < 1f)
         {
             return;
         }
 
-        for (int i = 0; i < totalCharges; i++)
+        float distance = Vector3.Distance(attacker.transform.position, player.transform.position);
+        if (distance <= MeleeRangeThreshold)
         {
-            if (Time.time >= nextReadyTimes[i])
-            {
-                nextReadyTimes[i] = Time.time + Mathf.Max(0f, RechargeTime);
-                damage = 0f;
-                break;
-            }
+            return;
         }
+
+        int required = Mathf.Max(1, NumberOfHits);
+        hitCount++;
+        if (hitCount < required)
+        {
+            return;
+        }
+
+        hitCount = 0;
+
+        if (currentGainPerTrigger <= 0)
+        {
+            return;
+        }
+
+        StatusController status = player.GetComponent<StatusController>();
+        if (status == null)
+        {
+            return;
+        }
+
+        status.AddStatus(StatusId.Nullify, currentGainPerTrigger, -1f);
     }
 }

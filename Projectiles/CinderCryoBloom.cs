@@ -497,12 +497,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
                     // CRITICAL: Update last damage time for this specific enemy
                     enemyLastDamageTimes[enemy] = Time.time;
                     
-                    BurnEffect burnEffect = GetComponent<BurnEffect>();
-                    if (burnEffect != null)
-                    {
-                        burnEffect.Initialize(finalDamage, projectileType);
-                        burnEffect.TryApplyBurn(enemy, hitPoint);
-                    }
+                    StatusController.TryApplyBurnFromProjectile(gameObject, enemy, hitPoint, finalDamage);
                     
                     SlowEffect slowEffect = GetComponent<SlowEffect>();
                     if (slowEffect != null)

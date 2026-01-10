@@ -298,8 +298,7 @@ public class CardButton : MonoBehaviour
             }
             else
             {
-                card.ApplyEffect(GameObject.FindGameObjectWithTag("Player"));
-                manager.SelectCombinedCard(new CombinedCard(card as CoreCards, null, card.rarity));
+                manager.SelectExternalCard(card);
             }
         }
     }

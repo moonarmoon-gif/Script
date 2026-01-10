@@ -280,12 +280,12 @@ public class CoreCards : BaseCard
         if (!string.IsNullOrEmpty(description))
         {
             float finalValue = GetValueForRarity();
-            string valueStr = finalValue.ToString("F0");
+            string valueStr = finalValue.ToString("0.##");
             return description.Replace("?", valueStr);
         }
         
         float finalValue2 = GetValueForRarity();
-        string valueStr2 = finalValue2.ToString("F0");
+        string valueStr2 = finalValue2.ToString("0.##");
 
         switch (statType)
         {

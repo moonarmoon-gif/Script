@@ -91,6 +91,7 @@ public class SkellyArcherEnemy : MonoBehaviour
     private IDamageable playerDamageable;
     private Vector2 currentVelocity;
     private SpriteFlipOffset spriteFlipOffset;
+    private CollapsePullController collapsePullController;
 
     // State flags
     private bool isDead;
@@ -164,6 +165,7 @@ public class SkellyArcherEnemy : MonoBehaviour
         }
         
         spriteFlipOffset = GetComponent<SpriteFlipOffset>();
+        collapsePullController = GetComponent<CollapsePullController>();
 
         if (projectileDamageV2 < 0f)
         {
@@ -292,8 +294,15 @@ public class SkellyArcherEnemy : MonoBehaviour
         }
         else
         {
+            if (collapsePullController == null)
+            {
+                collapsePullController = GetComponent<CollapsePullController>();
+            }
+
+            bool forceWalkFromCollapse = collapsePullController != null && collapsePullController.IsPulled;
+
             // During pre-attack delay, show idle (not attacking). Do NOT idle while reloading.
-            bool shouldIdle = !isDead && !isMoving && !isReloading && (!isShootingProjectile || isInPreAttackDelay);
+            bool shouldIdle = !isDead && !isMoving && !isReloading && (!isShootingProjectile || isInPreAttackDelay) && !forceWalkFromCollapse;
             animator.SetBool("IsIdle", shouldIdle);
             animator.SetBool("IsAttacking", !isDead && isShootingProjectile && !isInPreAttackDelay);
         }
@@ -339,15 +348,38 @@ public class SkellyArcherEnemy : MonoBehaviour
             animator.SetBool("movingflip", false);
             animator.SetBool("IsWalking", false);
         }
-        else if (spriteRenderer.flipX) // Flipped (facing left)
+        else
         {
-            animator.SetBool("movingflip", isMoving);
-            animator.SetBool("IsWalking", false);
-        }
-        else // Not flipped (facing right)
-        {
-            animator.SetBool("IsWalking", isMoving);
-            animator.SetBool("movingflip", false);
+            if (collapsePullController == null)
+            {
+                collapsePullController = GetComponent<CollapsePullController>();
+            }
+
+            bool forceWalkFromCollapse = collapsePullController != null && collapsePullController.IsPulled;
+
+            if (forceWalkFromCollapse)
+            {
+                if (spriteRenderer.flipX)
+                {
+                    animator.SetBool("movingflip", true);
+                    animator.SetBool("IsWalking", false);
+                }
+                else
+                {
+                    animator.SetBool("IsWalking", true);
+                    animator.SetBool("movingflip", false);
+                }
+            }
+            else if (spriteRenderer.flipX)
+            {
+                animator.SetBool("movingflip", isMoving);
+                animator.SetBool("IsWalking", false);
+            }
+            else
+            {
+                animator.SetBool("IsWalking", isMoving);
+                animator.SetBool("movingflip", false);
+            }
         }
     }
 
@@ -380,10 +412,20 @@ public class SkellyArcherEnemy : MonoBehaviour
             knockbackVelocity = Vector2.zero;
         }
 
+        if (collapsePullController == null)
+        {
+            collapsePullController = GetComponent<CollapsePullController>();
+        }
+
+        bool isPulledByCollapse = collapsePullController != null && collapsePullController.IsPulled;
+
         // Halt movement while shooting
         if (isShootingProjectile)
         {
-            rb.velocity = Vector2.zero;
+            if (!isPulledByCollapse)
+            {
+                rb.velocity = Vector2.zero;
+            }
             isMoving = false;
             return;
         }
@@ -393,7 +435,10 @@ public class SkellyArcherEnemy : MonoBehaviour
         // Shoot projectiles if in range
         if (dist <= shootingRange)
         {
-            rb.velocity = Vector2.zero;
+            if (!isPulledByCollapse)
+            {
+                rb.velocity = Vector2.zero;
+            }
             isMoving = false;
             
             if (canShoot && !isShootingProjectile && shootRoutine == null)

@@ -39,9 +39,9 @@ public class LevelUpButton : MonoBehaviour
             for (int i = 0; i < levelsPerClick; i++)
             {
                 // Get the EXACT amount of XP needed for the NEXT level
-                int xpNeeded = playerLevel.ExpToNextLevel;
+                float xpNeeded = playerLevel.ExpToNextLevelExact;
                 playerLevel.GainExperience(xpNeeded);
-                Debug.Log($"<color=green>Level Up Button: Gave {xpNeeded} XP! New level: {playerLevel.CurrentLevel}</color>");
+                Debug.Log($"<color=green>Level Up Button: Gave {xpNeeded:F2} XP! New level: {playerLevel.CurrentLevel}</color>");
             }
             return;
         }

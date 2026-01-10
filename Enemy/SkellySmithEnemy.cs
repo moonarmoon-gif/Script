@@ -22,6 +22,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
     [SerializeField] private float chargeSpeed = 4.0f;
     [Tooltip("Max distance at which SkellySmith will perform a charge")]
     [SerializeField] private float chargeRange = 5.0f;
+    public float ChargeMass = 150f;
     [Tooltip("Time to wait (windup) before starting the dash")]
     [SerializeField] private float chargeWindup = 0.25f;
     [Tooltip("Duration of the dash movement")]
@@ -111,6 +112,8 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
     private int attackActionToken = 0;
     private int chargeActionToken = 0;
 
+    private float defaultMass;
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -119,6 +122,11 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         if (capsuleCollider == null) capsuleCollider = GetComponent<CapsuleCollider2D>();
         health = GetComponent<EnemyHealth>();
         statusController = GetComponent<StatusController>();
+
+        if (rb != null)
+        {
+            defaultMass = rb.mass;
+        }
 
         capsuleCollider.isTrigger = false;
         Physics2D.IgnoreLayerCollision(gameObject.layer, LayerMask.NameToLayer("Default"), true);
@@ -155,6 +163,18 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         {
             damageInstancesPerAttackV2 = damageInstancesPerAttack;
         }
+    }
+
+    private void SetChargeMassActive(bool active)
+    {
+        if (rb == null)
+        {
+            return;
+        }
+
+        float baseMass = defaultMass > 0f ? defaultMass : rb.mass;
+        float targetMass = active ? Mathf.Max(0.01f, ChargeMass) : Mathf.Max(0.01f, baseMass);
+        rb.mass = targetMass;
     }
 
     private int BeginAttackAction()
@@ -335,6 +355,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         isAttacking = false;
         attackOnCooldown = false;
         isCharging = false;
+        SetChargeMassActive(false);
         chargeOnCooldown = false;
 
         CancelAttackAction();
@@ -443,6 +464,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         isAttacking = false;
         attackOnCooldown = false;
         isCharging = false;
+        SetChargeMassActive(false);
         chargeOnCooldown = false;
 
         if (animator != null)
@@ -530,6 +552,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
     {
         int myToken = BeginChargeAction();
         isCharging = true;
+        SetChargeMassActive(true);
         rb.velocity = Vector2.zero;
 
         // Face target immediately
@@ -557,6 +580,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
                 if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
                 {
                     isCharging = false;
+                    SetChargeMassActive(false);
                     animator.SetBool("chargestart", false);
                     animator.SetBool("chargeloop", false);
                     animator.SetBool("chargeend", false);
@@ -582,6 +606,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         else if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
         {
             isCharging = false;
+            SetChargeMassActive(false);
             animator.SetBool("chargestart", false);
             animator.SetBool("chargeloop", false);
             animator.SetBool("chargeend", false);
@@ -634,6 +659,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
         {
             isCharging = false;
+            SetChargeMassActive(false);
             animator.SetBool("chargestart", false);
             animator.SetBool("chargeloop", false);
             animator.SetBool("chargeend", false);
@@ -699,6 +725,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         animator.SetBool("chargeend", false);
         animator.SetBool("chargeendflip", false);
 
+        SetChargeMassActive(false);
         isCharging = false;
         chargeOnCooldown = true;
         lastChargeEndTime = Time.time;
@@ -877,6 +904,8 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         if (isDead) return;
         isDead = true;
 
+        SetChargeMassActive(false);
+
         CancelAttackAction();
         CancelChargeAction();
 
@@ -1002,6 +1031,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
             rb.velocity = Vector2.zero;
 
             isCharging = false;
+            SetChargeMassActive(false);
             chargeOnCooldown = true;
             lastChargeEndTime = Time.time;
 

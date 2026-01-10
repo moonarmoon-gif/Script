@@ -4,24 +4,19 @@ using UnityEngine;
 public class BonusActiveDamageFavour : FavourEffect
 {
     [Header("Bonus Active Damage Settings")]
-    [Tooltip("Base bonus damage for ACTIVE projectiles (0.05 = +5% damage).")]
+    [Tooltip("Flat bonus damage added to ACTIVE projectiles.")]
     public float BonusDamage = 0.05f;
 
-    // Internal multiplier applied to qualifying damage. Starts at 1 and
-    // increases by BonusDamage on apply and each subsequent upgrade.
-    private float currentBonusMultiplier = 1f;
+    private float currentFlatBonusDamage = 0f;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        // First pick: 1 + BonusDamage (e.g. 1.05 for +5%).
-        currentBonusMultiplier = 1f + Mathf.Max(0f, BonusDamage);
+        currentFlatBonusDamage = Mathf.Max(0f, BonusDamage);
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        // "Enhanced" behaviour: add the same BonusDamage again each time this
-        // favour is upgraded, effectively stacking +BonusDamage repeatedly.
-        currentBonusMultiplier += Mathf.Max(0f, BonusDamage);
+        currentFlatBonusDamage += Mathf.Max(0f, BonusDamage);
     }
 
     public override void OnBeforeDealDamage(GameObject player, GameObject enemy, ref float damage, FavourEffectManager manager)
@@ -53,12 +48,12 @@ public class BonusActiveDamageFavour : FavourEffect
             return damage;
         }
 
-        if (currentBonusMultiplier <= 0f || Mathf.Approximately(currentBonusMultiplier, 1f))
+        if (currentFlatBonusDamage <= 0f)
         {
             return damage;
         }
 
-        damage *= currentBonusMultiplier;
+        damage += currentFlatBonusDamage;
         return damage;
     }
 }

@@ -89,6 +89,19 @@ public class ManaShieldFavour : FavourEffect
             return;
         }
 
+        // When HolyShield is active, it takes precedence over ManaShield.
+        // Let HolyShield absorb the hit instead of consuming mana shield.
+        if (HolyShield.ActiveShield != null && HolyShield.ActiveShield.IsAlive)
+        {
+            return;
+        }
+
+        if ((ReflectShield.ActiveShield != null && ReflectShield.ActiveShield.IsAlive) ||
+            (NullifyShield.ActiveShield != null && NullifyShield.ActiveShield.IsAlive))
+        {
+            return;
+        }
+
         lastDamageTime = Time.time;
 
         if (currentShield <= 0f)

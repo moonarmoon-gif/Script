@@ -51,6 +51,17 @@ public static class PlayerDamageHelper
             card = ProjectileCardModifiers.Instance.GetCardFromProjectile(projectile);
         }
 
+        // Allow per-projectile Attack scaling to modify the pre-stats base damage
+        // before the standard PlayerStats.CalculateDamage pipeline runs.
+        if (stats != null)
+        {
+            float attackBonus = ProjectileAttackDamageScalingManager.GetAttackBonus(stats, card, projectile);
+            if (attackBonus > 0f)
+            {
+                damage += attackBonus;
+            }
+        }
+
         // Apply core PlayerStats damage pipeline (flat damage, multipliers, crit, etc.).
         if (stats != null)
         {
@@ -111,13 +122,13 @@ public static class PlayerDamageHelper
             return 0f;
         }
 
-        float baseAttack = Mathf.Max(0f, stats.baseAttack);
-        if (baseAttack <= 0f)
+        float effectiveAttack = ProjectileAttackDamageScalingManager.GetEffectiveAttack(stats);
+        if (effectiveAttack <= 0f)
         {
             return 0f;
         }
 
-        float baseDamage = baseAttack * (percent / 100f);
+        float baseDamage = effectiveAttack * (percent / 100f);
         if (baseDamage <= 0f)
         {
             return 0f;
@@ -157,12 +168,6 @@ public static class PlayerDamageHelper
             return;
         }
 
-        StatusController status = enemy.GetComponent<StatusController>();
-        if (status == null)
-        {
-            return;
-        }
-
         ProjectileType element;
         if (!TryGetProjectileElement(projectile, out element))
         {
@@ -176,19 +181,37 @@ public static class PlayerDamageHelper
             case ProjectileType.Fire:
             case ProjectileType.NovaStar:
                 {
-                    int stacks = status.GetStacks(StatusId.Scorched);
+                    StatusController status = enemy.GetComponent<StatusController>();
+                    int stacks = status != null ? status.GetStacks(StatusId.Scorched) : 0;
                     if (stacks > 0)
                     {
                         float per = StatusControllerManager.Instance.ScorchedFireDamageTakenPercentPerStack;
                         float total = Mathf.Max(0f, per * stacks);
                         multiplier *= 1f + total / 100f;
                     }
+
+                    // Apply DemonSlime-specific fire resistance (or vulnerability).
+                    DemonSlimeEnemy slime = enemy.GetComponent<DemonSlimeEnemy>();
+                    if (slime != null)
+                    {
+                        float fireResist = slime.FireResistance;
+                        // FireResistance is a percentage. Positive values reduce
+                        // damage, negative values increase it. We only clamp at
+                        // 0 so damage can never become negative.
+                        float factor = 1f - (fireResist / 100f);
+                        if (factor < 0f)
+                        {
+                            factor = 0f;
+                        }
+                        multiplier *= factor;
+                    }
                 }
                 break;
             case ProjectileType.Ice:
             case ProjectileType.DwarfStar:
                 {
-                    int stacks = status.GetStacks(StatusId.Frostbite);
+                    StatusController status = enemy.GetComponent<StatusController>();
+                    int stacks = status != null ? status.GetStacks(StatusId.Frostbite) : 0;
                     if (stacks > 0)
                     {
                         float per = StatusControllerManager.Instance.FrostbiteIceDamageTakenPercentPerStack;
@@ -199,7 +222,8 @@ public static class PlayerDamageHelper
                 break;
             case ProjectileType.Thunder:
                 {
-                    int stacks = status.GetStacks(StatusId.Shocked);
+                    StatusController status = enemy.GetComponent<StatusController>();
+                    int stacks = status != null ? status.GetStacks(StatusId.Shocked) : 0;
                     if (stacks > 0)
                     {
                         float per = StatusControllerManager.Instance.ShockedLightningDamageTakenPercentPerStack;
@@ -229,6 +253,54 @@ public static class PlayerDamageHelper
         if (claw != null)
         {
             element = claw.ProjectileElement;
+            return true;
+        }
+
+        ElementalBeam beam = projectile.GetComponent<ElementalBeam>();
+        if (beam != null)
+        {
+            // ElementalBeam exposes its elemental type via a serialized
+            // projectileType field.
+            var beamTypeField = typeof(ElementalBeam).GetField("projectileType", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (beamTypeField != null)
+            {
+                element = (ProjectileType)beamTypeField.GetValue(beam);
+                return true;
+            }
+        }
+
+        NovaStar nova = projectile.GetComponent<NovaStar>();
+        if (nova != null)
+        {
+            element = nova.starType;
+            return true;
+        }
+
+        DwarfStar dwarf = projectile.GetComponent<DwarfStar>();
+        if (dwarf != null)
+        {
+            element = dwarf.starType;
+            return true;
+        }
+
+        NuclearStrike nuke = projectile.GetComponent<NuclearStrike>();
+        if (nuke != null)
+        {
+            element = ProjectileType.Nuclear;
+            return true;
+        }
+
+        ProjectileFireTalon fireTalon = projectile.GetComponent<ProjectileFireTalon>();
+        if (fireTalon != null)
+        {
+            element = ProjectileType.Fire;
+            return true;
+        }
+
+        ProjectileIceTalon iceTalon = projectile.GetComponent<ProjectileIceTalon>();
+        if (iceTalon != null)
+        {
+            element = ProjectileType.Ice;
             return true;
         }
 

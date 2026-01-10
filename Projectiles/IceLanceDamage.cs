@@ -97,13 +97,49 @@ public class IceLanceDamage : MonoBehaviour
             // Apply slow effect
             if (Random.value <= slowChance)
             {
-                StatusEffectManager statusManager = other.GetComponent<StatusEffectManager>();
-                if (statusManager == null)
+                EnemyHealth ownerHealth = other.GetComponent<EnemyHealth>() ?? other.GetComponentInParent<EnemyHealth>();
+                GameObject ownerGO = ownerHealth != null ? ownerHealth.gameObject : other.gameObject;
+
+                StatusController statusController = ownerGO.GetComponent<StatusController>() ?? ownerGO.GetComponentInParent<StatusController>();
+                if (statusController == null)
                 {
-                    statusManager = other.gameObject.AddComponent<StatusEffectManager>();
+                    statusController = ownerGO.AddComponent<StatusController>();
                 }
-                statusManager.ApplySlow(slowMultiplier, slowDuration);
-                Debug.Log($"<color=cyan>IceLance applied SLOW to {other.gameObject.name} ({slowMultiplier * 100}% speed for {slowDuration}s)</color>");
+
+                int slowStacksBefore = statusController.GetStacks(StatusId.Slow);
+
+                float duration = slowDuration;
+                int stacksToAdd = Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp01(1f - slowMultiplier) * 4f), 1, 4);
+                if (stats != null)
+                {
+                    if (!Mathf.Approximately(stats.slowDurationBonus, 0f))
+                    {
+                        duration = Mathf.Max(0f, duration + stats.slowDurationBonus);
+                    }
+
+                    if (!Mathf.Approximately(stats.slowStrengthBonus, 0f))
+                    {
+                        float baseStrength = Mathf.Clamp01(stacksToAdd / 4f);
+                        float strength = Mathf.Clamp01(baseStrength + Mathf.Max(0f, stats.slowStrengthBonus));
+                        int adjustedStacks = Mathf.Clamp(Mathf.RoundToInt(strength * 4f), 1, 4);
+                        stacksToAdd = Mathf.Max(stacksToAdd, adjustedStacks);
+                    }
+                }
+
+                ProjectileCards sourceCard = null;
+                if (ProjectileCardModifiers.Instance != null)
+                {
+                    sourceCard = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
+                }
+
+                statusController.AddStatus(StatusId.Slow, stacksToAdd, duration, 0f, sourceCard);
+
+                int slowStacksAfter = statusController.GetStacks(StatusId.Slow);
+                if (slowStacksAfter > slowStacksBefore && DamageNumberManager.Instance != null)
+                {
+                    Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(ownerGO, ownerGO.transform.position);
+                    DamageNumberManager.Instance.ShowSlow(anchor);
+                }
             }
         }
     }
