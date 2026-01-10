@@ -47,6 +47,7 @@ public enum StatusId
     Rage,
     Overweight,
     Frenzy,
+    Corruption,
 }
 
 public struct IncomingDamageContext
@@ -1939,6 +1940,7 @@ public class StatusController : MonoBehaviour
             case StatusId.Amnesia:
             case StatusId.Weak:
             case StatusId.Overweight:
+            case StatusId.Corruption:
                 return true;
             default:
                 return false;

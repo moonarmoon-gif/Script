@@ -28,6 +28,13 @@ public class OrcArcherEnemy : MonoBehaviour
 
     public int ComboAttackAmount = 5;
 
+    [Header("Combo Animation Speed")]
+    [Tooltip("Percent speed increase per additional combo attack after the first (10 = +10% for 2nd shot, +20% for 3rd, etc.).")]
+    public float FastenedComboAnimations = 10f;
+
+    [Header("Fury Gain On Attack")]
+    public bool EnableFuryGainOnAttackShot = true;
+
     [Header("Knockback Settings")]
     public float knockbackIntensity = 5f;
     public float knockbackDuration = 0.2f;
@@ -197,7 +204,7 @@ public class OrcArcherEnemy : MonoBehaviour
             animator.SetBool("moving", shouldMove);
             animator.SetBool("movingflip", false);
         }
-     }
+    }
 
     void FixedUpdate()
     {
@@ -258,12 +265,20 @@ public class OrcArcherEnemy : MonoBehaviour
         isMoving = true;
     }
 
+    private float GetComboAnimationSpeed(int comboIndex)
+    {
+        float per = Mathf.Max(0f, FastenedComboAnimations) / 100f;
+        float speed = 1f + (per * Mathf.Max(0, comboIndex));
+        return Mathf.Max(0.01f, speed);
+    }
+
     private IEnumerator ComboAttackRoutine()
     {
         int myToken = BeginAttackAction();
 
         isAttacking = true;
         canAttack = false;
+        animator.speed = 1f;
 
         animator.SetBool("attackstart", true);
         animator.SetBool("attackshot", false);
@@ -294,10 +309,13 @@ public class OrcArcherEnemy : MonoBehaviour
                 yield break;
             }
 
+            float comboSpeed = GetComboAnimationSpeed(i);
+            animator.speed = comboSpeed;
+
             animator.SetBool("attackshot", true);
             FireOneProjectile();
 
-            float shotTime = Mathf.Max(0f, AttackShotAnimationTime);
+            float shotTime = Mathf.Max(0f, AttackShotAnimationTime) / comboSpeed;
             if (shotTime > 0f)
             {
                 yield return new WaitForSeconds(shotTime);
@@ -309,7 +327,7 @@ public class OrcArcherEnemy : MonoBehaviour
             {
                 animator.SetBool("reload", true);
 
-                float reloadTime = Mathf.Max(0f, ReloadAnimationTime);
+                float reloadTime = Mathf.Max(0f, ReloadAnimationTime) / comboSpeed;
                 if (reloadTime > 0f)
                 {
                     yield return new WaitForSeconds(reloadTime);
@@ -319,15 +337,27 @@ public class OrcArcherEnemy : MonoBehaviour
             }
         }
 
+        float finalComboSpeed = GetComboAnimationSpeed(shots - 1);
+        animator.speed = finalComboSpeed;
+
+        animator.SetBool("reload", true);
+        float finalReloadTime = Mathf.Max(0f, ReloadAnimationTime) / finalComboSpeed;
+        if (finalReloadTime > 0f)
+        {
+            yield return new WaitForSeconds(finalReloadTime);
+        }
+        animator.SetBool("reload", false);
+
         animator.SetBool("attacktoidle", true);
 
-        float toIdleTime = Mathf.Max(0f, AttackToIdleAnimationTime);
+        float toIdleTime = Mathf.Max(0f, AttackToIdleAnimationTime) / finalComboSpeed;
         if (toIdleTime > 0f)
         {
             yield return new WaitForSeconds(toIdleTime);
         }
 
         animator.SetBool("attacktoidle", false);
+        animator.speed = 1f;
 
         isAttacking = false;
 
@@ -355,6 +385,7 @@ public class OrcArcherEnemy : MonoBehaviour
         animator.SetBool("attackstatic", false);
         animator.SetBool("attacktoidle", false);
         animator.SetBool("reload", false);
+        animator.speed = 1f;
         isAttacking = false;
         canAttack = true;
         attackRoutine = null;
@@ -374,6 +405,11 @@ public class OrcArcherEnemy : MonoBehaviour
         if (proj.TryGetComponent<NecromancerProjectile>(out var necroProj))
         {
             necroProj.Initialize(projectileDamage, dir, col);
+        }
+
+        if (EnableFuryGainOnAttackShot && statusController != null)
+        {
+            statusController.AddStatus(StatusId.Fury, 1, -1f);
         }
     }
 

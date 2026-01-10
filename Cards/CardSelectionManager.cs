@@ -522,6 +522,17 @@ public class CardSelectionManager : MonoBehaviour
                 }
             }
 
+            deferVariantSelections = false;
+            if (!processingVariantQueue && pendingVariantSelections.Count > 0)
+            {
+                StartCoroutine(ProcessVariantSelectionQueue());
+            }
+
+            while (processingVariantQueue || pendingVariantSelections.Count > 0)
+            {
+                yield return null;
+            }
+
             // Now process all PROJECTILE card stages for this batch, if enabled
             if (enableTwoStageSelection && totalLevels > 0)
             {
@@ -538,6 +549,16 @@ public class CardSelectionManager : MonoBehaviour
 
                     yield return StartCoroutine(ShowSingleLevelUpStage(false));
 
+                    if (!processingVariantQueue && pendingVariantSelections.Count > 0)
+                    {
+                        StartCoroutine(ProcessVariantSelectionQueue());
+                    }
+
+                    while (processingVariantQueue || pendingVariantSelections.Count > 0)
+                    {
+                        yield return null;
+                    }
+
                     // Small delay between projectile card selections
                     if (i < totalLevels - 1)
                     {
@@ -546,8 +567,6 @@ public class CardSelectionManager : MonoBehaviour
                 }
             }
 
-            // After all Core + Projectile stages are complete, show any pending Variant cards.
-            deferVariantSelections = false;
             if (!processingVariantQueue && pendingVariantSelections.Count > 0)
             {
                 StartCoroutine(ProcessVariantSelectionQueue());

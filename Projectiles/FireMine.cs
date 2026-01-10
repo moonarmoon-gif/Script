@@ -125,6 +125,8 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     private bool hasExploded = false;
     private bool isExploding = false;
 
+    private Coroutine explodeDelayCoroutine = null;
+
     // Enhanced system
     private int enhancedVariant = 0; // 0 = basic, 1 = mega mine, 2-3 = future variants
     private float explosionRadiusForEffect = 0f; // Store radius BEFORE modifiers for effect scaling
@@ -144,6 +146,76 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     private float scheduledDespawnTime = -1f;
     private bool registeredInSpawnLimit = false;
     private static System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<FireMine>> activeMinesByKey = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<FireMine>>();
+
+    private static bool bossPauseActive = false;
+    private static System.Action<bool> bossPauseChanged;
+
+    private float pausedRemainingLifetime = 0f;
+    private bool hasPausedLifetime = false;
+
+    public static bool IsBossPauseActive()
+    {
+        return bossPauseActive;
+    }
+
+    public static void SetBossPauseActive(bool active)
+    {
+        if (bossPauseActive == active)
+        {
+            return;
+        }
+
+        bossPauseActive = active;
+        bossPauseChanged?.Invoke(active);
+    }
+
+    private void OnEnable()
+    {
+        bossPauseChanged += HandleBossPauseChanged;
+
+        if (bossPauseActive)
+        {
+            HandleBossPauseChanged(true);
+        }
+    }
+
+    private void OnDisable()
+    {
+        bossPauseChanged -= HandleBossPauseChanged;
+    }
+
+    private void HandleBossPauseChanged(bool paused)
+    {
+        if (paused)
+        {
+            if (explodeDelayCoroutine != null && !hasExploded)
+            {
+                StopCoroutine(explodeDelayCoroutine);
+                explodeDelayCoroutine = null;
+                isExploding = false;
+            }
+
+            if (scheduledDespawnTime > 0f)
+            {
+                pausedRemainingLifetime = Mathf.Max(0f, scheduledDespawnTime - Time.time);
+                hasPausedLifetime = true;
+            }
+        }
+        else
+        {
+            if (hasPausedLifetime && scheduledDespawnTime > 0f)
+            {
+                scheduledDespawnTime = Time.time + pausedRemainingLifetime;
+            }
+
+            hasPausedLifetime = false;
+
+            if (isArmed && !hasExploded && !isExploding)
+            {
+                TryTriggerExplosionFromCurrentOverlaps();
+            }
+        }
+    }
 
     private void Awake()
     {
@@ -205,6 +277,11 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         if (scheduledDespawnTime <= 0f)
         {
             return float.MaxValue;
+        }
+
+        if (bossPauseActive && hasPausedLifetime)
+        {
+            return Mathf.Max(0f, pausedRemainingLifetime);
         }
 
         return Mathf.Max(0f, scheduledDespawnTime - Time.time);
@@ -726,10 +803,31 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         spriteRenderer.color = color;
     }
 
+    private IEnumerator WaitPausableSeconds(float seconds)
+    {
+        if (seconds <= 0f)
+        {
+            yield break;
+        }
+
+        float elapsed = 0f;
+        while (elapsed < seconds)
+        {
+            if (bossPauseActive)
+            {
+                yield return null;
+                continue;
+            }
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+    }
+
     private IEnumerator ArmingSequence(float lifetime)
     {
         // Wait for arming delay
-        yield return new WaitForSeconds(armDelay);
+        yield return StartCoroutine(WaitPausableSeconds(armDelay));
 
         isArmed = true;
 
@@ -753,7 +851,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         // check at the moment of arming.
 
         // Wait for lifetime, then destroy without exploding
-        yield return new WaitForSeconds(lifetime - armDelay);
+        yield return StartCoroutine(WaitPausableSeconds(lifetime - armDelay));
 
         if (!hasExploded && !isExploding)
         {
@@ -764,23 +862,24 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        if (bossPauseActive) return;
         if (!isArmed || hasExploded || isExploding) return;
 
         // Explode when enemy enters trigger
         if (IsEnemyCollider(other))
         {
-            // Start explosion with delay
-            StartCoroutine(ExplodeWithDelay());
+            TryStartExplodeWithDelay();
         }
     }
 
     private void OnTriggerStay2D(Collider2D other)
     {
+        if (bossPauseActive) return;
         if (!isArmed || hasExploded || isExploding) return;
 
         if (IsEnemyCollider(other))
         {
-            StartCoroutine(ExplodeWithDelay());
+            TryStartExplodeWithDelay();
         }
     }
 
@@ -807,6 +906,11 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
     private void TryTriggerExplosionFromCurrentOverlaps()
     {
+        if (bossPauseActive)
+        {
+            return;
+        }
+
         if (!isArmed || hasExploded || isExploding)
         {
             return;
@@ -844,10 +948,30 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
             if (IsEnemyCollider(other))
             {
-                StartCoroutine(ExplodeWithDelay());
+                TryStartExplodeWithDelay();
                 return;
             }
         }
+    }
+
+    private void TryStartExplodeWithDelay()
+    {
+        if (bossPauseActive)
+        {
+            return;
+        }
+
+        if (hasExploded || isExploding)
+        {
+            return;
+        }
+
+        if (explodeDelayCoroutine != null)
+        {
+            return;
+        }
+
+        explodeDelayCoroutine = StartCoroutine(ExplodeWithDelay());
     }
 
     private IEnumerator ExplodeWithDelay()
@@ -857,18 +981,26 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             yield break;
         }
 
+        if (bossPauseActive)
+        {
+            explodeDelayCoroutine = null;
+            yield break;
+        }
+
         isExploding = true;
 
         // Wait for explosion delay
         if (explosionDelay > 0f)
         {
-            yield return new WaitForSeconds(explosionDelay);
+            yield return StartCoroutine(WaitPausableSeconds(explosionDelay));
         }
 
         if (!hasExploded)
         {
             yield return StartCoroutine(ExplodeRoutine());
         }
+
+        explodeDelayCoroutine = null;
     }
 
     private IEnumerator ExplodeRoutine()
@@ -964,7 +1096,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         }
         if (delayBeforeDamage > 0f)
         {
-            yield return new WaitForSeconds(delayBeforeDamage);
+            yield return StartCoroutine(WaitPausableSeconds(delayBeforeDamage));
         }
 
         // Find all enemies in explosion radius
@@ -1066,7 +1198,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
     private IEnumerator SpawnDelayedExplosionEffect(Vector3 position, float delay)
     {
-        yield return new WaitForSeconds(delay);
+        yield return StartCoroutine(WaitPausableSeconds(delay));
 
         if (explosionEffectPrefab != null)
         {

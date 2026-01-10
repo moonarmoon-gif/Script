@@ -473,6 +473,7 @@ public class EnemySpawner : MonoBehaviour
         float menaceDuration = bossMenaceTimer;
         float menaceElapsed = 0f;
         bossMenaceActive = true;
+        FireMine.SetBossPauseActive(true);
 
         while (menaceElapsed < menaceDuration)
         {
@@ -481,6 +482,7 @@ public class EnemySpawner : MonoBehaviour
         }
 
         bossMenaceActive = false;
+        FireMine.SetBossPauseActive(false);
 
         ResetAndReduceProjectileCooldowns();
         SetProjectilesSpawnable(true);
@@ -561,6 +563,7 @@ public class EnemySpawner : MonoBehaviour
         isBossEventActive = false;
         bossDeathTriggered = false;
         bossMenaceActive = false;
+        FireMine.SetBossPauseActive(false);
 
         bossEventsCompleted++;
 
@@ -748,6 +751,18 @@ public class EnemySpawner : MonoBehaviour
 
             HolyShield shield = proj.GetComponent<HolyShield>();
             if (shield != null)
+            {
+                continue;
+            }
+
+            FireMine mine = proj.GetComponentInChildren<FireMine>(true);
+            if (mine != null)
+            {
+                continue;
+            }
+
+            FrostMine frostMine = proj.GetComponentInChildren<FrostMine>(true);
+            if (frostMine != null)
             {
                 continue;
             }

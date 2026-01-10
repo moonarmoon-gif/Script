@@ -1355,6 +1355,7 @@ public class EnemyCardSpawner : MonoBehaviour
         // From this point on, bossMenaceActive handles spawn suppression instead of the pre-boss flag
         suppressEnemySpawnsBeforeBoss = false;
         bossMenaceActive = true;
+        FireMine.SetBossPauseActive(true);
         
         while (menaceElapsed < menaceDuration)
         {
@@ -1363,6 +1364,7 @@ public class EnemyCardSpawner : MonoBehaviour
         }
         
         bossMenaceActive = false;
+        FireMine.SetBossPauseActive(false);
         Debug.Log("<color=lime>Menace timer complete! Boss is now vulnerable!</color>");
         
         // STEP 8: Reset projectile cooldowns and reduce by 50%
@@ -1542,6 +1544,7 @@ public class EnemyCardSpawner : MonoBehaviour
         showingPostBossCards = false; // Resume boss timer
         isBossEventActive = false; // Allow boss timer to run again
         Debug.Log($"<color=red>SET isBossEventActive = FALSE (Post-boss cards done)</color>");
+        FireMine.SetBossPauseActive(false);
         
         // Boss index was already advanced in Update when the event triggered.
         // Just log what the next boss timing will be.
@@ -2030,6 +2033,12 @@ public class EnemyCardSpawner : MonoBehaviour
 
             HolyShield shield = proj.GetComponent<HolyShield>();
             if (shield != null)
+            {
+                continue;
+            }
+
+            FireMine mine = proj.GetComponentInChildren<FireMine>(true);
+            if (mine != null)
             {
                 continue;
             }

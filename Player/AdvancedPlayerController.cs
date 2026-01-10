@@ -97,7 +97,7 @@ public class AdvancedPlayerController : MonoBehaviour
     private float lastFireCustom1FireTime = -999f;
     private float lastIceCustom1FireTime = -999f;
 
-    private Dictionary<ProjectileCards, float> cardCooldownTimes = new Dictionary<ProjectileCards, float>();
+    private Dictionary<string, float> cardCooldownTimes = new Dictionary<string, float>();
 
     [Header("Auto-Fire Doomed Logic")]
     [Tooltip("If enabled, left side uses FIRE guaranteed damage and right side uses ICE guaranteed damage separately. If disabled, both sides share a single pool so you can reuse the same projectile type on both sides.")]
@@ -114,6 +114,10 @@ public class AdvancedPlayerController : MonoBehaviour
 
     [Header("Doomed Skip Duration")]
     [SerializeField] private float defaultDoomedSkipDuration = 0.75f;
+    [SerializeField] private float singleEnemyDoomSkipDuration = 0.25f;
+    [SerializeField] private float singleEnemyDoomSkipCheckInterval = 0.35f;
+    private float nextSingleEnemyDoomSkipCheckTime = 0f;
+    private bool cachedSingleNonBossEnemyAlive = false;
 
     [Tooltip("Global exchange rate for active projectiles: +1 speedIncrease on the active card reduces doomedSkipDuration by this many seconds.")]
     public float doomedSkipDurationPerSpeed = 0.1f;
@@ -1163,6 +1167,20 @@ public class AdvancedPlayerController : MonoBehaviour
 
     private float GetCurrentDoomedSkipDuration()
     {
+        if (activeProjectileCard != null && activeProjectileCard.projectileSystem == ProjectileCards.ProjectileSystemType.Active)
+        {
+            if (Time.time >= nextSingleEnemyDoomSkipCheckTime)
+            {
+                nextSingleEnemyDoomSkipCheckTime = Time.time + Mathf.Max(0.05f, singleEnemyDoomSkipCheckInterval);
+                cachedSingleNonBossEnemyAlive = IsExactlyOneNonBossEnemyAlive();
+            }
+
+            if (cachedSingleNonBossEnemyAlive && singleEnemyDoomSkipDuration > 0f)
+            {
+                return singleEnemyDoomSkipDuration;
+            }
+        }
+
         // Base duration comes from the active projectile card when set,
         // otherwise fall back to the global default.
         float baseDuration = defaultDoomedSkipDuration;
@@ -1191,6 +1209,35 @@ public class AdvancedPlayerController : MonoBehaviour
         float reduction = speedIncrease * doomedSkipDurationPerSpeed;
         float minDuration = 0.1f;
         return Mathf.Max(minDuration, baseDuration - reduction);
+    }
+
+    private bool IsExactlyOneNonBossEnemyAlive()
+    {
+        GameObject[] enemies = GameObject.FindGameObjectsWithTag("Enemy");
+        int aliveNonBossCount = 0;
+
+        for (int i = 0; i < enemies.Length; i++)
+        {
+            GameObject enemy = enemies[i];
+            if (enemy == null) continue;
+
+            EnemyHealth eh = enemy.GetComponent<EnemyHealth>() ?? enemy.GetComponentInChildren<EnemyHealth>();
+            if (eh == null || !eh.IsAlive) continue;
+
+            EnemyCardTag tag = enemy.GetComponent<EnemyCardTag>() ?? enemy.GetComponentInChildren<EnemyCardTag>();
+            if (tag != null && tag.rarity == CardRarity.Boss)
+            {
+                continue;
+            }
+
+            aliveNonBossCount++;
+            if (aliveNonBossCount > 1)
+            {
+                return false;
+            }
+        }
+
+        return aliveNonBossCount == 1;
     }
 
     private void RegisterGuaranteedDamage(Transform target, GameObject projectileObj, bool isFire)
@@ -1531,9 +1578,12 @@ public class AdvancedPlayerController : MonoBehaviour
     {
         if (card == null) return 0f;
 
-        if (cardCooldownTimes.ContainsKey(card))
+        string key = card.cardName;
+        if (string.IsNullOrEmpty(key)) return 0f;
+
+        if (cardCooldownTimes.ContainsKey(key))
         {
-            float timeSinceLastFire = Time.time - cardCooldownTimes[card];
+            float timeSinceLastFire = Time.time - cardCooldownTimes[key];
             float cooldown = GetActiveProjectileCooldown();
             float remaining = Mathf.Max(0f, cooldown - timeSinceLastFire);
             return remaining;
@@ -1546,7 +1596,13 @@ public class AdvancedPlayerController : MonoBehaviour
     {
         if (card != null)
         {
-            cardCooldownTimes[card] = Time.time;
+            string key = card.cardName;
+            if (string.IsNullOrEmpty(key))
+            {
+                return;
+            }
+
+            cardCooldownTimes[key] = Time.time;
             Debug.Log($"<color=cyan>Set cooldown for {card.cardName} at {Time.time:F2}</color>");
         }
     }
@@ -1555,14 +1611,18 @@ public class AdvancedPlayerController : MonoBehaviour
     {
         if (card == null) return true;
 
-        if (cardCooldownTimes.ContainsKey(card))
+        string key = card.cardName;
+        if (string.IsNullOrEmpty(key)) return true;
+
+        if (cardCooldownTimes.ContainsKey(key))
         {
-            float timeSinceLastFire = Time.time - cardCooldownTimes[card];
+            float timeSinceLastFire = Time.time - cardCooldownTimes[key];
             bool ready = timeSinceLastFire >= cooldown;
             if (!ready)
             {
                 Debug.Log($"<color=orange>{card.cardName} on cooldown: {timeSinceLastFire:F2}s / {cooldown:F2}s</color>");
             }
+
             return ready;
         }
 
