@@ -106,7 +106,7 @@ public class CardSelectionManager : MonoBehaviour
     private bool isSelectionActive = false;
     private bool isFirstStage = true; // True = Core cards, False = Projectile cards
     private bool waitingForSecondStage = false;
-    
+
     // Queue for multiple level-ups
     private Queue<int> pendingLevelUps = new Queue<int>();
     private bool processingLevelUpQueue = false;
