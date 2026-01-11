@@ -24,6 +24,7 @@ public class OrcArcherEnemy : MonoBehaviour
     public float AttackStartAnimationTime = 0.5f;
     public float AttackShotAnimationTime = 0.35f;
     public float ReloadAnimationTime = 0.7f;
+    public float LastReloadAnimationTime = 0.25f;
     public float AttackToIdleAnimationTime = 0.4f;
 
     public int ComboAttackAmount = 5;
@@ -31,6 +32,8 @@ public class OrcArcherEnemy : MonoBehaviour
     [Header("Combo Animation Speed")]
     [Tooltip("Percent speed increase per additional combo attack after the first (10 = +10% for 2nd shot, +20% for 3rd, etc.).")]
     public float FastenedComboAnimations = 10f;
+
+    public float MaxComboAnimationSpeed = 100f;
 
     [Header("Fury Gain On Attack")]
     public bool EnableFuryGainOnAttackShot = true;
@@ -269,7 +272,9 @@ public class OrcArcherEnemy : MonoBehaviour
     {
         float per = Mathf.Max(0f, FastenedComboAnimations) / 100f;
         float speed = 1f + (per * Mathf.Max(0, comboIndex));
-        return Mathf.Max(0.01f, speed);
+        float maxIncrease = Mathf.Max(0f, MaxComboAnimationSpeed) / 100f;
+        float maxSpeed = 1f + maxIncrease;
+        return Mathf.Max(0.01f, Mathf.Min(speed, maxSpeed));
     }
 
     private IEnumerator ComboAttackRoutine()
@@ -341,7 +346,7 @@ public class OrcArcherEnemy : MonoBehaviour
         animator.speed = finalComboSpeed;
 
         animator.SetBool("reload", true);
-        float finalReloadTime = Mathf.Max(0f, ReloadAnimationTime) / finalComboSpeed;
+        float finalReloadTime = Mathf.Max(0f, LastReloadAnimationTime) / finalComboSpeed;
         if (finalReloadTime > 0f)
         {
             yield return new WaitForSeconds(finalReloadTime);

@@ -107,6 +107,8 @@ public class CardSelectionManager : MonoBehaviour
     private bool isFirstStage = true; // True = Core cards, False = Projectile cards
     private bool waitingForSecondStage = false;
 
+    public bool IsSelectionUIActive => isSelectionActive;
+
     // Queue for multiple level-ups
     private Queue<int> pendingLevelUps = new Queue<int>();
     private bool processingLevelUpQueue = false;
@@ -505,7 +507,8 @@ public class CardSelectionManager : MonoBehaviour
             }
 
             // Process all CORE card stages for this batch
-            for (int i = 0; i < totalLevels; i++)
+            int coreStagesShown = 0;
+            while (coreStagesShown < totalLevels)
             {
                 // Wait for any variant selections to complete
                 while (processingVariantQueue)
@@ -514,9 +517,23 @@ public class CardSelectionManager : MonoBehaviour
                 }
 
                 yield return StartCoroutine(ShowSingleLevelUpStage(true));
+                coreStagesShown++;
+
+                if (pendingLevelUps.Count > 0)
+                {
+                    int extraLevels = pendingLevelUps.Count;
+                    totalLevels += extraLevels;
+                    for (int j = 0; j < extraLevels; j++)
+                    {
+                        if (pendingLevelUps.Count > 0)
+                        {
+                            pendingLevelUps.Dequeue();
+                        }
+                    }
+                }
 
                 // Small delay between core card selections
-                if (i < totalLevels - 1)
+                if (coreStagesShown < totalLevels)
                 {
                     yield return new WaitForSecondsRealtime(delayBetweenStages);
                 }

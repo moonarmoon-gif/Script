@@ -51,6 +51,13 @@ public class EnemyStatUIPanel : MonoBehaviour
             rectTransform = GetComponent<RectTransform>();
         }
 
+        if (rectTransform != null)
+        {
+            rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        }
+
         canvas = GetComponent<Canvas>();
         if (canvas == null)
         {
@@ -197,6 +204,24 @@ public class EnemyStatUIPanel : MonoBehaviour
         if (flipped)
         {
             offset.x = -offset.x;
+        }
+
+        RectTransform parentRect = transform.parent as RectTransform;
+        if (parentRect != null)
+        {
+            float scaleFactor = 1f;
+            Canvas parentCanvas = parentRect.GetComponentInParent<Canvas>();
+            if (parentCanvas != null)
+            {
+                scaleFactor = Mathf.Max(0.0001f, parentCanvas.scaleFactor);
+            }
+
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, screenPoint, null, out Vector2 localPoint))
+            {
+                Vector2 offsetLocal = offset / scaleFactor;
+                rectTransform.anchoredPosition = localPoint + offsetLocal;
+                return;
+            }
         }
 
         rectTransform.position = new Vector3(screenPoint.x + offset.x, screenPoint.y + offset.y, 0f);
