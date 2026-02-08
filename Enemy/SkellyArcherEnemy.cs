@@ -117,6 +117,8 @@ public class SkellyArcherEnemy : MonoBehaviour
     // Coroutine handles
     private Coroutine shootRoutine;
 
+    private StaticStatus cachedStaticStatus;
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -244,8 +246,11 @@ public class SkellyArcherEnemy : MonoBehaviour
         }
         
         Debug.Log($"<color=green>SkellyArcher summoning for {summonAnimationDuration}s (invulnerable)</color>");
-        
-        yield return new WaitForSeconds(summonAnimationDuration);
+
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            summonAnimationDuration,
+            () => isDead,
+            () => IsStaticFrozen());
         
         animator.SetBool("summon", false);
         animator.SetBool("digout", false);
@@ -272,7 +277,10 @@ public class SkellyArcherEnemy : MonoBehaviour
         Debug.Log($"<color=green>SkellyArcher post-summon idle for {postSummonIdleTime:F2}s</color>");
         
         animator.SetBool("IsIdle", true);
-        yield return new WaitForSeconds(postSummonIdleTime);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            postSummonIdleTime,
+            () => isDead,
+            () => IsStaticFrozen());
         animator.SetBool("IsIdle", false);
         
         isSummoning = false;
@@ -282,6 +290,11 @@ public class SkellyArcherEnemy : MonoBehaviour
     void Update()
     {
         if (isDead || isSummoning) return;
+
+        if (IsStaticFrozen())
+        {
+            return;
+        }
 
         bool playerDead = isPlayerDead || player == null || 
                          (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled);
@@ -392,6 +405,18 @@ public class SkellyArcherEnemy : MonoBehaviour
             return;
         }
 
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            isMoving = false;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                knockbackEndTime += dt;
+            }
+            return;
+        }
+
         // Check if player is valid
         if (isPlayerDead || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled))
         {
@@ -467,6 +492,10 @@ public class SkellyArcherEnemy : MonoBehaviour
         isShootingProjectile = true;
         canShoot = false;
 
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || isSummoning || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+            () => IsStaticFrozen());
+
         // Pre-attack delay (idle before attack animation starts). LETHARGY
         // increases this windup per stack.
         if (preAttackDelay > 0)
@@ -482,7 +511,10 @@ public class SkellyArcherEnemy : MonoBehaviour
             }
 
             isInPreAttackDelay = true;
-            yield return new WaitForSeconds(delay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                delay,
+                () => isDead || isSummoning || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
             isInPreAttackDelay = false;
         }
 
@@ -501,7 +533,10 @@ public class SkellyArcherEnemy : MonoBehaviour
         // Wait until spawn time (if positive)
         if (spawnTime > 0)
         {
-            yield return new WaitForSeconds(spawnTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                spawnTime,
+                () => isDead || isSummoning || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
         }
 
         if (isDead || isSummoning || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled))
@@ -515,8 +550,24 @@ public class SkellyArcherEnemy : MonoBehaviour
         // Spawn projectile
         if (projectilePrefab != null && player != null)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isSummoning || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
+
             Vector3 spawnPos = firePoint != null ? firePoint.position : transform.position;
-            Vector2 direction = (player.position - spawnPos).normalized;
+
+            Vector3 targetPos = player.position;
+            Collider2D playerCol = player.GetComponent<Collider2D>();
+            if (playerCol == null)
+            {
+                playerCol = player.GetComponentInChildren<Collider2D>();
+            }
+            if (playerCol != null)
+            {
+                targetPos = playerCol.bounds.center;
+            }
+
+            Vector2 direction = ((Vector2)targetPos - (Vector2)spawnPos).normalized;
             
             GameObject proj = Object.Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
 
@@ -531,7 +582,10 @@ public class SkellyArcherEnemy : MonoBehaviour
         float remainingAnimTime = attackAnimationTime - spawnTime;
         if (remainingAnimTime > 0)
         {
-            yield return new WaitForSeconds(remainingAnimTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingAnimTime,
+                () => isDead || isSummoning || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
         }
 
         if (isDead || isSummoning || isPlayerDead || myToken != shootActionToken)
@@ -556,7 +610,10 @@ public class SkellyArcherEnemy : MonoBehaviour
                 isReloading = true;
                 animator.SetBool("reload", true);
                 animator.SetBool("IsIdle", false);
-                yield return new WaitForSeconds(reloadTime);
+                yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                    reloadTime,
+                    () => isDead || isSummoning || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                    () => IsStaticFrozen());
                 animator.SetBool("reload", false);
                 isReloading = false;
                 remainingCooldown -= reloadTime;
@@ -567,12 +624,20 @@ public class SkellyArcherEnemy : MonoBehaviour
         if (remainingCooldown > 0f)
         {
             animator.SetBool("IsIdle", true);
-            yield return new WaitForSeconds(remainingCooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingCooldown,
+                () => isDead || isSummoning || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
             animator.SetBool("IsIdle", false);
         }
 
         canShoot = true;
         shootRoutine = null;
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void UpdateFirePointPosition()
@@ -688,7 +753,10 @@ public class SkellyArcherEnemy : MonoBehaviour
         float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
         if (animationDelay > 0f)
         {
-            yield return new WaitForSeconds(animationDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                animationDelay,
+                () => false,
+                () => false);
         }
 
         if (spriteRenderer != null && deathFadeOutDuration > 0f)
@@ -698,7 +766,11 @@ public class SkellyArcherEnemy : MonoBehaviour
 
             while (elapsed < deathFadeOutDuration)
             {
-                elapsed += Time.deltaTime;
+                float dt = GameStateManager.GetPauseSafeDeltaTime();
+                if (dt > 0f)
+                {
+                    elapsed += dt;
+                }
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / deathFadeOutDuration);
                 spriteRenderer.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;

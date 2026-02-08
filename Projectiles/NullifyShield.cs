@@ -24,6 +24,7 @@ public class NullifyShield : MonoBehaviour
     private SpriteRenderer[] spriteRenderers;
     private Color[] originalColors;
     private Collider2D shieldCollider;
+    private float baseRechargeDuration;
 
     private static NullifyShield activeShield;
 
@@ -37,6 +38,7 @@ public class NullifyShield : MonoBehaviour
     {
         spriteRenderers = GetComponentsInChildren<SpriteRenderer>();
         shieldCollider = GetComponent<Collider2D>();
+        baseRechargeDuration = NullifyRechargeDuration;
 
         if (spriteRenderers != null && spriteRenderers.Length > 0)
         {
@@ -53,9 +55,15 @@ public class NullifyShield : MonoBehaviour
 
     public void Initialize(Vector3 spawnPosition, Collider2D playerCollider, int maxCharges)
     {
+        Initialize(spawnPosition, playerCollider, maxCharges, baseRechargeDuration);
+    }
+
+    public void Initialize(Vector3 spawnPosition, Collider2D playerCollider, int maxCharges, float rechargeDurationSeconds)
+    {
         chargesMax = Mathf.Max(1, maxCharges);
         chargesCurrent = chargesMax;
         lastChargeConsumedTime = -999f;
+        SetRechargeDuration(rechargeDurationSeconds);
 
         transform.position = spawnPosition + (Vector3)spawnOffset;
         if (playerCollider != null)
@@ -75,6 +83,11 @@ public class NullifyShield : MonoBehaviour
         {
             StartCoroutine(FadeIn());
         }
+    }
+
+    public void SetRechargeDuration(float rechargeDurationSeconds)
+    {
+        NullifyRechargeDuration = Mathf.Max(0f, rechargeDurationSeconds);
     }
 
     public void SetMaxCharges(int maxCharges)
@@ -100,7 +113,7 @@ public class NullifyShield : MonoBehaviour
 
         if (chargesCurrent < chargesMax && NullifyRechargeDuration > 0f)
         {
-            if (Time.time - lastChargeConsumedTime >= NullifyRechargeDuration)
+            if (GameStateManager.PauseSafeTime - lastChargeConsumedTime >= NullifyRechargeDuration)
             {
                 chargesCurrent = chargesMax;
             }
@@ -127,7 +140,7 @@ public class NullifyShield : MonoBehaviour
     private void ConsumeCharge()
     {
         chargesCurrent = Mathf.Max(0, chargesCurrent - 1);
-        lastChargeConsumedTime = Time.time;
+        lastChargeConsumedTime = GameStateManager.PauseSafeTime;
 
         if (chargesCurrent <= 0)
         {
@@ -165,7 +178,7 @@ public class NullifyShield : MonoBehaviour
         float elapsed = 0f;
         while (elapsed < FadeOutDuration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float t = Mathf.Clamp01(elapsed / FadeOutDuration);
             SetAlpha(1f - t);
             yield return null;
@@ -180,7 +193,7 @@ public class NullifyShield : MonoBehaviour
         float wait = Mathf.Max(0f, NullifyRechargeDuration);
         if (wait > 0f)
         {
-            yield return new WaitForSeconds(wait);
+            yield return GameStateManager.WaitForPauseSafeSeconds(wait);
         }
 
         chargesCurrent = chargesMax;
@@ -214,7 +227,7 @@ public class NullifyShield : MonoBehaviour
         float elapsed = 0f;
         while (elapsed < FadeInDuration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float t = Mathf.Clamp01(elapsed / FadeInDuration);
             SetAlpha(t);
             yield return null;

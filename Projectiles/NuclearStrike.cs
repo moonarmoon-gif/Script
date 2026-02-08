@@ -7,10 +7,6 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
 {
     [Header("Drop Settings")]
     [SerializeField] private float dropSpeed = 5f;
-    [Tooltip("Minimum lifetime before explosion")]
-    [SerializeField] private float minLifetime = 2f;
-    [Tooltip("Maximum lifetime before explosion")]
-    [SerializeField] private float maxLifetime = 5f;
 
     public enum SpriteFacing2D { Right = 0, Up = 90, Left = 180, Down = 270 }
     [Header("Rotation")]
@@ -38,8 +34,25 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     [Tooltip("Tag name for maximum spawn position GameObject (right side)")]
     [SerializeField] private string maxPosTag = "NuclearStrike_MaxPos";
 
+    [Header("Detonation Area - 6 Point System")]
+    [SerializeField] private string pointATag = "HellBeam_PointA";
+    [SerializeField] private string pointBTag = "HellBeam_PointB";
+    [SerializeField] private string pointCTag = "HellBeam_PointC";
+    [SerializeField] private string pointDTag = "HellBeam_PointD";
+    [SerializeField] private string pointETag = "HellBeam_PointE";
+    [SerializeField] private string pointFTag = "HellBeam_PointF";
+
+    public float minStrikeDistance = 2f;
+
     private Transform minPos;
     private Transform maxPos;
+
+    private Transform pointA;
+    private Transform pointB;
+    private Transform pointC;
+    private Transform pointD;
+    private Transform pointE;
+    private Transform pointF;
 
     // Base values for instant modifier recalculation
     private float baseDropSpeed;
@@ -83,6 +96,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     [SerializeField] private GameObject shadowPrefab;
     [Tooltip("Offset for shadow position (X, Y)")]
     [SerializeField] private Vector2 shadowOffset = Vector2.zero;
+    public float ShadowFadeAwayDuration = 0.5f;
 
     [System.Serializable]
     public class SizeOffsetPair
@@ -121,14 +135,24 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     [Tooltip("Additional projectile count for Enhanced Variant 1 (e.g., 1 = spawn 1 extra)")]
     [SerializeField] public int enhancedProjectileCountBonus = 1;
 
+    [Header("Enhanced Variant 2 - Hell Beam")]
+    public GameObject HellBeamPrefab;
+    public float HellBeamBaseDamage = 100f;
+    public float HellBeamBaseLifetime = 1f;
+    public float HellBeamDamageTickInterval = 0.25f;
+
     private Rigidbody2D _rigidbody2D;
     private AudioSource _audioSource;
     private Collider2D _collider2D;
     private Camera mainCamera;
-    private float actualLifetime;
     private bool hasExploded = false;
     private GameObject shadowInstance;
     private Vector3 landingPosition;
+
+    private Vector2 dropDirection = Vector2.down;
+
+    private static List<Vector3> currentFrameLandingPositions = new List<Vector3>();
+    private static int lastLandingFrame = -1;
 
     // Enhanced system
     private int enhancedVariant = 0; // 0 = basic, 1 = rapid strike, 2-3 = future variants
@@ -196,6 +220,8 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             if (maxPosObj != null) maxPos = maxPosObj.transform;
         }
 
+        FindDetonationAreaPoints();
+
         // Get card-specific modifiers first
         ProjectileCards card = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
 
@@ -262,7 +288,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             finalCooldown = Mathf.Max(0.1f, finalCooldown);
         }
         int finalManaCost = Mathf.Max(1, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
-        damage += modifiers.damageFlat; // FLAT damage bonus per hit
+        damage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
 
         // Calculate speed increase and animation speed
         float originalDropSpeed = dropSpeed; // Store original BASE speed before ANY modifications
@@ -344,6 +370,21 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             cachedPlayerStats = stats;
         }
 
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null && cachedPlayerStats.projectileCooldownReduction > 0f)
+        {
+            float totalCdr = Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction);
+            effectiveCooldown = finalCooldown / (1f + totalCdr);
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
+
         // Allow the global "enhanced first spawn" reduction system to bypass this
         // internal cooldown gate exactly once for PASSIVE projectile cards.
         bool bypassEnhancedFirstSpawnCooldown = false;
@@ -365,9 +406,9 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             // Check cooldown
             if (!bypassEnhancedFirstSpawnCooldown && lastFireTimes.ContainsKey(prefabKey))
             {
-                if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
+                if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                 {
-                    Debug.Log($"<color=yellow>NuclearStrike on cooldown - {Time.time - lastFireTimes[prefabKey]:F2}s / {finalCooldown}s</color>");
+                    Debug.Log($"<color=yellow>NuclearStrike on cooldown - {GameStateManager.PauseSafeTime - lastFireTimes[prefabKey]:F2}s / {effectiveCooldown}s</color>");
                     Destroy(gameObject);
                     return;
                 }
@@ -383,48 +424,53 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             }
 
             // Record fire time
-            lastFireTimes[prefabKey] = Time.time;
+            lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
         }
         else
         {
             Debug.Log($"<color=gold>NuclearStrike: Skipping cooldown/mana check (multi-projectile spawn)</color>");
         }
 
-        // Determine spawn position
+        float spawnY = spawnPosition.y;
         if (minPos != null && maxPos != null)
         {
-            // Random X position between minPos and maxPos
-            float spawnX = Random.Range(minPos.position.x, maxPos.position.x);
-            // Y position is fixed at minPos/maxPos Y (they should be at same height - top of screen)
-            float spawnY = Mathf.Max(minPos.position.y, maxPos.position.y);
-
-            transform.position = new Vector3(spawnX, spawnY, spawnPosition.z);
+            spawnY = Mathf.Max(minPos.position.y, maxPos.position.y);
         }
-        else
+
+        Vector3 landingSeed = new Vector3(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+        Vector3 chosenLanding;
+        bool picked = TryPickLandingPosition(landingSeed, float.NegativeInfinity, float.PositiveInfinity, out chosenLanding);
+        if (!picked)
         {
-            // Fallback to provided spawn position
-            transform.position = spawnPosition;
+            Transform fallbackPoint = pointA != null ? pointA
+                : (pointB != null ? pointB
+                : (pointC != null ? pointC
+                : (pointD != null ? pointD
+                : (pointE != null ? pointE
+                : pointF))));
+
+            if (fallbackPoint != null)
+            {
+                chosenLanding = new Vector3(fallbackPoint.position.x, fallbackPoint.position.y, spawnPosition.z);
+            }
+            else
+            {
+                chosenLanding = new Vector3(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+            }
         }
 
-        // Apply lifetime reduction to BOTH min and max BEFORE randomizing
-        // Lifetime is divided by speed multiplier to maintain consistent fall distance
+        Vector3 startPosition = new Vector3(chosenLanding.x, spawnY, spawnPosition.z);
+        transform.position = startPosition;
 
-        // Apply speed-based divisor to min/max
-        float adjustedMinLifetime = minLifetime / speedMultiplier;
-        float adjustedMaxLifetime = maxLifetime / speedMultiplier;
+        landingPosition = new Vector3(chosenLanding.x, chosenLanding.y, spawnPosition.z);
+        float travelDistance = Vector2.Distance(startPosition, landingPosition);
+        float safeDropSpeed = Mathf.Max(0.01f, dropSpeed);
+        float estimatedTravelSeconds = travelDistance / safeDropSpeed;
 
-        // NOW randomize between the adjusted values
-        actualLifetime = Random.Range(adjustedMinLifetime, adjustedMaxLifetime);
+        Vector2 dir = (Vector2)(landingPosition - startPosition);
+        dropDirection = dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector2.down;
 
-        Debug.Log($"<color=red>NuclearStrike spawned! Speed={dropSpeed:F1} (base={baseDropSpeed:F1}, multiplier={speedMultiplier:F2}x), Lifetime={actualLifetime:F2}s (original range: {minLifetime:F2}-{maxLifetime:F2}s, adjusted range: {adjustedMinLifetime:F2}-{adjustedMaxLifetime:F2}s, speed divisor={speedMultiplier:F2})</color>");
-
-        // Calculate landing position (where nuclear will explode)
-        // Landing Y = current Y - (dropSpeed * actualLifetime)
-        landingPosition = new Vector3(
-            transform.position.x,
-            transform.position.y - (dropSpeed * actualLifetime),
-            transform.position.z
-        );
+        Debug.Log($"<color=red>NuclearStrike spawned! Speed={dropSpeed:F1} (base={baseDropSpeed:F1}, multiplier={speedMultiplier:F2}x), TravelTime={estimatedTravelSeconds:F2}s</color>");
 
         // Apply shadow offset
         Vector3 shadowPosition = landingPosition + (Vector3)shadowOffset;
@@ -434,22 +480,20 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         {
             shadowInstance = Instantiate(shadowPrefab, shadowPosition, Quaternion.identity);
 
+            Vector3 shadowScale = shadowInstance.transform.localScale;
+            shadowScale.x = explosionRadius;
+            shadowScale.y = explosionRadius;
+            shadowInstance.transform.localScale = shadowScale;
+
             // Get shadow animator and adjust animation speed
             Animator shadowAnimator = shadowInstance.GetComponent<Animator>();
             if (shadowAnimator != null)
             {
-                // Animation speed = 1 / actualLifetime
-                // This makes the animation complete exactly when nuclear lands
-                // Farther drop = longer lifetime = slower animation
-                // Closer drop = shorter lifetime = faster animation
-                float animSpeed = 1f / actualLifetime;
-                shadowAnimator.speed = animSpeed;
+                // Shadow animation uses its configured playback speed.
+                shadowAnimator.speed = 1f;
 
-                Debug.Log($"<color=yellow>Shadow spawned at {shadowPosition} with animation speed {animSpeed:F2}x (lifetime: {actualLifetime:F2}s)</color>");
+                Debug.Log($"<color=yellow>Shadow spawned at {shadowPosition} with animation speed {shadowAnimator.speed:F2}x (travel time: {estimatedTravelSeconds:F2}s)</color>");
             }
-
-            // Destroy shadow when nuclear explodes
-            Destroy(shadowInstance, actualLifetime);
         }
 
         // Play drop sound
@@ -463,7 +507,6 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
 
         // Start dropping and explosion countdown
         StartCoroutine(DropRoutine());
-        StartCoroutine(ExplodeAfterLifetime());
     }
 
     private void Update()
@@ -479,7 +522,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         float desired = targetAngle + facingCorrection + additionalRotationOffsetDeg;
 
         float current = transform.eulerAngles.z;
-        float step = maxRotationDegreesPerSecond * Time.deltaTime;
+        float step = maxRotationDegreesPerSecond * GameStateManager.GetPauseSafeDeltaTime();
         float newAngle = Mathf.MoveTowardsAngle(current, desired, step);
         transform.rotation = Quaternion.Euler(0f, 0f, newAngle);
     }
@@ -488,32 +531,208 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     {
         while (!hasExploded)
         {
-            // Move straight down
-            _rigidbody2D.velocity = Vector2.down * dropSpeed;
+            float dt = GameStateManager.GetPauseSafeDeltaTime();
+            if (dt > 0f)
+            {
+                transform.position += (Vector3)(dropDirection * dropSpeed * dt);
+            }
+
+            if (_rigidbody2D != null)
+            {
+                _rigidbody2D.velocity = Vector2.zero;
+            }
 
             // Set initial rotation if not keeping it
             if (!keepInitialRotation && rotateToVelocity)
             {
-                float baseAngle = Mathf.Atan2(-1f, 0f) * Mathf.Rad2Deg; // Down direction
+                float baseAngle = Mathf.Atan2(dropDirection.y, dropDirection.x) * Mathf.Rad2Deg;
                 float facingCorrection = (int)spriteFacing;
                 float finalAngle = baseAngle + facingCorrection + additionalRotationOffsetDeg;
                 transform.rotation = Quaternion.Euler(0f, 0f, finalAngle);
+            }
+
+            Vector2 toTarget = (Vector2)(landingPosition - transform.position);
+            if (toTarget.sqrMagnitude <= 0.0025f || Vector2.Dot(toTarget, dropDirection) <= 0f)
+            {
+                transform.position = landingPosition;
+                if (_rigidbody2D != null)
+                {
+                    _rigidbody2D.velocity = Vector2.zero;
+                }
+                Explode();
+                yield break;
             }
 
             yield return null;
         }
     }
 
-    private IEnumerator ExplodeAfterLifetime()
+    private void FindDetonationAreaPoints()
     {
-        // Wait until the projectile reaches its landing position (actualLifetime)
-        yield return new WaitForSeconds(actualLifetime);
-
-        // Trigger the explosion visuals and schedule damage application.
-        if (!hasExploded)
+        if (!string.IsNullOrEmpty(pointATag))
         {
-            Explode();
+            GameObject o = GameObject.FindGameObjectWithTag(pointATag);
+            if (o != null) pointA = o.transform;
         }
+        if (!string.IsNullOrEmpty(pointBTag))
+        {
+            GameObject o = GameObject.FindGameObjectWithTag(pointBTag);
+            if (o != null) pointB = o.transform;
+        }
+        if (!string.IsNullOrEmpty(pointCTag))
+        {
+            GameObject o = GameObject.FindGameObjectWithTag(pointCTag);
+            if (o != null) pointC = o.transform;
+        }
+        if (!string.IsNullOrEmpty(pointDTag))
+        {
+            GameObject o = GameObject.FindGameObjectWithTag(pointDTag);
+            if (o != null) pointD = o.transform;
+        }
+        if (!string.IsNullOrEmpty(pointETag))
+        {
+            GameObject o = GameObject.FindGameObjectWithTag(pointETag);
+            if (o != null) pointE = o.transform;
+        }
+        if (!string.IsNullOrEmpty(pointFTag))
+        {
+            GameObject o = GameObject.FindGameObjectWithTag(pointFTag);
+            if (o != null) pointF = o.transform;
+        }
+    }
+
+    private bool TryPickLandingPosition(Vector3 startPosition, float spawnMinX, float spawnMaxX, out Vector3 landing)
+    {
+        landing = startPosition;
+
+        List<Vector2> poly = new List<Vector2>(6);
+        if (pointA != null) poly.Add(pointA.position);
+        if (pointB != null) poly.Add(pointB.position);
+        if (pointC != null) poly.Add(pointC.position);
+        if (pointD != null) poly.Add(pointD.position);
+        if (pointE != null) poly.Add(pointE.position);
+        if (pointF != null) poly.Add(pointF.position);
+
+        if (poly.Count < 3)
+        {
+            return false;
+        }
+
+        float minX = poly[0].x;
+        float maxX = poly[0].x;
+        float minY = poly[0].y;
+        float maxY = poly[0].y;
+
+        for (int i = 1; i < poly.Count; i++)
+        {
+            Vector2 v = poly[i];
+            if (v.x < minX) minX = v.x;
+            if (v.x > maxX) maxX = v.x;
+            if (v.y < minY) minY = v.y;
+            if (v.y > maxY) maxY = v.y;
+        }
+
+        float sampleMinX = minX;
+        float sampleMaxX = maxX;
+        if (!float.IsNegativeInfinity(spawnMinX)) sampleMinX = Mathf.Max(sampleMinX, spawnMinX);
+        if (!float.IsPositiveInfinity(spawnMaxX)) sampleMaxX = Mathf.Min(sampleMaxX, spawnMaxX);
+
+        if (sampleMinX > sampleMaxX)
+        {
+            return false;
+        }
+
+        if (Time.frameCount != lastLandingFrame)
+        {
+            currentFrameLandingPositions.Clear();
+            lastLandingFrame = Time.frameCount;
+        }
+
+        float minDist = Mathf.Max(0f, minStrikeDistance);
+        float minDistSqr = minDist * minDist;
+
+        int maxAttempts = 60;
+        int strictMinDistAttempts = 40;
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            float x = Random.Range(sampleMinX, sampleMaxX);
+            float y = Random.Range(minY, maxY);
+            Vector2 p = new Vector2(x, y);
+
+            if (!IsPointInsidePolygon(p, poly))
+            {
+                continue;
+            }
+
+            Vector3 candidate = new Vector3(x, y, startPosition.z);
+
+            if (attempt < strictMinDistAttempts && minDistSqr > 0f)
+            {
+                bool tooClose = false;
+                for (int i = 0; i < currentFrameLandingPositions.Count; i++)
+                {
+                    Vector3 other = currentFrameLandingPositions[i];
+                    if ((candidate - other).sqrMagnitude < minDistSqr)
+                    {
+                        tooClose = true;
+                        break;
+                    }
+                }
+
+                if (tooClose)
+                {
+                    continue;
+                }
+            }
+
+            currentFrameLandingPositions.Add(candidate);
+            landing = candidate;
+            return true;
+        }
+
+        List<Vector2> fallbackCandidates = null;
+        for (int i = 0; i < poly.Count; i++)
+        {
+            Vector2 v = poly[i];
+            if (v.x < sampleMinX || v.x > sampleMaxX)
+            {
+                continue;
+            }
+
+            if (fallbackCandidates == null) fallbackCandidates = new List<Vector2>();
+            fallbackCandidates.Add(v);
+        }
+
+        if (fallbackCandidates != null && fallbackCandidates.Count > 0)
+        {
+            Vector2 v = fallbackCandidates[Random.Range(0, fallbackCandidates.Count)];
+            Vector3 candidate = new Vector3(v.x, v.y, startPosition.z);
+            currentFrameLandingPositions.Add(candidate);
+            landing = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsPointInsidePolygon(Vector2 p, List<Vector2> poly)
+    {
+        bool inside = false;
+        int count = poly.Count;
+        for (int i = 0, j = count - 1; i < count; j = i++)
+        {
+            Vector2 a = poly[i];
+            Vector2 b = poly[j];
+
+            bool intersect = ((a.y > p.y) != (b.y > p.y)) &&
+                             (p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y + 0.000001f) + a.x);
+            if (intersect)
+            {
+                inside = !inside;
+            }
+        }
+
+        return inside;
     }
 
     private void Explode()
@@ -616,6 +835,12 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
 
         // Destroy the missile immediately on impact. Any delayed damage/effect
         // timing is handled by NuclearStrikeDamageRunner.
+        if (shadowInstance != null)
+        {
+            ShadowSelfDestruct selfDestruct = shadowInstance.AddComponent<ShadowSelfDestruct>();
+            selfDestruct.Initialize(ShadowFadeAwayDuration);
+            shadowInstance = null;
+        }
         Destroy(gameObject);
     }
 
@@ -767,7 +992,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         {
             if (explosionEffectDelay > 0f)
             {
-                yield return new WaitForSeconds(explosionEffectDelay);
+                yield return GameStateManager.WaitForPauseSafeSeconds(explosionEffectDelay);
             }
 
             if (hasExplosionEffectConfig)
@@ -808,7 +1033,8 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             }
             else
             {
-                Destroy(explosion, explosionEffectDuration);
+                ExplosionSelfDestruct selfDestruct = explosion.AddComponent<ExplosionSelfDestruct>();
+                selfDestruct.Initialize(explosionEffectDuration, 0f);
             }
         }
 
@@ -816,7 +1042,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         {
             if (damageDelay > 0f)
             {
-                yield return new WaitForSeconds(damageDelay);
+                yield return GameStateManager.WaitForPauseSafeSeconds(damageDelay);
             }
             else
             {
@@ -862,7 +1088,9 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                         {
                             DamageNumberManager.DamageType dmgType = projectileType == ProjectileType.Fire
                                 ? DamageNumberManager.DamageType.Fire
-                                : DamageNumberManager.DamageType.Ice;
+                                : (projectileType == ProjectileType.Thunder || projectileType == ProjectileType.ThunderDisc
+                                    ? DamageNumberManager.DamageType.Thunder
+                                    : DamageNumberManager.DamageType.Ice);
                             enemyHealth.SetLastIncomingDamageType(dmgType);
                         }
                     }
@@ -914,7 +1142,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     {
         if (damageDelay > 0f)
         {
-            yield return new WaitForSeconds(damageDelay);
+            yield return GameStateManager.WaitForPauseSafeSeconds(damageDelay);
         }
 
         // Find all enemies in explosion radius at the time damage is applied
@@ -964,7 +1192,9 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                     {
                         DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire
                             ? DamageNumberManager.DamageType.Fire
-                            : DamageNumberManager.DamageType.Ice;
+                            : (projectileType == ProjectileType.Thunder || projectileType == ProjectileType.ThunderDisc
+                                ? DamageNumberManager.DamageType.Thunder
+                                : DamageNumberManager.DamageType.Ice);
                         enemyHealth.SetLastIncomingDamageType(damageType);
                     }
                 }
@@ -1122,8 +1352,8 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         }
         else
         {
-            // Destroy after duration (Unity automatically destroys all children)
-            Destroy(explosion, explosionEffectDuration);
+            ExplosionSelfDestruct selfDestruct = explosion.AddComponent<ExplosionSelfDestruct>();
+            selfDestruct.Initialize(explosionEffectDuration, 0f);
         }
     }
 
@@ -1133,7 +1363,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         float waitTime = totalDuration - fadeOutDuration;
         if (waitTime > 0f)
         {
-            yield return new WaitForSeconds(waitTime);
+            yield return GameStateManager.WaitForPauseSafeSeconds(waitTime);
         }
 
         // Get all sprite renderers and particle systems
@@ -1151,7 +1381,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         float elapsed = 0f;
         while (elapsed < fadeOutDuration && explosion != null)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float alpha = 1f - (elapsed / fadeOutDuration);
 
             // Fade sprites
@@ -1200,7 +1430,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
 
     private IEnumerator SpawnDelayedExplosionEffect(Vector3 position, float delay)
     {
-        yield return new WaitForSeconds(delay);
+        yield return GameStateManager.WaitForPauseSafeSeconds(delay);
 
         if (explosionEffectPrefab != null)
         {
@@ -1253,59 +1483,126 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         }
 
         // CRITICAL: Destroy shadow when projectile is destroyed
-        if (shadowInstance != null)
+        if (shadowInstance != null && !hasExploded)
         {
-            Destroy(shadowInstance);
-            Debug.Log($"<color=yellow>NuclearStrike destroyed - cleaning up shadow</color>");
+            ShadowSelfDestruct selfDestruct = shadowInstance.AddComponent<ShadowSelfDestruct>();
+            selfDestruct.Initialize(ShadowFadeAwayDuration);
+            shadowInstance = null;
+            Debug.Log($"<color=yellow>NuclearStrike destroyed - fading out shadow</color>");
         }
     }
-
-    /// <summary>
-    /// Apply modifiers instantly (IInstantModifiable interface)
-    /// </summary>
-    public void ApplyInstantModifiers(CardModifierStats modifiers)
-    {
-        Debug.Log($"<color=lime>╔═══ NUCLEARSTRIKE INSTANT MODIFIERS ═══╗</color>");
-
-        // Recalculate drop speed
-        float newSpeed = baseDropSpeed + modifiers.speedIncrease;
-        if (newSpeed != dropSpeed)
-        {
-            dropSpeed = newSpeed;
-            Debug.Log($"<color=lime>  Drop Speed: {baseDropSpeed:F2} + {modifiers.speedIncrease:F2} = {dropSpeed:F2}</color>");
-        }
-
-        // Recalculate explosion radius
-        float newRadius = (baseExplosionRadius + modifiers.explosionRadiusBonus) * modifiers.explosionRadiusMultiplier;
-        if (newRadius != explosionRadius)
-        {
-            explosionRadius = newRadius;
-            Debug.Log($"<color=lime>  Explosion Radius: ({baseExplosionRadius:F2} + {modifiers.explosionRadiusBonus:F2}) * {modifiers.explosionRadiusMultiplier:F2}x = {explosionRadius:F2}</color>");
-        }
-
-        // Recalculate damage
-        float newDamage = baseDamage * modifiers.damageMultiplier;
-        if (newDamage != damage)
-        {
-            damage = newDamage;
-            Debug.Log($"<color=lime>  Damage: {baseDamage:F2} * {modifiers.damageMultiplier:F2}x = {damage:F2}</color>");
-        }
-
-        // Recalculate size
-        if (modifiers.sizeMultiplier != 1f)
-        {
-            transform.localScale = baseScale * modifiers.sizeMultiplier;
-            Debug.Log($"<color=lime>  Size: {baseScale} * {modifiers.sizeMultiplier:F2}x = {transform.localScale}</color>");
-        }
-
-        Debug.Log($"<color=lime>╚═══════════════════════════════════════╝</color>");
-    }
-}
 
 /// <summary>
-/// Helper component that makes explosion effects destroy themselves independently
-/// This prevents explosions from persisting when NuclearStrike is destroyed
+/// Apply modifiers instantly (IInstantModifiable interface)
 /// </summary>
+public void ApplyInstantModifiers(CardModifierStats modifiers)
+{
+Debug.Log($"<color=lime>╔═══ NUCLEARSTRIKE INSTANT MODIFIERS ═══╗</color>");
+
+// Recalculate drop speed
+float newSpeed = baseDropSpeed + modifiers.speedIncrease;
+if (newSpeed != dropSpeed)
+{
+    dropSpeed = newSpeed;
+    Debug.Log($"<color=lime>  Drop Speed: {baseDropSpeed:F2} + {modifiers.speedIncrease:F2} = {dropSpeed:F2}</color>");
+}
+
+// Recalculate explosion radius
+float newRadius = (baseExplosionRadius + modifiers.explosionRadiusBonus) * modifiers.explosionRadiusMultiplier;
+if (newRadius != explosionRadius)
+{
+    explosionRadius = newRadius;
+    Debug.Log($"<color=lime>  Explosion Radius: ({baseExplosionRadius:F2} + {modifiers.explosionRadiusBonus:F2}) * {modifiers.explosionRadiusMultiplier:F2}x = {explosionRadius:F2}</color>");
+}
+
+ if (shadowInstance != null && !hasExploded)
+ {
+     Vector3 shadowScale = shadowInstance.transform.localScale;
+     shadowScale.x = explosionRadius;
+     shadowScale.y = explosionRadius;
+     shadowInstance.transform.localScale = shadowScale;
+ }
+
+// Recalculate damage
+float newDamage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
+if (newDamage != damage)
+{
+    damage = newDamage;
+    Debug.Log($"<color=lime>  Damage: ({baseDamage:F2} + {modifiers.damageFlat:F2}) * {modifiers.damageMultiplier:F2}x = {damage:F2}</color>");
+}
+
+// Recalculate size
+if (modifiers.sizeMultiplier != 1f)
+{
+    transform.localScale = baseScale * modifiers.sizeMultiplier;
+    Debug.Log($"<color=lime>  Size: {baseScale} * {modifiers.sizeMultiplier:F2}x = {transform.localScale}</color>");
+}
+
+Debug.Log($"<color=lime>╚═══════════════════════════════════════╝</color>");
+}
+
+}
+
+public class ShadowSelfDestruct : MonoBehaviour
+{
+private float fadeOutDuration;
+
+public void Initialize(float fadeOut)
+{
+    fadeOutDuration = Mathf.Max(0f, fadeOut);
+    StartCoroutine(FadeAndDestroy());
+}
+
+private IEnumerator FadeAndDestroy()
+{
+    if (fadeOutDuration <= 0f)
+    {
+        Destroy(gameObject);
+        yield break;
+    }
+
+    SpriteRenderer[] sprites = GetComponentsInChildren<SpriteRenderer>();
+    ParticleSystem[] particles = GetComponentsInChildren<ParticleSystem>();
+
+    Color[] originalColors = new Color[sprites.Length];
+    for (int i = 0; i < sprites.Length; i++)
+    {
+        originalColors[i] = sprites[i].color;
+    }
+
+    float elapsed = 0f;
+    while (elapsed < fadeOutDuration)
+    {
+        elapsed += GameStateManager.GetPauseSafeDeltaTime();
+        float alpha = 1f - (elapsed / fadeOutDuration);
+
+        for (int i = 0; i < sprites.Length; i++)
+        {
+            if (sprites[i] != null)
+            {
+                Color c = originalColors[i];
+                c.a = originalColors[i].a * alpha;
+                sprites[i].color = c;
+            }
+        }
+
+        foreach (var ps in particles)
+        {
+            if (ps != null)
+            {
+                var main = ps.main;
+                Color c = main.startColor.color;
+                c.a *= alpha;
+                main.startColor = c;
+            }
+        }
+
+        yield return null;
+    }
+
+    Destroy(gameObject);
+}
+}
 public class ExplosionSelfDestruct : MonoBehaviour
 {
     private float totalDuration;
@@ -1320,32 +1617,27 @@ public class ExplosionSelfDestruct : MonoBehaviour
 
     private IEnumerator FadeAndDestroy()
     {
-        // Wait until it's time to start fading
         float waitTime = totalDuration - fadeOutDuration;
         if (waitTime > 0f)
         {
-            yield return new WaitForSeconds(waitTime);
+            yield return GameStateManager.WaitForPauseSafeSeconds(waitTime);
         }
 
-        // Get all sprite renderers and particle systems
         SpriteRenderer[] sprites = GetComponentsInChildren<SpriteRenderer>();
         ParticleSystem[] particles = GetComponentsInChildren<ParticleSystem>();
 
-        // Store original alpha values
         Color[] originalColors = new Color[sprites.Length];
         for (int i = 0; i < sprites.Length; i++)
         {
             originalColors[i] = sprites[i].color;
         }
 
-        // Fade out
         float elapsed = 0f;
         while (elapsed < fadeOutDuration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float alpha = 1f - (elapsed / fadeOutDuration);
 
-            // Fade sprites
             for (int i = 0; i < sprites.Length; i++)
             {
                 if (sprites[i] != null)
@@ -1356,7 +1648,6 @@ public class ExplosionSelfDestruct : MonoBehaviour
                 }
             }
 
-            // Fade particles
             foreach (var ps in particles)
             {
                 if (ps != null)
@@ -1371,8 +1662,6 @@ public class ExplosionSelfDestruct : MonoBehaviour
             yield return null;
         }
 
-        // Destroy explosion GameObject (this destroys all children automatically)
         Destroy(gameObject);
-        Debug.Log($"<color=yellow>Explosion effect destroyed by ExplosionSelfDestruct</color>");
     }
 }

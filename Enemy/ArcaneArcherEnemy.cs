@@ -89,6 +89,7 @@ public class ArcaneArcherEnemy : MonoBehaviour
     // Knockback
     private Vector2 knockbackVelocity = Vector2.zero;
     private float knockbackEndTime = 0f;
+    private StaticStatus cachedStaticStatus;
 
     // FirePoint management
     private Vector3 firePointBaseLocalPosition;
@@ -171,6 +172,11 @@ public class ArcaneArcherEnemy : MonoBehaviour
         shootActionToken++;
     }
 
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
+    }
+
     void OnEnable()
     {
         if (health != null)
@@ -195,6 +201,7 @@ public class ArcaneArcherEnemy : MonoBehaviour
     void Update()
     {
         if (isDead) return;
+        if (IsStaticFrozen()) return;
 
         bool playerDead = player == null || 
                          (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled);
@@ -232,6 +239,7 @@ public class ArcaneArcherEnemy : MonoBehaviour
         }
         
         if (isDead) return;
+        if (IsStaticFrozen()) return;
 
         // Check if player is dead
         bool playerDead = player == null || 
@@ -262,6 +270,17 @@ public class ArcaneArcherEnemy : MonoBehaviour
         if (isDead)
         {
             rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f && Time.time < knockbackEndTime)
+            {
+                knockbackEndTime += dt;
+            }
             return;
         }
 
@@ -340,7 +359,10 @@ public class ArcaneArcherEnemy : MonoBehaviour
             }
 
             isInPreAttackDelay = true;
-            yield return new WaitForSeconds(delay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                delay,
+                () => isDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
             isInPreAttackDelay = false;
         }
 
@@ -359,7 +381,10 @@ public class ArcaneArcherEnemy : MonoBehaviour
         // Wait until spawn time (if positive)
         if (spawnTime > 0)
         {
-            yield return new WaitForSeconds(spawnTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                spawnTime,
+                () => isDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
         }
 
         if (isDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled))
@@ -373,8 +398,32 @@ public class ArcaneArcherEnemy : MonoBehaviour
         // Spawn projectile
         if (projectilePrefab != null && player != null)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
+
+            if (isDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled))
+            {
+                isShootingProjectile = false;
+                canShoot = true;
+                shootRoutine = null;
+                yield break;
+            }
+
             Vector3 spawnPos = firePoint != null ? firePoint.position : transform.position;
-            Vector2 direction = (player.position - spawnPos).normalized;
+
+            Vector3 targetPos = player.position;
+            Collider2D playerCol = player.GetComponent<Collider2D>();
+            if (playerCol == null)
+            {
+                playerCol = player.GetComponentInChildren<Collider2D>();
+            }
+            if (playerCol != null)
+            {
+                targetPos = playerCol.bounds.center;
+            }
+
+            Vector2 direction = ((Vector2)targetPos - (Vector2)spawnPos).normalized;
             
             GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
 
@@ -389,7 +438,10 @@ public class ArcaneArcherEnemy : MonoBehaviour
         float remainingAnimTime = attackAnimationTime - spawnTime;
         if (remainingAnimTime > 0)
         {
-            yield return new WaitForSeconds(remainingAnimTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingAnimTime,
+                () => isDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
         }
 
         // Attack animation finished - set to idle
@@ -407,7 +459,10 @@ public class ArcaneArcherEnemy : MonoBehaviour
             {
                 cooldown = 0f;
             }
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
         }
 
         canShoot = true;
@@ -489,7 +544,10 @@ public class ArcaneArcherEnemy : MonoBehaviour
 
     IEnumerator DeathCleanupRoutine()
     {
-        yield return new WaitForSeconds(deathCleanupDelay);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            deathCleanupDelay,
+            () => false,
+            () => IsStaticFrozen());
 
         // Fade out
         if (sr != null)
@@ -500,7 +558,7 @@ public class ArcaneArcherEnemy : MonoBehaviour
 
             while (elapsed < fadeTime)
             {
-                elapsed += Time.deltaTime;
+                elapsed += GameStateManager.GetPauseSafeDeltaTime();
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / fadeTime);
                 sr.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;

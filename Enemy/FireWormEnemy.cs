@@ -383,7 +383,19 @@ public class FireWormEnemy : MonoBehaviour
         if (projectilePrefab != null && player != null)
         {
             Vector3 spawnPos = firePoint != null ? firePoint.position : transform.position;
-            Vector2 direction = (player.position - spawnPos).normalized;
+
+            Vector3 targetPos = player.position;
+            Collider2D playerCol = player.GetComponent<Collider2D>();
+            if (playerCol == null)
+            {
+                playerCol = player.GetComponentInChildren<Collider2D>();
+            }
+            if (playerCol != null)
+            {
+                targetPos = playerCol.bounds.center;
+            }
+
+            Vector2 direction = ((Vector2)targetPos - (Vector2)spawnPos).normalized;
             
             GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
 

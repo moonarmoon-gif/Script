@@ -15,6 +15,9 @@ public class EnemyExpData : MonoBehaviour
     [Header("Soul Value Settings")]
     [SerializeField] private float soulValue = 10f;
 
+    [Header("Rarity Settings")]
+    public CardRarity EnemyRarity = CardRarity.Common;
+
     private bool hasStarted = false;
     private float pendingPostScalingExpMultiplier = 1f;
 
@@ -119,13 +122,7 @@ public class EnemyExpData : MonoBehaviour
 
         int baseExp = ExpReward;
 
-        CardRarity rarity = CardRarity.Common;
-        EnemyCardTag tag = GetComponent<EnemyCardTag>();
-        if (tag != null)
-        {
-            rarity = tag.rarity;
-        }
-
+        CardRarity rarity = EnemyRarity;
         int bonusExp = ExtraExpPerRarityFavour.GetBonusExpForRarity(rarity);
         float totalExp = Mathf.Max(0f, baseExp + bonusExp);
         
@@ -185,6 +182,12 @@ public class EnemyExpData : MonoBehaviour
 
         if (FavourExpUI.Instance != null)
         {
+            var manager = CardSelectionManager.Instance;
+            if (manager != null && manager.IsTimedLevelingFavourSystemActive)
+            {
+                return;
+            }
+
             float soul = SoulValue;
             if (soul > 0f)
             {

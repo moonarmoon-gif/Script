@@ -105,6 +105,8 @@ public class ExecutionerEnemy : MonoBehaviour
     private int meleeActionToken = 0;
     private int rangedActionToken = 0;
 
+    private StaticStatus cachedStaticStatus;
+
     // Movement / knockback
     private bool isMoving;
     private Vector2 knockbackVelocity = Vector2.zero;
@@ -217,6 +219,13 @@ public class ExecutionerEnemy : MonoBehaviour
 
     void Update()
     {
+        if (isDead) return;
+
+        if (IsStaticFrozen())
+        {
+            return;
+        }
+
         if (projectileCooldownTimer > 0f)
         {
             projectileCooldownTimer -= Time.deltaTime;
@@ -226,7 +235,6 @@ public class ExecutionerEnemy : MonoBehaviour
             }
         }
 
-        if (isDead) return;
 
         bool playerDead = player == null ||
                           (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled);
@@ -282,6 +290,13 @@ public class ExecutionerEnemy : MonoBehaviour
         if (isDead)
         {
             rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            isMoving = false;
             return;
         }
 
@@ -372,7 +387,10 @@ public class ExecutionerEnemy : MonoBehaviour
         float firstDelay = Mathf.Max(0f, firstAttackDamageDelayV2);
         if (firstDelay > 0f)
         {
-            yield return new WaitForSeconds(firstDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstDelay,
+                () => isDead || myToken != meleeActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
         }
 
         if (isDead || myToken != meleeActionToken)
@@ -384,6 +402,10 @@ public class ExecutionerEnemy : MonoBehaviour
             attackRoutine = null;
             yield break;
         }
+
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || myToken != meleeActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+            () => IsStaticFrozen());
 
         if (!DealMeleeDamage(firstAttackDamageV2))
         {
@@ -398,11 +420,18 @@ public class ExecutionerEnemy : MonoBehaviour
         float deltaSecond = Mathf.Max(0f, secondAttackDamageDelayV2 - firstAttackDamageDelayV2);
         if (deltaSecond > 0f)
         {
-            yield return new WaitForSeconds(deltaSecond);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                deltaSecond,
+                () => isDead || myToken != meleeActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
         }
 
         if (!isDead && myToken == meleeActionToken)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || myToken != meleeActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
+
             DealMeleeDamage(secondAttackDamageV2);
         }
 
@@ -410,7 +439,10 @@ public class ExecutionerEnemy : MonoBehaviour
         float remainingTime = attackDuration - totalDamageTime;
         if (remainingTime > 0f)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || myToken != meleeActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attack", false);
@@ -431,7 +463,10 @@ public class ExecutionerEnemy : MonoBehaviour
             {
                 cooldown = 0f;
             }
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || myToken != meleeActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
             attackOnCooldown = false;
             animator.SetBool("idle", false);
         }
@@ -493,7 +528,10 @@ public class ExecutionerEnemy : MonoBehaviour
         if (preRangedAttackDelayV2 > 0f)
         {
             isInPreRangedDelay = true;
-            yield return new WaitForSeconds(preRangedAttackDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                preRangedAttackDelayV2,
+                () => isDead || myToken != rangedActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
             isInPreRangedDelay = false;
         }
 
@@ -513,7 +551,10 @@ public class ExecutionerEnemy : MonoBehaviour
         float spawnTime = rangedAttackAnimationTime + projectileSpawnTimingV2;
         if (spawnTime > 0f)
         {
-            yield return new WaitForSeconds(spawnTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                spawnTime,
+                () => isDead || myToken != rangedActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
         }
 
         if (isDead || myToken != rangedActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled))
@@ -527,10 +568,26 @@ public class ExecutionerEnemy : MonoBehaviour
 
         if (!isDead && projectilePrefab != null && player != null)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || myToken != rangedActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
+
             UpdateFirePointPosition();
 
             Vector3 spawnPos = firePoint != null ? firePoint.position : transform.position;
-            Vector2 dir = ((Vector2)player.position - (Vector2)spawnPos).normalized;
+
+            Vector3 targetPos = player.position;
+            Collider2D playerCol = player.GetComponent<Collider2D>();
+            if (playerCol == null)
+            {
+                playerCol = player.GetComponentInChildren<Collider2D>();
+            }
+            if (playerCol != null)
+            {
+                targetPos = playerCol.bounds.center;
+            }
+
+            Vector2 dir = ((Vector2)targetPos - (Vector2)spawnPos).normalized;
 
             GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
 
@@ -543,7 +600,10 @@ public class ExecutionerEnemy : MonoBehaviour
         float remainingAnimTime = rangedAttackAnimationTime - spawnTime;
         if (remainingAnimTime > 0f)
         {
-            yield return new WaitForSeconds(remainingAnimTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingAnimTime,
+                () => isDead || myToken != rangedActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attackfar", false);
@@ -566,7 +626,10 @@ public class ExecutionerEnemy : MonoBehaviour
         if (postRangedAttackIdleDuration > 0f)
         {
             isInPostRangedCooldown = true;
-            yield return new WaitForSeconds(postRangedAttackIdleDuration);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                postRangedAttackIdleDuration,
+                () => isDead || myToken != rangedActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
+                () => IsStaticFrozen());
             isInPostRangedCooldown = false;
         }
 
@@ -766,5 +829,10 @@ public class ExecutionerEnemy : MonoBehaviour
         {
             // Physical contact with player
         }
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 }

@@ -64,7 +64,7 @@ public class AbsorptionPerTimeFavour : FavourEffect
 
         // Schedule the first periodic tick.
         float interval = Mathf.Max(0f, Interval);
-        nextTickTime = interval > 0f ? Time.time + interval : float.PositiveInfinity;
+        nextTickTime = interval > 0f ? GameStateManager.PauseSafeTime + interval : float.PositiveInfinity;
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -107,7 +107,7 @@ public class AbsorptionPerTimeFavour : FavourEffect
             return;
         }
 
-        if (Time.time < nextTickTime)
+        if (GameStateManager.PauseSafeTime < nextTickTime)
         {
             return;
         }
@@ -116,7 +116,7 @@ public class AbsorptionPerTimeFavour : FavourEffect
         if (existing >= currentMaxStacks)
         {
             // Already at or above cap; just schedule the next check.
-            nextTickTime = Time.time + interval;
+            nextTickTime = GameStateManager.PauseSafeTime + interval;
             return;
         }
 
@@ -127,6 +127,6 @@ public class AbsorptionPerTimeFavour : FavourEffect
             statusController.AddStatus(StatusId.Absorption, toAdd, -1f);
         }
 
-        nextTickTime = Time.time + interval;
+        nextTickTime = GameStateManager.PauseSafeTime + interval;
     }
 }

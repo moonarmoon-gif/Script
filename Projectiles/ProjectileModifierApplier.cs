@@ -23,6 +23,8 @@ public class ProjectileModifierApplier : MonoBehaviour
         
         // Get per-card modifiers
         CardModifierStats modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
+
+        ProjectileCardModifiers.ApplyStatusChanceModifiersToProjectile(projectile, modifiers);
         
         // Check if this is an ElementalBeam (doesn't use piercing)
         ElementalBeam beam = projectile.GetComponent<ElementalBeam>();

@@ -58,7 +58,7 @@ public class SwipeDetector : MonoBehaviour
     private void StartSwipe(Vector2 position)
     {
         startPosition = position;
-        startTime = Time.time;
+        startTime = GameStateManager.PauseSafeTime;
         isSwiping = true;
     }
     
@@ -71,7 +71,7 @@ public class SwipeDetector : MonoBehaviour
     {
         if (!isSwiping) return;
         
-        float swipeTime = Time.time - startTime;
+        float swipeTime = GameStateManager.PauseSafeTime - startTime;
         float swipeDistance = Vector2.Distance(startPosition, endPosition);
         
         // Check if it's a valid swipe

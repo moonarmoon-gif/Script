@@ -106,6 +106,8 @@ public class DeathBringerEnemy : MonoBehaviour
     private int attackActionToken = 0;
     private int spellActionToken = 0;
 
+    private StaticStatus cachedStaticStatus;
+
     // Cache original bodyType to restore after teleport locks.
     private RigidbodyType2D originalBodyType;
     private float originalMass;
@@ -237,6 +239,11 @@ public class DeathBringerEnemy : MonoBehaviour
     void Update()
     {
         if (isDead) return;
+
+        if (IsStaticFrozen())
+        {
+            return;
+        }
 
         if (isPlayerDead || (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead))
         {
@@ -423,6 +430,18 @@ public class DeathBringerEnemy : MonoBehaviour
             return;
         }
 
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                knockbackEndTime += dt;
+            }
+            return;
+        }
+
         if (isPlayerDead || (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead))
         {
             ForceIdleState();
@@ -506,7 +525,10 @@ public class DeathBringerEnemy : MonoBehaviour
         animator.SetBool("attackspell", true);
 
         // Wait for attackspell animation to complete
-        yield return new WaitForSeconds(spellAnimationDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            spellAnimationDuration,
+            () => isDead || mySpellToken != spellActionToken,
+            () => IsStaticFrozen());
 
         if (isDead || mySpellToken != spellActionToken)
         {
@@ -523,6 +545,10 @@ public class DeathBringerEnemy : MonoBehaviour
         // IMMEDIATELY spawn spell effect (independent of DeathBringer's actions)
         if (playerDamageable != null && playerDamageable.IsAlive && AdvancedPlayerController.Instance != null)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || mySpellToken != spellActionToken,
+                () => IsStaticFrozen());
+
             Vector3 playerPos = AdvancedPlayerController.Instance.transform.position;
             Vector3 spellPos = playerPos + (Vector3)spellEffectOffset;
 
@@ -542,7 +568,10 @@ public class DeathBringerEnemy : MonoBehaviour
         {
             animator.SetBool("idle", true);
             Debug.Log($"<color=purple>DeathBringer: Idle for {teleportDelay}s before teleport</color>");
-            yield return new WaitForSeconds(teleportDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                teleportDelay,
+                () => isDead || mySpellToken != spellActionToken,
+                () => IsStaticFrozen());
             animator.SetBool("idle", false);
 
             if (isDead || mySpellToken != spellActionToken)
@@ -560,7 +589,10 @@ public class DeathBringerEnemy : MonoBehaviour
         capsuleCollider.enabled = true;
 
         SetTeleportPhysicsLock(true);
-        yield return new WaitForSeconds(teleportAnimationDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            teleportAnimationDuration,
+            () => isDead || mySpellToken != spellActionToken,
+            () => IsStaticFrozen());
         animator.SetBool("teleport", false);
 
         if (isDead || mySpellToken != spellActionToken)
@@ -574,6 +606,9 @@ public class DeathBringerEnemy : MonoBehaviour
         }
 
         // Teleport to player's side
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || mySpellToken != spellActionToken,
+            () => IsStaticFrozen());
         TeleportToPlayerSide();
         lastTeleportTime = Time.time;
 
@@ -582,7 +617,10 @@ public class DeathBringerEnemy : MonoBehaviour
         // Play arrival animation
         animator.SetBool("arrival", true);
         capsuleCollider.enabled = true;
-        yield return new WaitForSeconds(arrivalAnimationDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            arrivalAnimationDuration,
+            () => isDead || mySpellToken != spellActionToken,
+            () => IsStaticFrozen());
         animator.SetBool("arrival", false);
 
         RestoreOriginalMass();
@@ -602,7 +640,10 @@ public class DeathBringerEnemy : MonoBehaviour
         if (postTeleportIdleTime > 0)
         {
             animator.SetBool("idle", true);
-            yield return new WaitForSeconds(postTeleportIdleTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                postTeleportIdleTime,
+                () => isDead || mySpellToken != spellActionToken,
+                () => IsStaticFrozen());
             animator.SetBool("idle", false);
 
             if (isDead || mySpellToken != spellActionToken)
@@ -621,7 +662,10 @@ public class DeathBringerEnemy : MonoBehaviour
         capsuleCollider.enabled = true;
 
         // Start teleport cooldown
-        yield return new WaitForSeconds(teleportCooldown);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            teleportCooldown,
+            () => isDead || mySpellToken != spellActionToken,
+            () => IsStaticFrozen());
         spellOnCooldown = false;
         Debug.Log("<color=purple>DeathBringer: Spell off cooldown!</color>");
     }
@@ -640,7 +684,10 @@ public class DeathBringerEnemy : MonoBehaviour
         Debug.Log("<color=purple>DeathBringer: Casting spell IN PLACE (melee range)!</color>");
         animator.SetBool("attackspell", true);
 
-        yield return new WaitForSeconds(spellAnimationDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            spellAnimationDuration,
+            () => isDead || mySpellToken != spellActionToken,
+            () => IsStaticFrozen());
 
         if (isDead || mySpellToken != spellActionToken)
         {
@@ -656,6 +703,10 @@ public class DeathBringerEnemy : MonoBehaviour
 
         if (playerDamageable != null && playerDamageable.IsAlive && AdvancedPlayerController.Instance != null)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || mySpellToken != spellActionToken,
+                () => IsStaticFrozen());
+
             Vector3 playerPos = AdvancedPlayerController.Instance.transform.position;
             Vector3 spellPos = playerPos + (Vector3)spellEffectOffset;
 
@@ -670,7 +721,10 @@ public class DeathBringerEnemy : MonoBehaviour
         {
             animator.SetBool("idle", true);
             Debug.Log($"<color=purple>DeathBringer: Idle for {teleportDelay}s before teleport</color>");
-            yield return new WaitForSeconds(teleportDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                teleportDelay,
+                () => isDead || mySpellToken != spellActionToken,
+                () => IsStaticFrozen());
             animator.SetBool("idle", false);
 
             if (isDead || mySpellToken != spellActionToken)
@@ -687,7 +741,10 @@ public class DeathBringerEnemy : MonoBehaviour
         capsuleCollider.enabled = true;
 
         SetTeleportPhysicsLock(true);
-        yield return new WaitForSeconds(teleportAnimationDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            teleportAnimationDuration,
+            () => isDead || mySpellToken != spellActionToken,
+            () => IsStaticFrozen());
         animator.SetBool("teleport", false);
 
         if (isDead || mySpellToken != spellActionToken)
@@ -700,6 +757,9 @@ public class DeathBringerEnemy : MonoBehaviour
             yield break;
         }
 
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || mySpellToken != spellActionToken,
+            () => IsStaticFrozen());
         TeleportToOppositeSide();
         lastTeleportTime = Time.time;
 
@@ -707,7 +767,10 @@ public class DeathBringerEnemy : MonoBehaviour
 
         animator.SetBool("arrival", true);
         capsuleCollider.enabled = true;
-        yield return new WaitForSeconds(arrivalAnimationDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            arrivalAnimationDuration,
+            () => isDead || mySpellToken != spellActionToken,
+            () => IsStaticFrozen());
         animator.SetBool("arrival", false);
 
         RestoreOriginalMass();
@@ -725,7 +788,10 @@ public class DeathBringerEnemy : MonoBehaviour
         if (postTeleportIdleTime > 0)
         {
             animator.SetBool("idle", true);
-            yield return new WaitForSeconds(postTeleportIdleTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                postTeleportIdleTime,
+                () => isDead || mySpellToken != spellActionToken,
+                () => IsStaticFrozen());
             animator.SetBool("idle", false);
 
             if (isDead || mySpellToken != spellActionToken)
@@ -742,7 +808,10 @@ public class DeathBringerEnemy : MonoBehaviour
 
         capsuleCollider.enabled = true;
 
-        yield return new WaitForSeconds(teleportCooldown);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            teleportCooldown,
+            () => isDead || mySpellToken != spellActionToken,
+            () => IsStaticFrozen());
         spellOnCooldown = false;
         Debug.Log("<color=purple>DeathBringer: Spell off cooldown!</color>");
     }
@@ -855,7 +924,10 @@ public class DeathBringerEnemy : MonoBehaviour
 
         if (attackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(attackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                attackDamageDelayV2,
+                () => isDead || myAttackToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || myAttackToken != attackActionToken)
@@ -871,6 +943,10 @@ public class DeathBringerEnemy : MonoBehaviour
         if (!hasDealtDamageThisAttack && playerDamageable != null && playerDamageable.IsAlive &&
             AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || myAttackToken != attackActionToken,
+                () => IsStaticFrozen());
+
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -882,7 +958,10 @@ public class DeathBringerEnemy : MonoBehaviour
         float remainingAttackTime = attackDuration - attackDamageDelayV2;
         if (remainingAttackTime > 0f)
         {
-            yield return new WaitForSeconds(remainingAttackTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingAttackTime,
+                () => isDead || myAttackToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attack", false);
@@ -902,13 +981,21 @@ public class DeathBringerEnemy : MonoBehaviour
         }
         if (cooldown > 0f)
         {
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || myAttackToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("idle", false);
 
         attackOnCooldown = false;
         attackRoutine = null;
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void HandleDeath()

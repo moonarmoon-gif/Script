@@ -41,6 +41,7 @@ public class LaserBeamController : MonoBehaviour
     private float lastFireTime;
     private List<LaserBeamProjectile> activeLasers = new List<LaserBeamProjectile>();
     private PlayerMana playerMana;
+    private AdvancedPlayerController advancedPlayerController;
     
     // Public property to check if laser is active
     public bool IsLaserActive => isHolding;
@@ -53,12 +54,29 @@ public class LaserBeamController : MonoBehaviour
         }
         
         playerMana = GetComponent<PlayerMana>();
+        advancedPlayerController = GetComponent<AdvancedPlayerController>();
         
         if (playerMana == null && requireMana)
         {
             Debug.LogWarning("PlayerMana component not found! Laser will fire without mana cost.");
             requireMana = false;
         }
+    }
+
+    private Transform GetEffectiveFirePoint()
+    {
+        if (advancedPlayerController == null)
+        {
+            advancedPlayerController = GetComponent<AdvancedPlayerController>();
+        }
+
+        Transform defaultFirePoint = advancedPlayerController != null ? advancedPlayerController.FirePoint : null;
+        if (defaultFirePoint != null)
+        {
+            return defaultFirePoint;
+        }
+
+        return firePoint != null ? firePoint : transform;
     }
     
     private void Update()
@@ -72,12 +90,12 @@ public class LaserBeamController : MonoBehaviour
             UpdateLaserDirection();
             
             // Fire lasers continuously
-            if (Time.time - holdStartTime >= initialDelay)
+            if (GameStateManager.PauseSafeTime - holdStartTime >= initialDelay)
             {
-                if (Time.time - lastFireTime >= fireInterval)
+                if (GameStateManager.PauseSafeTime - lastFireTime >= fireInterval)
                 {
                     FireLaser();
-                    lastFireTime = Time.time;
+                    lastFireTime = GameStateManager.PauseSafeTime;
                 }
             }
         }
@@ -134,8 +152,8 @@ public class LaserBeamController : MonoBehaviour
         
         isHolding = true;
         holdPosition = screenPosition;
-        holdStartTime = Time.time;
-        lastFireTime = Time.time - fireInterval; // Allow immediate first shot
+        holdStartTime = GameStateManager.PauseSafeTime;
+        lastFireTime = GameStateManager.PauseSafeTime - fireInterval; // Allow immediate first shot
         
         Debug.Log($"<color=yellow>Laser hold started at {screenPosition}</color>");
         
@@ -169,11 +187,7 @@ public class LaserBeamController : MonoBehaviour
             return;
         }
         
-        if (firePoint == null)
-        {
-            Debug.LogError("Fire point not assigned!");
-            return;
-        }
+        Transform effectiveFirePoint = GetEffectiveFirePoint();
         
         if (cam == null)
         {
@@ -194,7 +208,7 @@ public class LaserBeamController : MonoBehaviour
         
         // Convert screen position to world position
         Ray ray = cam.ScreenPointToRay(holdPosition);
-        Plane gamePlane = new Plane(Vector3.forward, firePoint.position.z);
+        Plane gamePlane = new Plane(Vector3.forward, effectiveFirePoint.position.z);
         
         if (!gamePlane.Raycast(ray, out float enter))
         {
@@ -203,10 +217,10 @@ public class LaserBeamController : MonoBehaviour
         }
         
         Vector3 worldPosition = ray.GetPoint(enter);
-        Vector2 direction = (worldPosition - firePoint.position).normalized;
+        Vector2 direction = (worldPosition - effectiveFirePoint.position).normalized;
         
         // Spawn laser
-        GameObject laserObj = Instantiate(laserPrefab, firePoint.position, Quaternion.identity);
+        GameObject laserObj = Instantiate(laserPrefab, effectiveFirePoint.position, Quaternion.identity);
         LaserBeamProjectile laser = laserObj.GetComponent<LaserBeamProjectile>();
         
         if (laser != null)
@@ -225,10 +239,12 @@ public class LaserBeamController : MonoBehaviour
     private void UpdateLaserDirection()
     {
         if (activeLasers.Count == 0) return;
+
+        Transform effectiveFirePoint = GetEffectiveFirePoint();
         
         // Convert screen position to world position
         Ray ray = cam.ScreenPointToRay(holdPosition);
-        Plane gamePlane = new Plane(Vector3.forward, firePoint.position.z);
+        Plane gamePlane = new Plane(Vector3.forward, effectiveFirePoint.position.z);
         
         if (!gamePlane.Raycast(ray, out float enter))
         {
@@ -236,7 +252,7 @@ public class LaserBeamController : MonoBehaviour
         }
         
         Vector3 worldPosition = ray.GetPoint(enter);
-        Vector2 direction = (worldPosition - firePoint.position).normalized;
+        Vector2 direction = (worldPosition - effectiveFirePoint.position).normalized;
         
         // Update direction of the most recent laser
         if (activeLasers.Count > 0)

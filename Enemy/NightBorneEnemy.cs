@@ -73,6 +73,7 @@ public class NightBorneEnemy : MonoBehaviour
     private Coroutine attackRoutine;
     private Vector2 knockbackVelocity = Vector2.zero;
     private float knockbackEndTime = 0f;
+    private StaticStatus cachedStaticStatus;
 
     private int attackActionToken = 0;
 
@@ -126,6 +127,11 @@ public class NightBorneEnemy : MonoBehaviour
         attackActionToken++;
     }
 
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
+    }
+
     void OnEnable() => health.OnDeath += HandleDeath;
 
     void OnDisable()
@@ -142,6 +148,7 @@ public class NightBorneEnemy : MonoBehaviour
     void Update()
     {
         if (isDead) return;
+        if (IsStaticFrozen()) return;
 
         bool isMoving = rb.velocity.sqrMagnitude > 0.0001f && !isAttacking;
         
@@ -237,6 +244,17 @@ public class NightBorneEnemy : MonoBehaviour
             return;
         }
 
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f && Time.time < knockbackEndTime)
+            {
+                knockbackEndTime += dt;
+            }
+            return;
+        }
+
         // Handle knockback
         if (Time.time < knockbackEndTime)
         {
@@ -287,7 +305,10 @@ public class NightBorneEnemy : MonoBehaviour
         // Wait for FIRST damage delay
         if (firstAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(firstAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstAttackDamageDelayV2,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || myToken != attackActionToken)
@@ -312,6 +333,19 @@ public class NightBorneEnemy : MonoBehaviour
                 yield break;
             }
 
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
+
+            if (isDead || myToken != attackActionToken)
+            {
+                animator.SetBool("attack", false);
+                animator.speed = originalSpeed;
+                isAttacking = false;
+                attackRoutine = null;
+                yield break;
+            }
+
             if (playerDamageable != null && playerDamageable.IsAlive && AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
             {
                 Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position; // Use PLAYER position for damage number
@@ -325,7 +359,10 @@ public class NightBorneEnemy : MonoBehaviour
                 {
                     if (restAttackDamageDelayV2 > 0f)
                     {
-                        yield return new WaitForSeconds(restAttackDamageDelayV2);
+                        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                            restAttackDamageDelayV2,
+                            () => isDead || myToken != attackActionToken,
+                            () => IsStaticFrozen());
                     }
                 }
             }
@@ -345,7 +382,10 @@ public class NightBorneEnemy : MonoBehaviour
         float remainingTime = attackDuration - totalDamageTime;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attack", false);
@@ -367,7 +407,10 @@ public class NightBorneEnemy : MonoBehaviour
         }
         if (cooldown > 0f)
         {
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         attackOnCooldown = false;
@@ -405,49 +448,39 @@ public class NightBorneEnemy : MonoBehaviour
     
     IEnumerator DeathDamageRoutine()
     {
-        yield return new WaitForSeconds(deathDamageDelay);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            deathDamageDelay,
+            () => false,
+            () => IsStaticFrozen());
         
-        if (playerDamageable != null && playerDamageable.IsAlive && AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => playerDamageable == null || !playerDamageable.IsAlive || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled,
+            () => IsStaticFrozen());
+
+        if (playerDamageable == null || !playerDamageable.IsAlive || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
         {
-            // Calculate explosion center with offset
-            Vector3 explosionCenter = transform.position + new Vector3(explosionOffsetX, explosionOffsetY, 0f);
-            
-            // Check if player is within explosion radius
-            float distanceToPlayer = Vector3.Distance(explosionCenter, AdvancedPlayerController.Instance.transform.position);
-            
-            if (distanceToPlayer <= explosionRadius)
-            {
-                Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
-                Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - explosionCenter).normalized;
-                PlayerHealth.RegisterPendingAttacker(gameObject);
-                DamageAoeScope.BeginAoeDamage();
-                playerDamageable.TakeDamage(deathDamage, hitPoint, hitNormal);
-                DamageAoeScope.EndAoeDamage();
-                Debug.Log($"<color=red>★ NightBorne dealt {deathDamage} DEATH DAMAGE to player! (Distance: {distanceToPlayer:F2}/{explosionRadius}) ★</color>");
-            }
-            else
-            {
-                Debug.Log($"<color=yellow>NightBorne explosion missed player (Distance: {distanceToPlayer:F2}/{explosionRadius})</color>");
-            }
+            yield break;
         }
-    }
-    
-    private void OnDrawGizmosSelected()
-    {
-        // Draw explosion radius gizmo
-        Gizmos.color = new Color(1f, 0f, 0f, 0.3f); // Red with transparency
+
+        // Calculate explosion center with offset
         Vector3 explosionCenter = transform.position + new Vector3(explosionOffsetX, explosionOffsetY, 0f);
-        Gizmos.DrawSphere(explosionCenter, explosionRadius);
         
-        // Draw wire sphere for better visibility
-        Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(explosionCenter, explosionRadius);
+        // Check if player is within explosion radius
+        float distanceToPlayer = Vector3.Distance(explosionCenter, AdvancedPlayerController.Instance.transform.position);
         
-        // Draw line to explosion center if offset
-        if (explosionOffsetX != 0f || explosionOffsetY != 0f)
+        if (distanceToPlayer <= explosionRadius)
         {
-            Gizmos.color = Color.yellow;
-            Gizmos.DrawLine(transform.position, explosionCenter);
+            Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
+            Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - explosionCenter).normalized;
+            PlayerHealth.RegisterPendingAttacker(gameObject);
+            DamageAoeScope.BeginAoeDamage();
+            playerDamageable.TakeDamage(deathDamage, hitPoint, hitNormal);
+            DamageAoeScope.EndAoeDamage();
+            Debug.Log($"<color=red>★ NightBorne dealt {deathDamage} DEATH DAMAGE to player! (Distance: {distanceToPlayer:F2}/{explosionRadius}) ★</color>");
+        }
+        else
+        {
+            Debug.Log($"<color=yellow>NightBorne explosion missed player (Distance: {distanceToPlayer:F2}/{explosionRadius})</color>");
         }
     }
     
@@ -457,7 +490,10 @@ public class NightBorneEnemy : MonoBehaviour
         float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
         if (animationDelay > 0)
         {
-            yield return new WaitForSeconds(animationDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                animationDelay,
+                () => false,
+                () => IsStaticFrozen());
         }
         
         // Fade out
@@ -468,7 +504,7 @@ public class NightBorneEnemy : MonoBehaviour
             
             while (elapsed < deathFadeOutDuration)
             {
-                elapsed += Time.deltaTime;
+                elapsed += GameStateManager.GetPauseSafeDeltaTime();
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / deathFadeOutDuration);
                 spriteRenderer.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;

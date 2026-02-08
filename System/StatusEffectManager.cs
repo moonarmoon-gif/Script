@@ -159,7 +159,7 @@ public class StatusEffectManager : MonoBehaviour
                 break;
             }
             
-            yield return new WaitForSeconds(burnTickInterval);
+            yield return GameStateManager.WaitForPauseSafeSeconds(burnTickInterval);
             elapsed += burnTickInterval;
         }
         
@@ -175,7 +175,7 @@ public class StatusEffectManager : MonoBehaviour
         SetEnemySpeed(originalSpeed * slowMultiplier);
         Debug.Log($"<color=cyan>SLOW started on {gameObject.name}: Speed reduced to {slowMultiplier * 100}% for {slowDuration}s</color>");
         
-        yield return new WaitForSeconds(slowDuration);
+        yield return GameStateManager.WaitForPauseSafeSeconds(slowDuration);
         
         // Restore original speed
         SetEnemySpeed(originalSpeed);

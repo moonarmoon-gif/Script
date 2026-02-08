@@ -64,7 +64,7 @@ public class AdvancedGestureDetector : MonoBehaviour
         }
         
         // Clean up old swipes from recent list
-        recentSwipes.RemoveAll(t => Time.time - t.startTime > dualSwipeTimeWindow);
+        recentSwipes.RemoveAll(t => GameStateManager.PauseSafeTime - t.startTime > dualSwipeTimeWindow);
     }
     
     private void HandleTouchInput()
@@ -122,7 +122,7 @@ public class AdvancedGestureDetector : MonoBehaviour
         {
             fingerId = fingerId,
             startPosition = position,
-            startTime = Time.time,
+            startTime = GameStateManager.PauseSafeTime,
             isActive = true
         };
         activeTouches[fingerId] = touchData;
@@ -138,7 +138,7 @@ public class AdvancedGestureDetector : MonoBehaviour
         }
 
         TouchData touchData = activeTouches[fingerId];
-        float swipeTime = Time.time - touchData.startTime;
+        float swipeTime = GameStateManager.PauseSafeTime - touchData.startTime;
         float swipeDistance = Vector2.Distance(touchData.startPosition, endPosition);
 
         Debug.Log($"<color=cyan>[GestureDetector] Swipe analysis: Time={swipeTime:F2}s, Distance={swipeDistance:F1}px</color>");

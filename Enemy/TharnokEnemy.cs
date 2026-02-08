@@ -107,6 +107,8 @@ public class TharnokEnemy : MonoBehaviour
     private int meleeActionToken = 0;
     private int rangedActionToken = 0;
 
+    private StaticStatus cachedStaticStatus;
+
     // Movement / knockback
     private bool isMoving;
     private Vector2 knockbackVelocity = Vector2.zero;
@@ -221,16 +223,21 @@ public class TharnokEnemy : MonoBehaviour
 
     void Update()
     {
-        if (projectileCooldownTimer > 0f)
+        if (isDead) return;
+
+        if (IsStaticFrozen())
         {
-            projectileCooldownTimer -= Time.deltaTime;
-            if (projectileCooldownTimer < 0f)
-            {
-                projectileCooldownTimer = 0f;
-            }
+            return;
         }
 
-        if (isDead) return;
+        if (projectileCooldownTimer > 0f)
+        {
+            float dt = GameStateManager.GetPauseSafeDeltaTime();
+            if (dt > 0f)
+            {
+                projectileCooldownTimer = Mathf.Max(0f, projectileCooldownTimer - dt);
+            }
+        }
 
         bool playerDead = player == null ||
                           (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled);
@@ -265,7 +272,7 @@ public class TharnokEnemy : MonoBehaviour
                         || isInPostRangedCooldown;
         animator.SetBool("idle", showIdle);
 
-        if (!isAttacking && !attackOnCooldown && !isShootingProjectile && !isInPostRangedCooldown && player != null)
+        if (!isAttacking && !attackOnCooldown && attackRoutine == null && !isShootingProjectile && !isInPostRangedCooldown && player != null)
         {
             float distance = Vector2.Distance(transform.position, player.position);
             if (distance <= attackRange)
@@ -280,6 +287,17 @@ public class TharnokEnemy : MonoBehaviour
         if (isDead)
         {
             rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                knockbackEndTime += dt;
+            }
             return;
         }
 
@@ -379,6 +397,10 @@ public class TharnokEnemy : MonoBehaviour
         isAttacking = true;
         attackOnCooldown = false;
 
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || isPlayerDead || myToken != meleeActionToken,
+            IsStaticFrozen);
+
         float originalSpeed = animator.speed;
         animator.speed = attackAnimSpeed;
 
@@ -389,7 +411,10 @@ public class TharnokEnemy : MonoBehaviour
         float firstDelay = Mathf.Max(0f, firstAttackDamageDelayV2);
         if (firstDelay > 0f)
         {
-            yield return new WaitForSeconds(firstDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstDelay,
+                () => isDead || isPlayerDead || myToken != meleeActionToken,
+                IsStaticFrozen);
         }
 
         if (isDead || isPlayerDead || myToken != meleeActionToken)
@@ -401,6 +426,10 @@ public class TharnokEnemy : MonoBehaviour
             attackRoutine = null;
             yield break;
         }
+
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || isPlayerDead || myToken != meleeActionToken,
+            IsStaticFrozen);
 
         if (!DealMeleeDamage(firstAttackDamageV2))
         {
@@ -415,11 +444,17 @@ public class TharnokEnemy : MonoBehaviour
         float deltaSecond = Mathf.Max(0f, secondAttackDamageDelayV2 - firstAttackDamageDelayV2);
         if (deltaSecond > 0f)
         {
-            yield return new WaitForSeconds(deltaSecond);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                deltaSecond,
+                () => isDead || isPlayerDead || myToken != meleeActionToken,
+                IsStaticFrozen);
         }
 
         if (!isDead && !isPlayerDead && myToken == meleeActionToken)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isPlayerDead || myToken != meleeActionToken,
+                IsStaticFrozen);
             DealMeleeDamage(secondAttackDamageV2);
         }
 
@@ -427,7 +462,10 @@ public class TharnokEnemy : MonoBehaviour
         float remainingTime = attackDuration - totalDamageTime;
         if (remainingTime > 0f)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || isPlayerDead || myToken != meleeActionToken,
+                IsStaticFrozen);
         }
 
         animator.SetBool("attack", false);
@@ -451,7 +489,10 @@ public class TharnokEnemy : MonoBehaviour
             }
             if (cooldown > 0f)
             {
-                yield return new WaitForSeconds(cooldown);
+                yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                    cooldown,
+                    () => isDead || isPlayerDead || myToken != meleeActionToken,
+                    IsStaticFrozen);
             }
 
             attackOnCooldown = false;
@@ -488,6 +529,10 @@ public class TharnokEnemy : MonoBehaviour
 
         isShootingProjectile = true;
 
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || isPlayerDead || myToken != rangedActionToken,
+            IsStaticFrozen);
+
         if (preRangedAttackDelayV2 > 0f)
         {
             float delay = preRangedAttackDelayV2;
@@ -503,7 +548,10 @@ public class TharnokEnemy : MonoBehaviour
             isInPreRangedDelay = true;
             if (delay > 0f)
             {
-                yield return new WaitForSeconds(delay);
+                yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                    delay,
+                    () => isDead || isPlayerDead || myToken != rangedActionToken,
+                    IsStaticFrozen);
             }
             isInPreRangedDelay = false;
         }
@@ -524,7 +572,10 @@ public class TharnokEnemy : MonoBehaviour
         float spawnTime = rangedAttackAnimationTime + projectileSpawnTimingV2;
         if (spawnTime > 0f)
         {
-            yield return new WaitForSeconds(spawnTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                spawnTime,
+                () => isDead || isPlayerDead || myToken != rangedActionToken,
+                IsStaticFrozen);
         }
 
         if (isDead || isPlayerDead || myToken != rangedActionToken || projectilePrefab == null || player == null)
@@ -538,10 +589,26 @@ public class TharnokEnemy : MonoBehaviour
 
         if (!isDead && projectilePrefab != null && player != null)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isPlayerDead || myToken != rangedActionToken,
+                IsStaticFrozen);
+
             UpdateFirePointPosition();
 
             Vector3 spawnPos = firePoint != null ? firePoint.position : transform.position;
-            Vector2 dir = ((Vector2)player.position - (Vector2)spawnPos).normalized;
+
+            Vector3 targetPos = player.position;
+            Collider2D playerCol = player.GetComponent<Collider2D>();
+            if (playerCol == null)
+            {
+                playerCol = player.GetComponentInChildren<Collider2D>();
+            }
+            if (playerCol != null)
+            {
+                targetPos = playerCol.bounds.center;
+            }
+
+            Vector2 dir = ((Vector2)targetPos - (Vector2)spawnPos).normalized;
 
             GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
 
@@ -554,7 +621,10 @@ public class TharnokEnemy : MonoBehaviour
         float remainingAnimTime = rangedAttackAnimationTime - spawnTime;
         if (remainingAnimTime > 0f)
         {
-            yield return new WaitForSeconds(remainingAnimTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingAnimTime,
+                () => isDead || isPlayerDead || myToken != rangedActionToken,
+                IsStaticFrozen);
         }
 
         animator.SetBool("attackfar", false);
@@ -587,7 +657,10 @@ public class TharnokEnemy : MonoBehaviour
             isInPostRangedCooldown = true;
             if (idle > 0f)
             {
-                yield return new WaitForSeconds(idle);
+                yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                    idle,
+                    () => isDead || isPlayerDead || myToken != rangedActionToken,
+                    IsStaticFrozen);
             }
             isInPostRangedCooldown = false;
         }
@@ -751,7 +824,10 @@ public class TharnokEnemy : MonoBehaviour
         float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
         if (animationDelay > 0f)
         {
-            yield return new WaitForSeconds(animationDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                animationDelay,
+                () => false,
+                () => false);
         }
 
         if (spriteRenderer != null)
@@ -761,7 +837,11 @@ public class TharnokEnemy : MonoBehaviour
 
             while (elapsed < deathFadeOutDuration)
             {
-                elapsed += Time.deltaTime;
+                float dt = GameStateManager.GetPauseSafeDeltaTime();
+                if (dt > 0f)
+                {
+                    elapsed += dt;
+                }
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / deathFadeOutDuration);
                 spriteRenderer.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;
@@ -769,6 +849,11 @@ public class TharnokEnemy : MonoBehaviour
         }
 
         Destroy(gameObject);
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void OnCollisionEnter2D(Collision2D collision)

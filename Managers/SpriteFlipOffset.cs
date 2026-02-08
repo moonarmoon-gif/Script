@@ -46,6 +46,9 @@ public class SpriteFlipOffset : MonoBehaviour
     private SpriteRenderer shadowSpriteRenderer;
     private Vector2 baseColliderOffset; // Base offset when NOT flipped (from inspector)
     private Vector3 baseShadowLocalPosition; // Base shadow position when NOT flipped
+    private Transform clickHitboxTransform;
+    private Vector3 baseClickHitboxLocalPosition;
+    private bool hasClickHitbox = false;
     private bool wasFlipped = false;
     private bool hasCollider = false;
     private bool hasShadow = false;
@@ -63,6 +66,20 @@ public class SpriteFlipOffset : MonoBehaviour
             Debug.LogError($"SpriteFlipOffset on {gameObject.name}: No SpriteRenderer found!");
             enabled = false;
             return;
+        }
+
+        // Find ClickHitbox (used for EnemyStatUI click selection)
+        Transform[] children = GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < children.Length; i++)
+        {
+            Transform t = children[i];
+            if (t != null && t.name == "ClickHitbox")
+            {
+                clickHitboxTransform = t;
+                hasClickHitbox = true;
+                baseClickHitboxLocalPosition = t.localPosition;
+                break;
+            }
         }
 
         // Find collider
@@ -190,6 +207,17 @@ public class SpriteFlipOffset : MonoBehaviour
                 shadowSpriteRenderer.flipX = isFlipped;
             }
         }
+
+        // Apply ClickHitbox offset (always independent from collider/shadow enable flags).
+        // Skip completely if offsets are 0 so we do not override any pre-existing enemy logic.
+        if (hasClickHitbox && clickHitboxTransform != null)
+        {
+            if (!Mathf.Approximately(colliderFlippedOffsetX, 0f) || !Mathf.Approximately(colliderFlippedOffsetY, 0f))
+            {
+                Vector3 clickOffset = isFlipped ? new Vector3(colliderFlippedOffsetX, colliderFlippedOffsetY, 0f) : Vector3.zero;
+                clickHitboxTransform.localPosition = baseClickHitboxLocalPosition + clickOffset;
+            }
+        }
     }
 
     /// <summary>
@@ -221,6 +249,11 @@ public class SpriteFlipOffset : MonoBehaviour
             Vector3 oldBase = baseShadowLocalPosition;
             baseShadowLocalPosition = shadowTransform.localPosition;
             Debug.Log($"<color=magenta>Shadow base position updated: {oldBase} -> {baseShadowLocalPosition}</color>");
+        }
+
+        if (hasClickHitbox && clickHitboxTransform != null)
+        {
+            baseClickHitboxLocalPosition = clickHitboxTransform.localPosition;
         }
         
         // Reapply offset to ensure consistency

@@ -67,8 +67,8 @@ public class HoldInputDetector : MonoBehaviour
     {
         isHolding = true;
         holdPosition = position;
-        holdStartTime = Time.time;
-        lastHoldTriggerTime = Time.time;
+        holdStartTime = GameStateManager.PauseSafeTime;
+        lastHoldTriggerTime = GameStateManager.PauseSafeTime;
         
         OnHoldStart?.Invoke(position, 0f);
         
@@ -90,7 +90,7 @@ public class HoldInputDetector : MonoBehaviour
     {
         if (!isHolding) return;
         
-        float holdDuration = Time.time - holdStartTime;
+        float holdDuration = GameStateManager.PauseSafeTime - holdStartTime;
         OnHoldEnd?.Invoke(holdPosition, holdDuration);
         
         isHolding = false;
@@ -107,16 +107,16 @@ public class HoldInputDetector : MonoBehaviour
     private IEnumerator HoldRoutine()
     {
         // Wait for initial delay
-        yield return new WaitForSeconds(initialDelay);
+        yield return GameStateManager.WaitForPauseSafeSeconds(initialDelay);
         
         // Continuous hold triggers
         while (isHolding)
         {
-            float holdDuration = Time.time - holdStartTime;
+            float holdDuration = GameStateManager.PauseSafeTime - holdStartTime;
             OnHolding?.Invoke(holdPosition, holdDuration);
-            lastHoldTriggerTime = Time.time;
+            lastHoldTriggerTime = GameStateManager.PauseSafeTime;
             
-            yield return new WaitForSeconds(holdInterval);
+            yield return GameStateManager.WaitForPauseSafeSeconds(holdInterval);
         }
     }
     
@@ -125,7 +125,7 @@ public class HoldInputDetector : MonoBehaviour
     /// </summary>
     public float GetHoldDuration()
     {
-        return isHolding ? Time.time - holdStartTime : 0f;
+        return isHolding ? GameStateManager.PauseSafeTime - holdStartTime : 0f;
     }
     
     /// <summary>

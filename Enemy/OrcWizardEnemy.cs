@@ -70,6 +70,8 @@ public class OrcWizardEnemy : MonoBehaviour
     private bool lastOffsetsDisabled;
     private Coroutine attackRoutine;
 
+    private StaticStatus cachedStaticStatus;
+
     void Awake()
     {
         spriteRenderer = GetComponent<SpriteRenderer>();
@@ -150,6 +152,11 @@ public class OrcWizardEnemy : MonoBehaviour
     {
         if (isDead) return;
 
+        if (IsStaticFrozen())
+        {
+            return;
+        }
+
         bool playerDead = isPlayerDead || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled);
 
         if (playerDead)
@@ -188,6 +195,13 @@ public class OrcWizardEnemy : MonoBehaviour
     void FixedUpdate()
     {
         if (isDead)
+        {
+            rb.velocity = Vector2.zero;
+            isMoving = false;
+            return;
+        }
+
+        if (IsStaticFrozen())
         {
             rb.velocity = Vector2.zero;
             isMoving = false;
@@ -248,6 +262,10 @@ public class OrcWizardEnemy : MonoBehaviour
     {
         int myToken = BeginAttackAction();
 
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+            () => IsStaticFrozen());
+
         isAttacking = true;
         canAttack = false;
 
@@ -262,7 +280,10 @@ public class OrcWizardEnemy : MonoBehaviour
         }
         if (startTime > 0f)
         {
-            yield return new WaitForSeconds(startTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                startTime,
+                () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isPlayerDead || myToken != attackActionToken || player == null)
@@ -277,7 +298,10 @@ public class OrcWizardEnemy : MonoBehaviour
         float channelDelay = Mathf.Max(0f, ChannelingTimer);
         if (channelDelay > 0f)
         {
-            yield return new WaitForSeconds(channelDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                channelDelay,
+                () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isPlayerDead || myToken != attackActionToken || player == null)
@@ -294,7 +318,10 @@ public class OrcWizardEnemy : MonoBehaviour
             {
                 if (ProjectileFireInterval > 0f)
                 {
-                    yield return new WaitForSeconds(ProjectileFireInterval);
+                    yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                        ProjectileFireInterval,
+                        () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                        () => IsStaticFrozen());
                 }
             }
 
@@ -303,6 +330,10 @@ public class OrcWizardEnemy : MonoBehaviour
                 EndAttackEarly();
                 yield break;
             }
+
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                () => IsStaticFrozen());
 
             FireOneProjectile();
         }
@@ -313,7 +344,10 @@ public class OrcWizardEnemy : MonoBehaviour
         float endTime = Mathf.Max(0f, AttackEndAnimationTime);
         if (endTime > 0f)
         {
-            yield return new WaitForSeconds(endTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                endTime,
+                () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attackend", false);
@@ -327,7 +361,10 @@ public class OrcWizardEnemy : MonoBehaviour
         }
         if (cooldown > 0f)
         {
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                () => IsStaticFrozen());
         }
 
         canAttack = true;
@@ -342,6 +379,11 @@ public class OrcWizardEnemy : MonoBehaviour
         isAttacking = false;
         canAttack = true;
         attackRoutine = null;
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     private void FireOneProjectile()
@@ -367,7 +409,18 @@ public class OrcWizardEnemy : MonoBehaviour
             spawnPos = firePoint.position;
         }
 
-        Vector2 dir = (player.position - spawnPos).normalized;
+        Vector3 targetPos = player.position;
+        Collider2D playerCol = player.GetComponent<Collider2D>();
+        if (playerCol == null)
+        {
+            playerCol = player.GetComponentInChildren<Collider2D>();
+        }
+        if (playerCol != null)
+        {
+            targetPos = playerCol.bounds.center;
+        }
+
+        Vector2 dir = ((Vector2)targetPos - (Vector2)spawnPos).normalized;
         float dmg = Random.Range(Mathf.Min(MinDamage, MaxDamage), Mathf.Max(MinDamage, MaxDamage));
 
         GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);

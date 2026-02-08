@@ -201,7 +201,7 @@ public class Collapse : MonoBehaviour, IInstantModifiable
     {
         if (chargeDelay > 0f)
         {
-            yield return new WaitForSeconds(chargeDelay);
+            yield return GameStateManager.WaitForPauseSafeSeconds(chargeDelay);
         }
 
         if (fireChakram != null)
@@ -271,7 +271,7 @@ public class Collapse : MonoBehaviour, IInstantModifiable
                 }
             }
 
-            yield return new WaitForSeconds(interval);
+            yield return GameStateManager.WaitForPauseSafeSeconds(interval);
         }
     }
 
@@ -538,6 +538,21 @@ public class Collapse : MonoBehaviour, IInstantModifiable
         }
         int finalManaCost = Mathf.Max(0, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
 
+        float effectiveCooldown = finalCooldown;
+        if (playerStats != null && playerStats.projectileCooldownReduction > 0f)
+        {
+            float totalCdr = Mathf.Max(0f, playerStats.projectileCooldownReduction);
+            effectiveCooldown = finalCooldown / (1f + totalCdr);
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
+
         bool bypassEnhancedFirstSpawnCooldown = false;
         if (!skipCooldownCheck && card != null && card.applyEnhancedFirstSpawnReduction && card.pendingEnhancedFirstSpawn)
         {
@@ -554,7 +569,7 @@ public class Collapse : MonoBehaviour, IInstantModifiable
         {
             if (!bypassEnhancedFirstSpawnCooldown && lastFireTimes.ContainsKey(prefabKey))
             {
-                if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
+                if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                 {
                     Destroy(gameObject);
                     return;
@@ -568,7 +583,7 @@ public class Collapse : MonoBehaviour, IInstantModifiable
                 return;
             }
 
-            lastFireTimes[prefabKey] = Time.time;
+            lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
         }
 
         if (_collider2D != null && playerCollider != null)
@@ -591,7 +606,7 @@ public class Collapse : MonoBehaviour, IInstantModifiable
 
         if (waitTime > 0f)
         {
-            yield return new WaitForSeconds(waitTime);
+            yield return GameStateManager.WaitForPauseSafeSeconds(waitTime);
         }
 
         if (fadeTime > 0f)
@@ -625,7 +640,7 @@ public class Collapse : MonoBehaviour, IInstantModifiable
         float elapsed = 0f;
         while (elapsed < duration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float t = Mathf.Clamp01(elapsed / duration);
             float alpha = 1f - t;
 
@@ -664,7 +679,7 @@ public class Collapse : MonoBehaviour, IInstantModifiable
         float elapsed = 0f;
         while (elapsed < duration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float t = Mathf.Clamp01(elapsed / duration);
 
             for (int i = 0; i < renderers.Length; i++)

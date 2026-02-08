@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public class StatusControllerManager : MonoBehaviour
 {
@@ -79,6 +80,10 @@ public class StatusControllerManager : MonoBehaviour
     [SerializeField, Tooltip("Percent movement speed reduction per stack of BURDEN on enemies.")]
     private float enemyBurdenMoveSpeedPercentPerStack = 1f;
 
+    [Header("Burden")]
+    public float SlowPerStack = 1f;
+    public int MaxBurdenStacks = 50;
+
     [Header("Overweight")]
     [SerializeField, Tooltip("Additional Rigidbody2D mass added per stack of OVERWEIGHT.")]
     private float massPerStack = 1f;
@@ -134,18 +139,20 @@ public class StatusControllerManager : MonoBehaviour
     private float focusBonusPercentPerStack = 10f;
 
     [Header("Fury")]
-    [SerializeField, Tooltip("Bonus percent damage per FURY stack while at or below the low-health threshold.")]
-    private float furyBonusPercentPerStack = 10f;
-    [SerializeField, Tooltip("Low-health threshold percent (0-100) used by FURY (e.g., 50 = 50% or below).")]
-    private float furyLowHealthThresholdPercent = 50f;
+    [FormerlySerializedAs("rageAttackBonusPerStack")]
+    [SerializeField, Tooltip("Flat Attack bonus granted to the PLAYER per stack of FURY.")]
+    private float furyAttackBonusPerStack = 1f;
+    [FormerlySerializedAs("rageEnemyBaseDamageBonusPerStack")]
+    [SerializeField, Tooltip("Flat base damage bonus granted to ENEMIES per stack of FURY.")]
+    private float furyEnemyBaseDamageBonusPerStack = 1f;
 
     [Header("Rage")]
-    [SerializeField, Tooltip("Flat Attack bonus granted to the PLAYER per stack of RAGE.")]
-    private float rageAttackBonusPerStack = 1f;
-    [SerializeField, Tooltip("Flat base damage bonus granted to ENEMIES per stack of RAGE.")]
-    private float rageEnemyBaseDamageBonusPerStack = 1f;
-    [SerializeField, Tooltip("Duration in seconds for RAGE status when applied with default duration (-1 in AddStatus).")]
-    private float rageDurationSeconds = 5f;
+    [FormerlySerializedAs("furyBonusPercentPerStack")]
+    [SerializeField, Tooltip("Bonus percent damage per RAGE stack while at or below the low-health threshold.")]
+    private float rageBonusPercentPerStack = 10f;
+    [FormerlySerializedAs("furyLowHealthThresholdPercent")]
+    [SerializeField, Tooltip("Low-health threshold percent (0-100) used by RAGE (e.g., 50 = 50% or below).")]
+    private float rageLowHealthThresholdPercent = 50f;
 
     [Header("Burn")]
     [SerializeField, Tooltip("Global burn tick interval in seconds. All burn systems must obey this value.")]
@@ -194,7 +201,7 @@ public class StatusControllerManager : MonoBehaviour
     public float PlayerSlowPercentPerStack => Mathf.Max(0f, playerSlowPercentPerStack);
     public float AmnesiaChancePerStackPercent => Mathf.Max(0f, amnesiaChancePerStackPercent);
     public float EnemyHasteMoveSpeedPercentPerStack => Mathf.Max(0f, enemyHasteMoveSpeedPercentPerStack);
-    public float EnemyBurdenMoveSpeedPercentPerStack => Mathf.Max(0f, enemyBurdenMoveSpeedPercentPerStack);
+    public float EnemyBurdenMoveSpeedPercentPerStack => Mathf.Max(0f, SlowPerStack);
     public float MassPerStack => Mathf.Max(0f, massPerStack);
     public float CritPerStack => Mathf.Max(0f, critPerStack);
     public float LethargyAttackCooldownSecondsPerStack => Mathf.Max(0f, lethargyAttackCooldownSecondsPerStack);
@@ -218,19 +225,11 @@ public class StatusControllerManager : MonoBehaviour
 
     public float HatredBonusPercentPerDebuffPerStack => Mathf.Max(0f, hatredBonusPercentPerDebuffPerStack);
     public float FocusBonusPercentPerStack => Mathf.Max(0f, focusBonusPercentPerStack);
-    public float FuryBonusPercentPerStack => Mathf.Max(0f, furyBonusPercentPerStack);
-    public float FuryLowHealthThresholdPercent => Mathf.Clamp(furyLowHealthThresholdPercent, 0f, 100f);
+    public float FuryAttackBonusPerStack => Mathf.Max(0f, furyAttackBonusPerStack);
+    public float FuryEnemyBaseDamageBonusPerStack => Mathf.Max(0f, furyEnemyBaseDamageBonusPerStack);
 
-    public float RageAttackBonusPerStack => Mathf.Max(0f, rageAttackBonusPerStack);
-    public float RageEnemyBaseDamageBonusPerStack => Mathf.Max(0f, rageEnemyBaseDamageBonusPerStack);
-    public float RageDurationSeconds => Mathf.Max(0f, rageDurationSeconds);
-
-    public float FuryAttackBonusPerStack => RageAttackBonusPerStack;
-    public float FuryEnemyBaseDamageBonusPerStack => RageEnemyBaseDamageBonusPerStack;
-    public float FuryDurationSeconds => RageDurationSeconds;
-
-    public float RageBonusPercentPerStack => FuryBonusPercentPerStack;
-    public float RageLowHealthThresholdPercent => FuryLowHealthThresholdPercent;
+    public float RageBonusPercentPerStack => Mathf.Max(0f, rageBonusPercentPerStack);
+    public float RageLowHealthThresholdPercent => Mathf.Clamp(rageLowHealthThresholdPercent, 0f, 100f);
 
     public float RoundDamage(float rawDamage)
     {

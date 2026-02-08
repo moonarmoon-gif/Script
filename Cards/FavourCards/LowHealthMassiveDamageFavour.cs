@@ -75,16 +75,16 @@ public class LowHealthMassiveDamageFavour : FavourEffect
 
         if (!isChanneling)
         {
-            if (healthPercent <= threshold && Time.time >= nextAvailableTime)
+            if (healthPercent <= threshold && GameStateManager.PauseSafeTime >= nextAvailableTime)
             {
                 float duration = Mathf.Max(0.01f, ChannelDuration);
                 isChanneling = true;
-                channelEndTime = Time.time + duration;
+                channelEndTime = GameStateManager.PauseSafeTime + duration;
             }
         }
         else
         {
-            if (Time.time >= channelEndTime)
+            if (GameStateManager.PauseSafeTime >= channelEndTime)
             {
                 isChanneling = false;
                 TriggerBurst(player);
@@ -115,7 +115,7 @@ public class LowHealthMassiveDamageFavour : FavourEffect
             return;
         }
 
-        nextAvailableTime = Time.time + Mathf.Max(0f, CooldownSeconds);
+        nextAvailableTime = GameStateManager.PauseSafeTime + Mathf.Max(0f, CooldownSeconds);
 
         EnemyHealth[] enemies = Object.FindObjectsOfType<EnemyHealth>();
         if (enemies == null || enemies.Length == 0)

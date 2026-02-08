@@ -148,7 +148,9 @@ public class ProjectileCards : BaseCard
         NovaStar,
         DwarfStar,
         Collapse,
-        HolyShield
+        HolyShield,
+        ThunderDisc,
+        ElectroBall
     }
 
     public enum ProjectileSystemType
@@ -306,6 +308,7 @@ public class ProjectileCards : BaseCard
                 return global::ProjectileType.Ice;
                 
             case ProjectileCards.ProjectileType.ThunderBird:
+            case ProjectileCards.ProjectileType.ThunderDisc:
                 return global::ProjectileType.Thunder;
                 
             case ProjectileCards.ProjectileType.NuclearStrike:
@@ -318,6 +321,9 @@ public class ProjectileCards : BaseCard
                 
             case ProjectileCards.ProjectileType.ElementalBeam:
                 return global::ProjectileType.Laser;
+
+            case ProjectileCards.ProjectileType.ElectroBall:
+                return global::ProjectileType.ElectroBall;
                 
             default:
                 return global::ProjectileType.Fire; // Default to Fire if unknown
@@ -560,6 +566,8 @@ public class ProjectileCards : BaseCard
                 return $"Spawn Fire Mine every {spawnInterval}s that explodes on contact";
             case ProjectileType.ThunderBird:
                 return $"Spawn Thunder Bird every {spawnInterval}s that flies across the screen";
+            case ProjectileType.ThunderDisc:
+                return $"Spawn Thunder Disc every {spawnInterval}s";
             case ProjectileType.NuclearStrike:
                 return $"Spawn Nuclear Strike every {spawnInterval}s that drops from above and explodes";
             case ProjectileType.ElementalBeam:

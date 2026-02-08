@@ -257,7 +257,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
         float finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease + enhancedLifetimeAdd; // RAW seconds + enhanced
         float finalCooldown = Mathf.Max(0.1f, baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f)); // % from base
         int finalManaCost = Mathf.Max(1, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
-        damage = (damage + modifiers.damageFlat) * enhancedDamageMult;
+        damage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier * enhancedDamageMult;
         
         // Apply size multiplier
         float totalSizeMultiplier = modifiers.sizeMultiplier;
@@ -286,6 +286,21 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
         
         // Get PlayerStats for base damage calculation
         cachedPlayerStats = FindObjectOfType<PlayerStats>();
+
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null && cachedPlayerStats.projectileCooldownReduction > 0f)
+        {
+            float totalCdr = Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction);
+            effectiveCooldown = finalCooldown / (1f + totalCdr);
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
         
         // Allow the global "enhanced first spawn" reduction system to bypass this
         // internal cooldown gate exactly once for PASSIVE projectile cards.
@@ -308,9 +323,9 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
             // Check cooldown
             if (!bypassEnhancedFirstSpawnCooldown && lastFireTimes.ContainsKey(prefabKey))
             {
-                if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
+                if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                 {
-                    Debug.Log($"<color=yellow>CinderBloom on cooldown - {Time.time - lastFireTimes[prefabKey]:F2}s / {finalCooldown}s</color>");
+                    Debug.Log($"<color=yellow>CinderBloom on cooldown - {GameStateManager.PauseSafeTime - lastFireTimes[prefabKey]:F2}s / {effectiveCooldown}s</color>");
                     Destroy(gameObject);
                     return;
                 }
@@ -326,7 +341,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
             }
             
             // Record fire time
-            lastFireTimes[prefabKey] = Time.time;
+            lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
         }
         else
         {
@@ -349,7 +364,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
         currentHealth = bloomHealth;
         
         // Wait for arming delay
-        yield return new WaitForSeconds(armDelay);
+        yield return GameStateManager.WaitForPauseSafeSeconds(armDelay);
         
         isArmed = true;
         
@@ -357,7 +372,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
         if (armingEffectPrefab != null)
         {
             GameObject armEffect = Instantiate(armingEffectPrefab, transform.position, Quaternion.identity, transform);
-            Destroy(armEffect, lifetime);
+            PauseSafeSelfDestruct.Schedule(armEffect, lifetime);
         }
         
         // Play arming sound
@@ -387,7 +402,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
             SpitFire();
             
             // Wait for spit interval
-            yield return new WaitForSeconds(spitInterval);
+            yield return GameStateManager.WaitForPauseSafeSeconds(spitInterval);
             elapsedTime += spitInterval;
             
             // Clear damaged enemies for next cycle
@@ -442,7 +457,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
                 // CRITICAL: Check if enough time has passed since last damage to THIS SPECIFIC ENEMY
                 if (enemyLastDamageTimes.ContainsKey(enemy))
                 {
-                    float timeSinceLastDamage = Time.time - enemyLastDamageTimes[enemy];
+                    float timeSinceLastDamage = GameStateManager.PauseSafeTime - enemyLastDamageTimes[enemy];
                     if (timeSinceLastDamage < spitInterval)
                     {
                         // Too soon to damage this enemy again
@@ -487,7 +502,9 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
                         {
                             DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire
                                 ? DamageNumberManager.DamageType.Fire
-                                : DamageNumberManager.DamageType.Ice;
+                                : (projectileType == ProjectileType.Thunder || projectileType == ProjectileType.ThunderDisc
+                                    ? DamageNumberManager.DamageType.Thunder
+                                    : DamageNumberManager.DamageType.Ice);
                             enemyHealth.SetLastIncomingDamageType(damageType);
                         }
                     }
@@ -495,7 +512,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
                     damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
                     
                     // CRITICAL: Update last damage time for this specific enemy
-                    enemyLastDamageTimes[enemy] = Time.time;
+                    enemyLastDamageTimes[enemy] = GameStateManager.PauseSafeTime;
                     
                     StatusController.TryApplyBurnFromProjectile(gameObject, enemy, hitPoint, finalDamage);
                     
@@ -511,7 +528,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
                         staticEffect.TryApplyStatic(enemy, hitPoint);
                     }
                     
-                    Debug.Log($"<color=orange>CinderBloom dealt {finalDamage} damage to {enemy.name} (last damage: {(enemyLastDamageTimes.ContainsKey(enemy) ? (Time.time - enemyLastDamageTimes[enemy]).ToString("F2") : "never")}s ago)</color>");
+                    Debug.Log($"<color=orange>CinderBloom dealt {finalDamage} damage to {enemy.name} (last damage: {(enemyLastDamageTimes.ContainsKey(enemy) ? (GameStateManager.PauseSafeTime - enemyLastDamageTimes[enemy]).ToString("F2") : "never")}s ago)</color>");
                 }
             }
         }
@@ -668,7 +685,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
                 }
             }
             
-            yield return new WaitForSeconds(tauntPulseInterval);
+            yield return GameStateManager.WaitForPauseSafeSeconds(tauntPulseInterval);
         }
     }
     
@@ -677,8 +694,22 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
         Debug.Log($"<color=lime>╔═══ CINDERCRYOBLOOM INSTANT MODIFIERS ═══╗</color>");
         float newLifetime = baseLifetimeSeconds + modifiers.lifetimeIncrease;
         if (newLifetime != lifetimeSeconds) { lifetimeSeconds = newLifetime; Debug.Log($"<color=lime>  Lifetime: {baseLifetimeSeconds:F2} + {modifiers.lifetimeIncrease:F2} = {lifetimeSeconds:F2}</color>"); }
-        float newDamage = baseDamage * modifiers.damageMultiplier;
-        if (newDamage != damage) { damage = newDamage; Debug.Log($"<color=lime>  Damage: {baseDamage:F2} * {modifiers.damageMultiplier:F2}x = {damage:F2}</color>"); }
+
+        float enhancedDamageMult = 1f;
+        ProjectileCards card = ProjectileCardModifiers.Instance != null
+            ? ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject)
+            : null;
+        if (card != null && ProjectileCardLevelSystem.Instance != null)
+        {
+            int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
+            if (enhancedVariant == 1)
+            {
+                enhancedDamageMult = enhancedDamageMultiplier;
+            }
+        }
+
+        float newDamage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier * enhancedDamageMult;
+        if (newDamage != damage) { damage = newDamage; Debug.Log($"<color=lime>  Damage: ({baseDamage:F2} + {modifiers.damageFlat:F2}) * {modifiers.damageMultiplier:F2}x * {enhancedDamageMult:F2}x = {damage:F2}</color>"); }
         if (modifiers.sizeMultiplier != 1f) { transform.localScale = baseScale * modifiers.sizeMultiplier; Debug.Log($"<color=lime>  Size: {baseScale} * {modifiers.sizeMultiplier:F2}x = {transform.localScale}</color>"); }
         Debug.Log($"<color=lime>╚═══════════════════════════════════════╝</color>");
     }

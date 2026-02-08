@@ -21,9 +21,9 @@ public class MobileUIButton : MonoBehaviour, IPointerDownHandler, IPointerUpHand
     }
     public enum ButtonType
     {
-        SwapTerrain,    // Swap fire/ice (like Spacebar)
-        Projectile1,    // Switch to projectile set 0 (like key 1)
-        Projectile3     // Switch to projectile set 2 (like key 3)
+        SwapTerrain = 0,    // Swap fire/ice (like Spacebar)
+        Projectile1 = 1,    // Switch to projectile set 0 (like key 1)
+        Projectile1Alt = 2  // Legacy: previously set 3 button; now also switches to set 1
     }
     
     [Header("Button Settings")]
@@ -115,10 +115,10 @@ public class MobileUIButton : MonoBehaviour, IPointerDownHandler, IPointerUpHand
                 AdvancedPlayerController.Instance.SwitchToProjectileSet(0);
                 Debug.Log("<color=orange>Switched to Projectile Set 1 (Fireball/Icicle)</color>");
                 break;
-                
-            case ButtonType.Projectile3:
-                AdvancedPlayerController.Instance.SwitchToProjectileSet(2);
-                Debug.Log("<color=purple>Switched to Projectile Set 3 (Custom)</color>");
+
+            case ButtonType.Projectile1Alt:
+                AdvancedPlayerController.Instance.SwitchToProjectileSet(0);
+                Debug.Log("<color=orange>Switched to Projectile Set 1 (Fireball/Icicle)</color>");
                 break;
         }
     }

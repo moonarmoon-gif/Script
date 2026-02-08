@@ -16,6 +16,7 @@ public class ProjectileSpawner : MonoBehaviour
     private List<ProjectileSpawnData> activeProjectiles = new List<ProjectileSpawnData>();
     private ProjectileModifierApplier modifierApplier;
     private PlayerStats playerStats;
+    private AdvancedPlayerController advancedPlayerController;
     
     // Track active ElementalBeam stagger coroutines to prevent overlapping spawns
     private Dictionary<string, Coroutine> activeBeamCoroutines = new Dictionary<string, Coroutine>();
@@ -64,7 +65,7 @@ public class ProjectileSpawner : MonoBehaviour
                 Debug.Log($"<color=gold>{projectileCard.cardName} FIRST SPAWN: Cooldown reduced to {interval:F2}s</color>");
             }
             
-            nextSpawnTime = Time.time + interval;
+            nextSpawnTime = GameStateManager.PauseSafeTime + interval;
         }
     }
 
@@ -94,8 +95,24 @@ public class ProjectileSpawner : MonoBehaviour
 
             if (sameInstance || samePrefabAndType)
             {
-                data.nextSpawnTime = Time.time;
+                data.nextSpawnTime = GameStateManager.PauseSafeTime;
             }
+        }
+    }
+
+    public void RefreshCooldownForAllPassiveCards()
+    {
+        float now = GameStateManager.PauseSafeTime;
+
+        for (int i = 0; i < activeProjectiles.Count; i++)
+        {
+            ProjectileSpawnData data = activeProjectiles[i];
+            if (data == null || data.card == null)
+            {
+                continue;
+            }
+
+            data.nextSpawnTime = now;
         }
     }
 
@@ -128,7 +145,7 @@ public class ProjectileSpawner : MonoBehaviour
             finalInterval = Mathf.Max(0.1f, finalInterval);
         }
 
-        float now = Time.time;
+        float now = GameStateManager.PauseSafeTime;
         const float minDelay = 0.05f;
 
         for (int i = 0; i < activeProjectiles.Count; i++)
@@ -167,6 +184,58 @@ public class ProjectileSpawner : MonoBehaviour
         }
 
         playerStats = GetComponent<PlayerStats>();
+        advancedPlayerController = GetComponent<AdvancedPlayerController>();
+    }
+
+    private Vector3 GetSpawnOriginPosition()
+    {
+        if (advancedPlayerController == null)
+        {
+            advancedPlayerController = GetComponent<AdvancedPlayerController>();
+        }
+
+        Transform origin = advancedPlayerController != null ? advancedPlayerController.FirePoint : null;
+        if (origin != null)
+        {
+            return origin.position;
+        }
+
+        return transform.position;
+    }
+
+    private Vector3 GetSpawnOriginPositionForCard(ProjectileCards card)
+    {
+        Vector3 defaultOrigin = GetSpawnOriginPosition();
+
+        if (card == null || card.projectilePrefab == null)
+        {
+            return defaultOrigin;
+        }
+
+        bool allowActive =
+            card.projectilePrefab.GetComponent<PlayerProjectiles>() != null ||
+            card.projectilePrefab.GetComponent<FireBall>() != null ||
+            card.projectilePrefab.GetComponent<ElectroBall>() != null ||
+            card.projectilePrefab.GetComponent<ProjectileFireTalon>() != null ||
+            card.projectilePrefab.GetComponent<ProjectileIceTalon>() != null;
+
+        if (!allowActive)
+        {
+            return defaultOrigin;
+        }
+
+        if (advancedPlayerController == null)
+        {
+            advancedPlayerController = GetComponent<AdvancedPlayerController>();
+        }
+
+        Transform active = advancedPlayerController != null ? advancedPlayerController.ActiveFirePoint : null;
+        if (active != null)
+        {
+            return active.position;
+        }
+
+        return defaultOrigin;
     }
 
     public void AddProjectile(ProjectileCards card)
@@ -242,25 +311,25 @@ public class ProjectileSpawner : MonoBehaviour
 
     void Update()
     {
+        float now = GameStateManager.PauseSafeTime;
         foreach (var data in activeProjectiles)
         {
-            if (Time.time >= data.nextSpawnTime)
+            if (now >= data.nextSpawnTime)
             {
-                // ElementalBeam smart targeting: if there are no enemies on-screen,
-                // do not fire and do not consume cooldown. Instead, wait a short
-                // delay and then rescan.
+                Vector3 spawnOriginPosition = GetSpawnOriginPositionForCard(data != null ? data.card : null);
+
                 if (data != null && data.card != null && data.card.projectilePrefab != null)
                 {
                     ElementalBeam beamPrefab = data.card.projectilePrefab.GetComponent<ElementalBeam>();
-                    if (beamPrefab != null && !beamPrefab.HasAnyOnScreenEnemy(transform.position))
+                    if (beamPrefab != null && !beamPrefab.HasAnyOnScreenEnemy(spawnOriginPosition))
                     {
                         float delay = Mathf.Max(0.05f, beamPrefab.NoEnemyTargetDelay);
-                        data.nextSpawnTime = Time.time + delay;
+                        data.nextSpawnTime = now + delay;
                         continue;
                     }
                 }
 
-                SpawnProjectile(data);
+                SpawnProjectile(data, spawnOriginPosition);
                 
                 // Use runtime interval if set (includes any enhanced/variant-specific cooldowns),
                 // otherwise fall back to inspector spawnInterval
@@ -294,7 +363,7 @@ public class ProjectileSpawner : MonoBehaviour
                     Debug.Log($"<color=gold>{data.card.cardName} first spawn complete, next spawn in {finalInterval:F2}s</color>");
                 }
                 
-                data.nextSpawnTime = Time.time + finalInterval;
+                data.nextSpawnTime = now + finalInterval;
             }
         }
     }
@@ -395,7 +464,7 @@ public class ProjectileSpawner : MonoBehaviour
             float reductionFactor = Mathf.Clamp01(1f - card.enhancedFirstSpawnReduction);
             float reducedInterval = baseInterval * reductionFactor;
 
-            data.nextSpawnTime = Time.time + reducedInterval;
+            data.nextSpawnTime = GameStateManager.PauseSafeTime + reducedInterval;
             Debug.Log($"<color=gold>{card.cardName} ENHANCED FIRST SPAWN: scheduling next spawn in {reducedInterval:F2}s (base {baseInterval:F2}s, reduction {card.enhancedFirstSpawnReduction * 100f:F0}%)</color>");
             return;
         }
@@ -403,7 +472,13 @@ public class ProjectileSpawner : MonoBehaviour
 
     void SpawnProjectile(ProjectileSpawnData data)
     {
-        if (data.card.projectilePrefab == null) return;
+        Vector3 spawnOriginPosition = GetSpawnOriginPositionForCard(data != null ? data.card : null);
+        SpawnProjectile(data, spawnOriginPosition);
+    }
+
+    void SpawnProjectile(ProjectileSpawnData data, Vector3 spawnOriginPosition)
+    {
+        if (data == null || data.card == null || data.card.projectilePrefab == null) return;
 
         // Check if this is a FireMine
         FireMine fireMine = data.card.projectilePrefab.GetComponent<FireMine>();
@@ -449,7 +524,7 @@ public class ProjectileSpawner : MonoBehaviour
             for (int i = 0; i < mineProjectileCount; i++)
             {
                 // FireMine handles its own spawn position logic (4-point system)
-                GameObject mine = Instantiate(data.card.projectilePrefab, transform.position, Quaternion.identity);
+                GameObject mine = Instantiate(data.card.projectilePrefab, spawnOriginPosition, Quaternion.identity);
                 // Tag projectile with card reference
                 ProjectileCardModifiers.Instance.TagProjectileWithCard(mine, data.card);
                 
@@ -459,7 +534,7 @@ public class ProjectileSpawner : MonoBehaviour
                 {
                     // CRITICAL: Only first projectile checks cooldown/mana
                     bool skipCheck = (i > 0);
-                    mineComponent.Initialize(transform.position, PlayerCollider, skipCheck);
+                    mineComponent.Initialize(spawnOriginPosition, PlayerCollider, skipCheck);
                     
                     if (skipCheck)
                     {
@@ -494,7 +569,7 @@ public class ProjectileSpawner : MonoBehaviour
             for (int i = 0; i < bloomProjectileCount; i++)
             {
                 // CinderBloom handles its own spawn position logic (4-point system)
-                GameObject bloom2 = Instantiate(data.card.projectilePrefab, transform.position, Quaternion.identity);
+                GameObject bloom2 = Instantiate(data.card.projectilePrefab, spawnOriginPosition, Quaternion.identity);
                 // Tag projectile with card reference
                 ProjectileCardModifiers.Instance.TagProjectileWithCard(bloom2, data.card);
                 
@@ -504,7 +579,7 @@ public class ProjectileSpawner : MonoBehaviour
                 {
                     // CRITICAL: Only first projectile checks cooldown/mana
                     bool skipCheck = (i > 0);
-                    bloomComponent.Initialize(transform.position, PlayerCollider, skipCheck);
+                    bloomComponent.Initialize(spawnOriginPosition, PlayerCollider, skipCheck);
                     
                     if (skipCheck)
                     {
@@ -571,7 +646,7 @@ public class ProjectileSpawner : MonoBehaviour
             for (int i = 0; i < birdProjectileCount; i++)
             {
                 // ThunderBird handles its own spawn position logic
-                GameObject bird = Instantiate(data.card.projectilePrefab, transform.position, Quaternion.identity);
+                GameObject bird = Instantiate(data.card.projectilePrefab, spawnOriginPosition, Quaternion.identity);
                 // Tag projectile with card reference
                 ProjectileCardModifiers.Instance.TagProjectileWithCard(bird, data.card);
                 
@@ -580,7 +655,7 @@ public class ProjectileSpawner : MonoBehaviour
                 if (birdComponent != null)
                 {
                     // CRITICAL: ALL birds skip cooldown/mana check (checked by ProjectileSpawner before loop)
-                    birdComponent.Initialize(transform.position, PlayerCollider, true);
+                    birdComponent.Initialize(spawnOriginPosition, PlayerCollider, true);
                     Debug.Log($"<color=gold>ThunderBird #{i+1}/{birdProjectileCount}: Spawned (cooldown/mana pre-checked)</color>");
                 }
                 
@@ -605,21 +680,23 @@ public class ProjectileSpawner : MonoBehaviour
             // applied immediately on the very first enhanced spawn.
             int nukeProjectileCount = 1 + nukeModifiers.projectileCount;
 
-            // CRITICAL: Add enhanced projectile count bonus for NuclearStrike instantly,
-            // so the very first spawn after enhancement already uses the extra strikes.
+            int enhancedVariant = 0;
+            bool hasVariant2History = false;
             if (ProjectileCardLevelSystem.Instance != null)
             {
-                int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(data.card);
+                enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(data.card);
+                bool isEnhancedUnlocked = ProjectileCardLevelSystem.Instance.IsEnhancedUnlocked(data.card);
+                bool hasVariant1History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 1);
+                hasVariant2History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 2);
 
-                // SAFETY: Same pattern as Talons/FireMine - if the card is enhanced-unlocked
-                // but variant is still 0 for this frame, treat it as Variant 1 for count.
-                if (enhancedVariant == 0 && ProjectileCardLevelSystem.Instance.IsEnhancedUnlocked(data.card))
+                bool applyVariant1Bonus = enhancedVariant == 1 || hasVariant1History;
+                if (!applyVariant1Bonus && enhancedVariant == 0 && isEnhancedUnlocked && !hasVariant2History)
                 {
-                    enhancedVariant = 1;
-                    Debug.Log($"<color=yellow>[NuclearStrike Safety] {data.card.cardName} is enhanced-unlocked but has variant 0; treating as Variant 1 for projectile count.</color>");
+                    applyVariant1Bonus = true;
+                    Debug.Log($"<color=yellow>[NuclearStrike Safety] {data.card.cardName} is enhanced-unlocked but has no selected variant yet; treating as Variant 1 for projectile count.</color>");
                 }
 
-                if (enhancedVariant >= 1)
+                if (applyVariant1Bonus)
                 {
                     int enhancedBonus = nuclearStrike.enhancedProjectileCountBonus;
                     if (enhancedBonus > 0)
@@ -629,6 +706,8 @@ public class ProjectileSpawner : MonoBehaviour
                     }
                 }
             }
+
+            bool useHellBeam = (enhancedVariant == 2 || hasVariant2History) && nuclearStrike.HellBeamPrefab != null;
             
             Debug.Log($"<color=cyan>Spawning {nukeProjectileCount} NuclearStrike(s) for {data.card.cardName} (base 1 + {nukeModifiers.projectileCount} from modifiers + any enhanced bonus)</color>");
             
@@ -637,24 +716,41 @@ public class ProjectileSpawner : MonoBehaviour
             // Spawn multiple NuclearStrikes if nukeProjectileCount > 1
             for (int i = 0; i < nukeProjectileCount; i++)
             {
-                // NuclearStrike handles its own spawn position logic
-                GameObject strike = Instantiate(data.card.projectilePrefab, transform.position, Quaternion.identity);
+                GameObject prefabToSpawn = useHellBeam ? nuclearStrike.HellBeamPrefab : data.card.projectilePrefab;
+                GameObject strike = Instantiate(prefabToSpawn, spawnOriginPosition, Quaternion.identity);
+                strike.tag = "Projectile";
+
                 // Tag projectile with card reference
                 ProjectileCardModifiers.Instance.TagProjectileWithCard(strike, data.card);
-                
-                NuclearStrike strikeComponent = strike.GetComponent<NuclearStrike>();
-                
-                if (strikeComponent != null)
+
+                bool skipCheck = (i > 0);
+                if (useHellBeam)
                 {
-                    // CRITICAL: Only first projectile checks cooldown/mana
-                    // Additional projectiles skip these checks
-                    bool skipCheck = (i > 0);
-                    strikeComponent.Initialize(transform.position, PlayerCollider, skipCheck);
-                    
-                    if (skipCheck)
+                    HellBeam hellBeam = strike.GetComponent<HellBeam>();
+                    if (hellBeam != null)
                     {
-                        Debug.Log($"<color=gold>NuclearStrike #{i+1}: Spawned as additional projectile (skipping cooldown/mana)</color>");
+                        hellBeam.Initialize(
+                            spawnOriginPosition,
+                            PlayerCollider,
+                            nuclearStrike.HellBeamBaseDamage,
+                            nuclearStrike.HellBeamBaseLifetime,
+                            nuclearStrike.HellBeamDamageTickInterval,
+                            skipCheck
+                        );
                     }
+                }
+                else
+                {
+                    NuclearStrike strikeComponent = strike.GetComponent<NuclearStrike>();
+                    if (strikeComponent != null)
+                    {
+                        strikeComponent.Initialize(spawnOriginPosition, PlayerCollider, skipCheck);
+                    }
+                }
+
+                if (skipCheck)
+                {
+                    Debug.Log($"<color=gold>NuclearStrike #{i+1}: Spawned as additional projectile (skipping cooldown/mana)</color>");
                 }
                 
                 if (modifierApplier != null)
@@ -680,7 +776,7 @@ public class ProjectileSpawner : MonoBehaviour
 
             for (int i = 0; i < collapseProjectileCount; i++)
             {
-                GameObject collapseObj = Instantiate(data.card.projectilePrefab, transform.position, Quaternion.identity);
+                GameObject collapseObj = Instantiate(data.card.projectilePrefab, spawnOriginPosition, Quaternion.identity);
                 ProjectileCardModifiers.Instance.TagProjectileWithCard(collapseObj, data.card);
 
                 Collapse collapseComponent = collapseObj.GetComponent<Collapse>();
@@ -688,7 +784,7 @@ public class ProjectileSpawner : MonoBehaviour
                 if (collapseComponent != null)
                 {
                     bool skipCheck = (i > 0);
-                    collapseComponent.Initialize(transform.position, PlayerCollider, skipCheck);
+                    collapseComponent.Initialize(spawnOriginPosition, PlayerCollider, skipCheck);
 
                     if (skipCheck)
                     {
@@ -730,7 +826,7 @@ public class ProjectileSpawner : MonoBehaviour
             for (int i = 0; i < bloomProjectileCount; i++)
             {
                 // CinderCryoBloom handles its own spawn position logic (4-point system)
-                GameObject bloomObj = Instantiate(data.card.projectilePrefab, transform.position, Quaternion.identity);
+                GameObject bloomObj = Instantiate(data.card.projectilePrefab, spawnOriginPosition, Quaternion.identity);
                 // Tag projectile with card reference
                 ProjectileCardModifiers.Instance.TagProjectileWithCard(bloomObj, data.card);
                 
@@ -738,7 +834,7 @@ public class ProjectileSpawner : MonoBehaviour
                 
                 if (bloomComponent != null)
                 {
-                    bloomComponent.Initialize(transform.position, PlayerCollider);
+                    bloomComponent.Initialize(spawnOriginPosition, PlayerCollider);
                 }
                 
                 if (modifierApplier != null)
@@ -784,14 +880,38 @@ public class ProjectileSpawner : MonoBehaviour
         Vector2 spawnDirection = GetSpawnDirection(data.card);
 
         // Calculate spawn position with offset based on direction
-        Vector3 spawnPosition = transform.position;
+        Vector3 spawnPosition = spawnOriginPosition;
+
+        ElectroBall electroBallPrefabComponent = (data.card != null && data.card.projectilePrefab != null)
+            ? data.card.projectilePrefab.GetComponent<ElectroBall>()
+            : null;
+
+        bool isEnhancedElectroBallDualShot = false;
+        if (electroBallPrefabComponent != null && ProjectileCardLevelSystem.Instance != null)
+        {
+            int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(data.card);
+            bool isEnhancedUnlocked = ProjectileCardLevelSystem.Instance.IsEnhancedUnlocked(data.card);
+
+            bool hasVariant1History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 1);
+            bool hasVariant2History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 2);
+
+            int effectiveVariant = enhancedVariant;
+            if (effectiveVariant == 0 && isEnhancedUnlocked && !hasVariant1History && !hasVariant2History)
+            {
+                effectiveVariant = 1;
+            }
+
+            isEnhancedElectroBallDualShot = effectiveVariant == 1 || hasVariant1History;
+        }
 
         // Apply spawn offset for Talon variants and PlayerProjectiles using their GetSpawnOffset method
         if (data.card != null && data.card.projectilePrefab != null)
         {
             ProjectileFireTalon fireTalonComponent = data.card.projectilePrefab.GetComponent<ProjectileFireTalon>();
             ProjectileIceTalon iceTalonComponent = data.card.projectilePrefab.GetComponent<ProjectileIceTalon>();
+            FireBall fireBallComponent = data.card.projectilePrefab.GetComponent<FireBall>();
             PlayerProjectiles playerProjComponent = data.card.projectilePrefab.GetComponent<PlayerProjectiles>();
+            ElectroBall electroBallComponent = electroBallPrefabComponent;
             
             if (fireTalonComponent != null)
             {
@@ -804,6 +924,18 @@ public class ProjectileSpawner : MonoBehaviour
                 Vector2 offset = iceTalonComponent.GetSpawnOffset(spawnDirection);
                 spawnPosition += new Vector3(offset.x, offset.y, 0f);
                 Debug.Log($"<color=cyan>ProjectileSpawner: Applied IceTalon offset {offset} to spawn position</color>");
+            }
+            else if (electroBallComponent != null && !isEnhancedElectroBallDualShot)
+            {
+                Vector2 offset = electroBallComponent.GetSpawnOffset(spawnDirection);
+                spawnPosition += new Vector3(offset.x, offset.y, 0f);
+                Debug.Log($"<color=cyan>ProjectileSpawner: Applied ElectroBall offset {offset} to spawn position</color>");
+            }
+            else if (fireBallComponent != null)
+            {
+                Vector2 offset = fireBallComponent.GetSpawnOffset(spawnDirection);
+                spawnPosition += new Vector3(offset.x, offset.y, 0f);
+                Debug.Log($"<color=cyan>ProjectileSpawner: Applied FireBall offset {offset} to spawn position</color>");
             }
             else if (playerProjComponent != null)
             {
@@ -873,7 +1005,7 @@ public class ProjectileSpawner : MonoBehaviour
         PlayerMana playerMana = GetComponent<PlayerMana>();
         
         // Store original player position for ElementalBeam offset calculation
-        Vector3 originalPlayerPosition = transform.position;
+        Vector3 originalPlayerPosition = spawnOriginPosition;
         
         // Check if this is ElementalBeam for special handling
         ElementalBeam beamPrefab = data.card.projectilePrefab.GetComponent<ElementalBeam>();
@@ -947,10 +1079,114 @@ public class ProjectileSpawner : MonoBehaviour
         
         // Track used angles for minimum separation
         List<float> usedAngles = new List<float>();
+
+        float electroBallMinSeparation = 0f;
+        if (electroBallPrefabComponent != null)
+        {
+            float minSep = Mathf.Max(0f, electroBallPrefabComponent.MinSpawnRange);
+            float maxSep = Mathf.Max(0f, electroBallPrefabComponent.MaxSpawnRange);
+            if (maxSep > 0f && maxSep < minSep)
+            {
+                maxSep = minSep;
+            }
+
+            electroBallMinSeparation = (maxSep > minSep)
+                ? Random.Range(minSep, maxSep)
+                : minSep;
+        }
+
+        bool hasCheckedCooldownForEnhancedElectroBall = false;
         
         // Spawn multiple projectiles if projCount > 1
         for (int i = 0; i < projCount; i++)
         {
+            if (isEnhancedElectroBallDualShot && electroBallPrefabComponent != null)
+            {
+                Vector2 leftDir;
+                Vector2 rightDir;
+
+                float leftAngle = 0f;
+                float rightAngle = 0f;
+
+                int maxAttempts = 30;
+
+                leftAngle = Random.Range(electroBallPrefabComponent.LeftMinAngle, electroBallPrefabComponent.LeftMaxAngle);
+                for (int attempt = 0; attempt < maxAttempts; attempt++)
+                {
+                    float candidate = Random.Range(electroBallPrefabComponent.LeftMinAngle, electroBallPrefabComponent.LeftMaxAngle);
+                    if (!IsAngleTooClose(candidate, usedAngles, electroBallMinSeparation))
+                    {
+                        leftAngle = candidate;
+                        break;
+                    }
+                    leftAngle = candidate;
+                }
+
+                usedAngles.Add(leftAngle);
+                float leftRad = leftAngle * Mathf.Deg2Rad;
+                leftDir = new Vector2(Mathf.Cos(leftRad), Mathf.Sin(leftRad)).normalized;
+
+                rightAngle = Random.Range(electroBallPrefabComponent.RightMinAngle, electroBallPrefabComponent.RightMaxAngle);
+                for (int attempt = 0; attempt < maxAttempts; attempt++)
+                {
+                    float candidate = Random.Range(electroBallPrefabComponent.RightMinAngle, electroBallPrefabComponent.RightMaxAngle);
+                    if (!IsAngleTooClose(candidate, usedAngles, electroBallMinSeparation))
+                    {
+                        rightAngle = candidate;
+                        break;
+                    }
+                    rightAngle = candidate;
+                }
+
+                usedAngles.Add(rightAngle);
+                float rightRad = rightAngle * Mathf.Deg2Rad;
+                rightDir = new Vector2(Mathf.Cos(rightRad), Mathf.Sin(rightRad)).normalized;
+
+                Vector2 leftOffset = electroBallPrefabComponent.GetSpawnOffset(leftDir);
+                Vector3 leftPos = spawnPosition + new Vector3(leftOffset.x, leftOffset.y, 0f);
+                float leftZ = Mathf.Atan2(leftDir.y, leftDir.x) * Mathf.Rad2Deg;
+                Quaternion leftRot = Quaternion.Euler(0f, 0f, leftZ);
+                GameObject leftProjectile = Instantiate(data.card.projectilePrefab, leftPos, leftRot);
+                ProjectileCardModifiers.Instance.TagProjectileWithCard(leftProjectile, data.card);
+
+                ElectroBall leftElectroBall = leftProjectile.GetComponent<ElectroBall>();
+                if (leftElectroBall != null)
+                {
+                    leftElectroBall.SetDirection(leftDir);
+                    bool skipCheck = hasCheckedCooldownForEnhancedElectroBall;
+                    leftElectroBall.Launch(leftDir, playerCollider, playerMana, skipCheck);
+                    hasCheckedCooldownForEnhancedElectroBall = true;
+                }
+
+                if (modifierApplier != null)
+                {
+                    modifierApplier.ApplyModifiersToProjectile(leftProjectile, data.card);
+                }
+
+                Vector2 rightOffset = electroBallPrefabComponent.GetSpawnOffset(rightDir);
+                Vector3 rightPos = spawnPosition + new Vector3(rightOffset.x, rightOffset.y, 0f);
+                float rightZ = Mathf.Atan2(rightDir.y, rightDir.x) * Mathf.Rad2Deg;
+                Quaternion rightRot = Quaternion.Euler(0f, 0f, rightZ);
+                GameObject rightProjectile = Instantiate(data.card.projectilePrefab, rightPos, rightRot);
+                ProjectileCardModifiers.Instance.TagProjectileWithCard(rightProjectile, data.card);
+
+                ElectroBall rightElectroBall = rightProjectile.GetComponent<ElectroBall>();
+                if (rightElectroBall != null)
+                {
+                    rightElectroBall.SetDirection(rightDir);
+                    bool skipCheck = hasCheckedCooldownForEnhancedElectroBall;
+                    rightElectroBall.Launch(rightDir, playerCollider, playerMana, skipCheck);
+                    hasCheckedCooldownForEnhancedElectroBall = true;
+                }
+
+                if (modifierApplier != null)
+                {
+                    modifierApplier.ApplyModifiersToProjectile(rightProjectile, data.card);
+                }
+
+                continue;
+            }
+
             // CRITICAL FIX: Each projectile gets unique random direction if custom angles enabled
             Vector2 currentSpawnDirection;
             if (data.card.useCustomAngles && projCount > 1)
@@ -958,6 +1194,7 @@ public class ProjectileSpawner : MonoBehaviour
                 // Check if this is a Talon variant projectile with minimum angle separation
                 ProjectileFireTalon fireTalonCheck = data.card.projectilePrefab.GetComponent<ProjectileFireTalon>();
                 ProjectileIceTalon iceTalonCheck = data.card.projectilePrefab.GetComponent<ProjectileIceTalon>();
+                ElectroBall electroBallCheck = electroBallPrefabComponent;
                 
                 if (fireTalonCheck != null && fireTalonCheck.minAngleSeparation > 0f)
                 {
@@ -977,9 +1214,19 @@ public class ProjectileSpawner : MonoBehaviour
                 }
                 else
                 {
-                    // Generate unique random direction for each projectile
-                    currentSpawnDirection = GetSpawnDirection(data.card);
-                    Debug.Log($"<color=cyan>Projectile #{i+1}/{projCount}: Unique random direction = {currentSpawnDirection}</color>");
+                    if (electroBallCheck != null && electroBallMinSeparation > 0f)
+                    {
+                        currentSpawnDirection = GetDirectionWithMinSeparation(data.card, usedAngles, electroBallMinSeparation);
+                        float currentAngle = Mathf.Atan2(currentSpawnDirection.y, currentSpawnDirection.x) * Mathf.Rad2Deg;
+                        usedAngles.Add(currentAngle);
+                        Debug.Log($"<color=cyan>Projectile #{i+1}/{projCount}: ElectroBall direction with {electroBallMinSeparation}° separation = {currentSpawnDirection}, angle = {currentAngle:F1}°</color>");
+                    }
+                    else
+                    {
+                        // Generate unique random direction for each projectile
+                        currentSpawnDirection = GetSpawnDirection(data.card);
+                        Debug.Log($"<color=cyan>Projectile #{i+1}/{projCount}: Unique random direction = {currentSpawnDirection}</color>");
+                    }
                 }
             }
             else
@@ -1015,7 +1262,9 @@ public class ProjectileSpawner : MonoBehaviour
             ProjectileFireTalon fireTalon1 = projectile.GetComponent<ProjectileFireTalon>();
             ProjectileIceTalon iceTalon1 = projectile.GetComponent<ProjectileIceTalon>();
             ElementalBeam beam = projectile.GetComponent<ElementalBeam>();
+            FireBall fireBall = projectile.GetComponent<FireBall>();
             PlayerProjectiles playerProj = projectile.GetComponent<PlayerProjectiles>();
+            ElectroBall electroBall = projectile.GetComponent<ElectroBall>();
 
             if (fireTalon1 != null)
             {
@@ -1054,6 +1303,18 @@ public class ProjectileSpawner : MonoBehaviour
                     Debug.Log($"<color=gold>ElementalBeam #{i+1}: Spawned as additional projectile (skipping cooldown/mana)</color>");
                 }
             }
+            else if (fireBall != null)
+            {
+                // FireBall - call Launch() method
+                // CRITICAL: Only first projectile checks cooldown/mana
+                bool skipCheck = (i > 0);
+                fireBall.Launch(finalDirection, playerCollider, playerMana, skipCheck);
+
+                if (skipCheck)
+                {
+                    Debug.Log($"<color=gold>FireBall #{i+1}: Spawned as additional projectile (skipping cooldown/mana)</color>");
+                }
+            }
             else if (playerProj != null)
             {
                 // PlayerProjectiles (FireBolt, etc.) - call Launch() method
@@ -1064,6 +1325,17 @@ public class ProjectileSpawner : MonoBehaviour
                 if (skipCheck)
                 {
                     Debug.Log($"<color=gold>PlayerProjectiles #{i+1}: Spawned as additional projectile (skipping cooldown/mana)</color>");
+                }
+            }
+            else if (electroBall != null)
+            {
+                electroBall.SetDirection(finalDirection);
+                bool skipCheck = (i > 0);
+                electroBall.Launch(finalDirection, playerCollider, playerMana, skipCheck);
+
+                if (skipCheck)
+                {
+                    Debug.Log($"<color=gold>ElectroBall #{i+1}: Spawned as additional projectile (skipping cooldown/mana)</color>");
                 }
             }
             else if (rb != null)
@@ -1259,7 +1531,7 @@ public class ProjectileSpawner : MonoBehaviour
             // First beam fires immediately; later beams wait for the stagger
             if (i > 0)
             {
-                yield return new WaitForSeconds(interval);
+                yield return GameStateManager.WaitForPauseSafeSeconds(interval);
             }
 
             // Re-check that there are still enemies on-screen before each
@@ -1270,10 +1542,10 @@ public class ProjectileSpawner : MonoBehaviour
                 : null;
             if (beamPrefab != null)
             {
-                while (!beamPrefab.HasAnyOnScreenEnemy(transform.position))
+                while (!beamPrefab.HasAnyOnScreenEnemy(spawnPosition))
                 {
                     float delay = Mathf.Max(0.05f, beamPrefab.NoEnemyTargetDelay);
-                    yield return new WaitForSeconds(delay);
+                    yield return GameStateManager.WaitForPauseSafeSeconds(delay);
                 }
             }
 
@@ -1367,7 +1639,7 @@ public class ProjectileSpawner : MonoBehaviour
         float minAngle = card.minAngle;
         float maxAngle = card.maxAngle;
         
-        int maxAttempts = 100;
+        int maxAttempts = 30;
         int attempts = 0;
         float chosenAngle = 0f;
         
@@ -1380,14 +1652,7 @@ public class ProjectileSpawner : MonoBehaviour
             bool isFarEnough = true;
             foreach (float usedAngle in usedAngles)
             {
-                float diff = Mathf.Abs(chosenAngle - usedAngle);
-                
-                // Handle wrap-around (e.g., 359° and 1° are only 2° apart)
-                if (diff > 180f)
-                {
-                    diff = 360f - diff;
-                }
-                
+                float diff = Mathf.Abs(Mathf.DeltaAngle(chosenAngle, usedAngle));
                 if (diff < minSeparation)
                 {
                     isFarEnough = false;
@@ -1422,13 +1687,7 @@ public class ProjectileSpawner : MonoBehaviour
     {
         foreach (float usedAngle in usedAngles)
         {
-            float diff = Mathf.Abs(angle - usedAngle);
-            // Handle wrap-around (e.g., 359° and 1° are only 2° apart)
-            if (diff > 180f)
-            {
-                diff = 360f - diff;
-            }
-            
+            float diff = Mathf.Abs(Mathf.DeltaAngle(angle, usedAngle));
             if (diff < minSeparation)
             {
                 return true; // Too close!
@@ -1446,14 +1705,16 @@ public class ProjectileSpawner : MonoBehaviour
 
         Collider2D playerCollider = GetComponent<Collider2D>();
 
-        GameObject shieldObj = Instantiate(card.projectilePrefab, transform.position, Quaternion.identity);
+        Vector3 spawnOriginPosition = GetSpawnOriginPositionForCard(card);
+
+        GameObject shieldObj = Instantiate(card.projectilePrefab, spawnOriginPosition, Quaternion.identity);
         ProjectileCardModifiers.Instance.TagProjectileWithCard(shieldObj, card);
 
         HolyShield shieldComponent = shieldObj.GetComponent<HolyShield>();
 
         if (shieldComponent != null)
         {
-            shieldComponent.Initialize(transform.position, playerCollider, false);
+            shieldComponent.Initialize(spawnOriginPosition, playerCollider, false);
         }
 
         if (modifierApplier != null)
@@ -1468,7 +1729,7 @@ public class ProjectileSpawner : MonoBehaviour
     /// </summary>
     public void ResetAndReduceCooldowns(float reductionPercent)
     {
-        float currentTime = Time.time;
+        float currentTime = GameStateManager.PauseSafeTime;
         
         foreach (var data in activeProjectiles)
         {

@@ -46,32 +46,6 @@ public class OrbitalStarManager : MonoBehaviour
 
     [Tooltip("Radius for Level 6 orbit (largest)")]
     public float level6Radius = 18f;
-
-    [Header("Downtime System")]
-    [Tooltip("Downtime after Level 1 orbit completes (seconds)")]
-    public float level1Downtime = 2f;
-
-    [Tooltip("Downtime after Level 2 orbit completes (seconds)")]
-    public float level2Downtime = 3f;
-
-    [Tooltip("Downtime after Level 3 orbit completes (seconds)")]
-    public float level3Downtime = 4f;
-
-    [Tooltip("Downtime after Level 4 orbit completes (seconds)")]
-    public float level4Downtime = 5f;
-
-    [Tooltip("Downtime after Level 5 orbit completes (seconds)")]
-    public float level5Downtime = 6f;
-
-    [Tooltip("Downtime after Level 6 orbit completes (seconds)")]
-    public float level6Downtime = 7f;
-
-    [Header("Enhanced Sync Downtime")]
-    [Tooltip("Downtime after odd levels complete in enhanced mode")]
-    public float enhancedOddDowntime = 5f;
-
-    [Tooltip("Downtime after even levels complete in enhanced mode")]
-    public float enhancedEvenDowntime = 5f;
     
     [Header("Synchronized Spawning Mode")]
     [Tooltip("When enabled: Spawn one star at each level 1-6 sequentially (not odd/even batches). Works for single enhanced star or both synchronized.")]
@@ -140,6 +114,10 @@ public class OrbitalStarManager : MonoBehaviour
     [Header("Synchronization Settings")]
     [Tooltip("Enable enhanced synchronization: When level requirement met, both stars spawn at all odd/even levels together")]
     public bool synchronizeSpawns = false;
+
+    [Header("MEGASYNC")]
+    [Tooltip("When enabled: If BOTH NovaStar and DwarfStar have unlocked BOTH Variant 1 and Variant 2, they can enter MEGASYNC. When disabled: MEGASYNC never activates and stars do not share modifiers.")]
+    public bool enableMegaSync = true;
     
     [Tooltip("Delay between each level spawn in enhanced mode (seconds)")]
     public float enhancedLevelSpawnDelay = 2f;
@@ -185,11 +163,14 @@ public class OrbitalStarManager : MonoBehaviour
     private bool novaWasInSyncMode = false; // Track if NovaStar was in sync mode last frame
     private bool dwarfWasInSyncMode = false; // Track if DwarfStar was in sync mode last frame
 
+    private int novaSequentialLevel = 1;
+    private int novaReverseSequentialLevel = 6;
+    private int dwarfSequentialLevel = 1;
+    private int dwarfReverseSequentialLevel = 6;
+
     // Downtime tracking
     private bool novaStarWaitingForDowntime = false;
-    private float novaStarNextSpawnTime = 0f;
     private bool dwarfStarWaitingForDowntime = false;
-    private float dwarfStarNextSpawnTime = 0f;
     
     // Full cycle tracking (for enhanced transition)
     // Tracks if we're in middle of spawning a full cycle (1,3,5 or 2,4,6)
@@ -301,7 +282,7 @@ public class OrbitalStarManager : MonoBehaviour
         // is intentionally independent of the CURRENT variant index so that once a
         // star has unlocked both Variant 1 and Variant 2, its two tracks can be
         // considered permanently available for MEGASYNC purposes.
-        megaSyncActive = ShouldMegaSync();
+        megaSyncActive = enableMegaSync && ShouldMegaSync();
         if (!megaSyncActive)
         {
             // As soon as MEGASYNC is no longer active, allow its initialization
@@ -349,7 +330,6 @@ public class OrbitalStarManager : MonoBehaviour
         else
         {
             novaStarCurrentLevel = 1;
-            novaStarNextSpawnTime = Time.time;
             novaStarWaitingForDowntime = false;
             novaStarSpawnCoroutine = StartCoroutine(NovaStarCycleBase());
             Debug.Log($"<color=orange>NovaStar SWITCHED TO BASE cycle!</color>");
@@ -381,7 +361,6 @@ public class OrbitalStarManager : MonoBehaviour
         else
         {
             dwarfStarCurrentLevel = 2;
-            dwarfStarNextSpawnTime = Time.time;
             dwarfStarWaitingForDowntime = false;
             dwarfStarSpawnCoroutine = StartCoroutine(DwarfStarCycleBase());
             Debug.Log($"<color=cyan>DwarfStar SWITCHED TO BASE cycle!</color>");
@@ -418,7 +397,6 @@ public class OrbitalStarManager : MonoBehaviour
         else
         {
             novaStarCurrentLevel = 1;
-            novaStarNextSpawnTime = Time.time;
             novaStarWaitingForDowntime = false;
             novaStarSpawnCoroutine = StartCoroutine(NovaStarCycleBase());
             Debug.Log($"<color=orange>NovaStar BASE cycle started (odd levels only)</color>");
@@ -455,7 +433,6 @@ public class OrbitalStarManager : MonoBehaviour
         else
         {
             dwarfStarCurrentLevel = 2;
-            dwarfStarNextSpawnTime = Time.time;
             dwarfStarWaitingForDowntime = false;
             dwarfStarSpawnCoroutine = StartCoroutine(DwarfStarCycleBase());
             Debug.Log($"<color=cyan>DwarfStar BASE cycle started (even levels only)</color>");
@@ -728,7 +705,7 @@ public class OrbitalStarManager : MonoBehaviour
             // boss cards are shown.
             if (bossEventActive)
             {
-                yield return new WaitForSeconds(0.5f);
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 continue;
             }
 
@@ -746,7 +723,7 @@ public class OrbitalStarManager : MonoBehaviour
             }
 
             // Check if can spawn (not waiting for downtime)
-            if (!novaStarWaitingForDowntime && Time.time >= novaStarNextSpawnTime)
+            if (!novaStarWaitingForDowntime)
             {
                 // Spawn at current odd level
                 SpawnNovaStar(novaStarCurrentLevel);
@@ -755,7 +732,7 @@ public class OrbitalStarManager : MonoBehaviour
                 Debug.Log($"<color=orange>NovaStar BASE spawned at Level {novaStarCurrentLevel}, waiting for orbit completion</color>");
             }
 
-            yield return new WaitForSeconds(0.5f);
+            yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
         }
     }
 
@@ -768,7 +745,7 @@ public class OrbitalStarManager : MonoBehaviour
             // boss cards are shown.
             if (bossEventActive)
             {
-                yield return new WaitForSeconds(0.5f);
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 continue;
             }
 
@@ -786,7 +763,7 @@ public class OrbitalStarManager : MonoBehaviour
             }
             
             // Check if can spawn (not waiting for downtime)
-            if (!dwarfStarWaitingForDowntime && Time.time >= dwarfStarNextSpawnTime)
+            if (!dwarfStarWaitingForDowntime)
             {
                 // Spawn at current even level
                 SpawnDwarfStar(dwarfStarCurrentLevel);
@@ -795,7 +772,7 @@ public class OrbitalStarManager : MonoBehaviour
                 Debug.Log($"<color=cyan>DwarfStar BASE spawned at Level {dwarfStarCurrentLevel}, waiting for orbit completion</color>");
             }
 
-            yield return new WaitForSeconds(0.5f);
+            yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
         }
     }
 
@@ -806,12 +783,12 @@ public class OrbitalStarManager : MonoBehaviour
         // CRITICAL FIX: Reset sequential level to 1 when starting enhanced mode
         if (novaSequential && !novaReverseSequential)
         {
-            currentSequentialLevel = 1;
+            novaSequentialLevel = 1;
             Debug.Log($"<color=gold>★ NovaStar Enhanced: Reset currentSequentialLevel to 1</color>");
         }
         else if (novaReverseSequential)
         {
-            currentReverseSequentialLevel = 6;
+            novaReverseSequentialLevel = 6;
             Debug.Log($"<color=magenta>★ NovaStar Enhanced: Reset currentReverseSequentialLevel to 6</color>");
         }
         
@@ -821,9 +798,15 @@ public class OrbitalStarManager : MonoBehaviour
         Debug.Log($"  sequential: {sequential}");
         Debug.Log($"  reverseSequential: {reverseSequential}");
         Debug.Log($"  synchronizeSpawns: {synchronizeSpawns}");
-        Debug.Log($"  currentSequentialLevel: {currentSequentialLevel}");
+        Debug.Log($"  currentSequentialLevel: {novaSequentialLevel}");
         Debug.Log($"  isNovaStarEnhanced: {isNovaStarEnhanced}");
         Debug.Log($"  isDwarfStarEnhanced: {isDwarfStarEnhanced}");
+
+        float novaStackedSeqNextSpawnTime = 0f;
+        float novaStackedRevNextSpawnTime = 0f;
+        bool novaStackedSeqWasActive = false;
+        bool novaStackedRevWasActive = false;
+        bool novaStackedInitialized = false;
         
         while (true)
         {
@@ -832,7 +815,7 @@ public class OrbitalStarManager : MonoBehaviour
             // new orbits appear while boss cards/menace are active.
             if (bossEventActive)
             {
-                yield return new WaitForSeconds(0.5f);
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 continue;
             }
 
@@ -908,7 +891,7 @@ public class OrbitalStarManager : MonoBehaviour
                         }
 
                         Debug.Log("<color=yellow>Waiting for existing NovaStar/DwarfStar orbits to finish before starting MEGASYNC...</color>");
-                        yield return new WaitForSeconds(0.5f);
+                        yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                     }
 
                     currentSequentialLevel = 1;
@@ -943,7 +926,7 @@ public class OrbitalStarManager : MonoBehaviour
                 SpawnSingleDwarfStarAtLevelReverse(currentReverseSequentialLevel, 0f);
 
                 // Wait until ALL NovaStar and DwarfStar instances have despawned.
-                float megaWaitStart = Time.time;
+                float megaWaitStart = GameStateManager.PauseSafeTime;
                 while (true)
                 {
                     bool anyNova = FindObjectsOfType<NovaStar>().Length > 0;
@@ -954,20 +937,13 @@ public class OrbitalStarManager : MonoBehaviour
                         break;
                     }
 
-                    if (Time.time - megaWaitStart > enhancedStallTimeout)
+                    if (GameStateManager.PauseSafeTime - megaWaitStart > enhancedStallTimeout)
                     {
                         Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for MEGASYNC completion at seq L{currentSequentialLevel} / rev L{currentReverseSequentialLevel}. Still waiting to avoid overlapping waves.</color>");
                     }
 
-                    yield return new WaitForSeconds(0.5f);
+                    yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 }
-
-                // Downtime uses the slower of the two level-specific downtimes so
-                // the MEGASYNC step feels like a single combined cycle.
-                float seqDowntime = GetDowntimeForLevel(currentSequentialLevel);
-                float revDowntime = GetDowntimeForLevel(currentReverseSequentialLevel);
-                float megaDowntime = Mathf.Max(seqDowntime, revDowntime);
-                yield return new WaitForSeconds(megaDowntime);
 
                 // Advance both tracks: 1→2→3 and 6→5→4.
                 currentSequentialLevel++;
@@ -1040,7 +1016,7 @@ public class OrbitalStarManager : MonoBehaviour
 
                 // Wait until ALL Nova/Dwarf instances from this step have
                 // despawned so no new wave overlaps a previous one.
-                float partialWaitStart = Time.time;
+                float partialWaitStart = GameStateManager.PauseSafeTime;
                 while (true)
                 {
                     bool anyNova = FindObjectsOfType<NovaStar>().Length > 0;
@@ -1051,20 +1027,13 @@ public class OrbitalStarManager : MonoBehaviour
                         break;
                     }
 
-                    if (Time.time - partialWaitStart > enhancedStallTimeout)
+                    if (GameStateManager.PauseSafeTime - partialWaitStart > enhancedStallTimeout)
                     {
                         Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for partial Nova V1+V2 / Dwarf V1 completion at seq L{currentSequentialLevel} / rev L{currentReverseSequentialLevel}. Still waiting to avoid overlapping waves.</color>");
                     }
 
-                    yield return new WaitForSeconds(0.5f);
+                    yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 }
-
-                // Downtime uses the slower of the two levels so the trio feels
-                // like a single combined cycle.
-                float partialSeqDowntime = GetDowntimeForLevel(currentSequentialLevel);
-                float partialRevDowntime = GetDowntimeForLevel(currentReverseSequentialLevel);
-                float partialDowntime = Mathf.Max(partialSeqDowntime, partialRevDowntime);
-                yield return new WaitForSeconds(partialDowntime);
 
                 // Advance both tracks: 1→2→3 (sequential) and 6→5→4 (reverse).
                 currentSequentialLevel++;
@@ -1130,7 +1099,7 @@ public class OrbitalStarManager : MonoBehaviour
                 // Extra reverse Dwarf V2.
                 SpawnSingleDwarfStarAtLevelReverse(currentReverseSequentialLevel, 0f);
 
-                float dwarfPartialWaitStart = Time.time;
+                float dwarfPartialWaitStart = GameStateManager.PauseSafeTime;
                 while (true)
                 {
                     bool anyNova = FindObjectsOfType<NovaStar>().Length > 0;
@@ -1141,18 +1110,13 @@ public class OrbitalStarManager : MonoBehaviour
                         break;
                     }
 
-                    if (Time.time - dwarfPartialWaitStart > enhancedStallTimeout)
+                    if (GameStateManager.PauseSafeTime - dwarfPartialWaitStart > enhancedStallTimeout)
                     {
                         Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for partial Nova V1 / Dwarf V1+V2 completion at seq L{currentSequentialLevel} / rev L{currentReverseSequentialLevel}. Still waiting to avoid overlapping waves.</color>");
                     }
 
-                    yield return new WaitForSeconds(0.5f);
+                    yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 }
-
-                float dwarfPartialSeqDowntime = GetDowntimeForLevel(currentSequentialLevel);
-                float dwarfPartialRevDowntime = GetDowntimeForLevel(currentReverseSequentialLevel);
-                float dwarfPartialDowntime = Mathf.Max(dwarfPartialSeqDowntime, dwarfPartialRevDowntime);
-                yield return new WaitForSeconds(dwarfPartialDowntime);
 
                 currentSequentialLevel++;
                 if (currentSequentialLevel > 3)
@@ -1202,95 +1166,93 @@ public class OrbitalStarManager : MonoBehaviour
 
             if (novaSeqRevStacked)
             {
-                // Ensure the per-mode level trackers are within their expected
-                // ranges before we start pairing them.
-                if (currentSequentialLevel < 1 || currentSequentialLevel > 3)
+                if (!novaStackedInitialized)
                 {
-                    currentSequentialLevel = 1;
-                }
-                if (currentReverseSequentialLevel < 4 || currentReverseSequentialLevel > 6)
-                {
-                    currentReverseSequentialLevel = 6;
+                    novaStackedInitialized = true;
+                    novaStackedSeqNextSpawnTime = GameStateManager.PauseSafeTime;
+                    novaStackedRevNextSpawnTime = GameStateManager.PauseSafeTime;
+                    GetNovaStarTrackActivity(out novaStackedSeqWasActive, out novaStackedRevWasActive);
                 }
 
-                Debug.Log($"<color=gold>NovaStar STACKED SEQ+REV SOLO: spawning Level {currentSequentialLevel} (seq) & Level {currentReverseSequentialLevel} (rev)</color>");
-
-                // Reset Nova counters for this paired step.
-                novaStarsCompletedCount = 0;
-                novaStarsActiveCount = 0;
-
-                // Spawn one sequential NovaStar at the currentSequentialLevel.
-                SpawnSingleNovaStarAtLevel(currentSequentialLevel, 0f);
-
-                // Spawn one reverse-sequential NovaStar at the currentReverseSequentialLevel.
-                SpawnSingleNovaStarAtLevelReverse(currentReverseSequentialLevel, 0f);
-
-                // Wait until ALL NovaStars from this step have despawned. We rely
-                // on actual scene instances here to guarantee no overlapping
-                // waves for the stacked pair.
-                float waitStart = Time.time;
-                while (true)
+                if (novaSequentialLevel < 1 || novaSequentialLevel > 3)
                 {
-                    bool anyNova = FindObjectsOfType<NovaStar>().Length > 0;
-                    if (!anyNova)
-                    {
-                        Debug.Log($"<color=gold>NovaStar STACKED SEQ+REV: both orbits completed (seq L{currentSequentialLevel}, rev L{currentReverseSequentialLevel})</color>");
-                        break;
-                    }
-
-                    if (Time.time - waitStart > enhancedStallTimeout)
-                    {
-                        Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for stacked NovaStar seq+rev completion at Levels {currentSequentialLevel}/{currentReverseSequentialLevel}. Still waiting to avoid overlapping waves.</color>");
-                    }
-
-                    yield return new WaitForSeconds(0.5f);
+                    novaSequentialLevel = 1;
+                }
+                if (novaReverseSequentialLevel < 4 || novaReverseSequentialLevel > 6)
+                {
+                    novaReverseSequentialLevel = 6;
                 }
 
-                // Use the slower of the two downtimes so the pair feels like a
-                // single combined cycle.
-                float seqDowntime = GetDowntimeForLevel(currentSequentialLevel);
-                float revDowntime = GetDowntimeForLevel(currentReverseSequentialLevel);
-                float stackedDowntime = Mathf.Max(seqDowntime, revDowntime);
-                yield return new WaitForSeconds(stackedDowntime);
+                GetNovaStarTrackActivity(out bool seqActive, out bool revActive);
 
-                // Advance the forward and reverse tracks: 1→2→3 and 6→5→4.
-                currentSequentialLevel++;
-                if (currentSequentialLevel > 3)
+                if (novaStackedSeqWasActive && !seqActive)
                 {
-                    if (loopLevels)
+                    novaStackedSeqNextSpawnTime = GameStateManager.PauseSafeTime;
+
+                    novaSequentialLevel++;
+                    if (novaSequentialLevel > 3)
                     {
-                        currentSequentialLevel = 1;
-                        Debug.Log($"<color=gold>NovaStar STACKED SEQ: Looping back to Level 1 (1→2→3)</color>");
-                    }
-                    else
-                    {
-                        Debug.Log($"<color=gold>NovaStar STACKED SEQ: Reached Level 3, stopping</color>");
-                        yield break;
+                        if (loopLevels)
+                        {
+                            novaSequentialLevel = 1;
+                            Debug.Log($"<color=gold>SEQUENTIAL MODE: Looping back to Level 1 (1→2→3)</color>");
+                        }
+                        else
+                        {
+                            Debug.Log($"<color=gold>SEQUENTIAL MODE: Reached Level 3, stopping</color>");
+                            yield break;
+                        }
                     }
                 }
 
-                currentReverseSequentialLevel--;
-                if (currentReverseSequentialLevel < 4)
+                if (novaStackedRevWasActive && !revActive)
                 {
-                    if (loopLevels)
+                    novaStackedRevNextSpawnTime = GameStateManager.PauseSafeTime;
+
+                    novaReverseSequentialLevel--;
+                    if (novaReverseSequentialLevel < 4)
                     {
-                        currentReverseSequentialLevel = 6;
-                        Debug.Log($"<color=magenta>NovaStar STACKED REV: Looping back to Level 6 (6→5→4)</color>");
-                    }
-                    else
-                    {
-                        Debug.Log($"<color=magenta>NovaStar STACKED REV: Reached Level 4, stopping</color>");
-                        yield break;
+                        if (loopLevels)
+                        {
+                            novaReverseSequentialLevel = 6;
+                            Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE: Looping back to Level 6 (6→5→4)</color>");
+                        }
+                        else
+                        {
+                            Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE: Reached Level 4, stopping</color>");
+                            yield break;
+                        }
                     }
                 }
 
+                if (!seqActive && GameStateManager.PauseSafeTime >= novaStackedSeqNextSpawnTime)
+                {
+                    SpawnSingleNovaStarAtLevel(novaSequentialLevel, 0f);
+                    seqActive = true;
+                }
+
+                if (!revActive && GameStateManager.PauseSafeTime >= novaStackedRevNextSpawnTime)
+                {
+                    SpawnSingleNovaStarAtLevelReverse(novaReverseSequentialLevel, 0f);
+                    revActive = true;
+                }
+
+                novaStackedSeqWasActive = seqActive;
+                novaStackedRevWasActive = revActive;
+
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.1f);
                 continue;
+            }
+            else
+            {
+                novaStackedInitialized = false;
             }
 
             // ==================== SEQUENTIAL MODE (per-star) ====================
             if (novaSequential && !novaReverseSequential)
             {
                 bool spawnedReverseDuringSequential = false;
+                bool transitionToStacked = false;
                 if (shouldSync)
                 {
                     // Check if we just transitioned to sync mode
@@ -1313,7 +1275,7 @@ public class OrbitalStarManager : MonoBehaviour
                             }
 
                             Debug.Log("<color=yellow>Waiting for existing NovaStar/DwarfStar orbits to finish before starting synchronized sequential sequence...</color>");
-                            yield return new WaitForSeconds(0.5f);
+                            yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                         }
 
                         // NOW reset to level 1 after ALL previous orbits completed
@@ -1325,7 +1287,7 @@ public class OrbitalStarManager : MonoBehaviour
                     Debug.Log($"<color=gold>NovaStar SYNCHRONIZED SEQUENTIAL: Waiting for DwarfStar coroutine</color>");
                     while (!isDwarfStarEnhanced || dwarfStarSpawnCoroutine == null)
                     {
-                        yield return new WaitForSeconds(0.5f);
+                        yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                     }
 
                     Debug.Log($"<color=gold>SEQUENTIAL MODE (SYNC): Spawning level {currentSequentialLevel}</color>");
@@ -1344,7 +1306,7 @@ public class OrbitalStarManager : MonoBehaviour
 
                     // Wait for BOTH to complete using actual scene objects so that no
                     // new level starts while any previous orbit is still alive.
-                    float bothWaitStart = Time.time;
+                    float bothWaitStart = GameStateManager.PauseSafeTime;
                     while (true)
                     {
                         bool anyNovaSeq = FindObjectsOfType<NovaStar>().Length > 0;
@@ -1356,7 +1318,7 @@ public class OrbitalStarManager : MonoBehaviour
                             break;
                         }
 
-                        if (Time.time - bothWaitStart > enhancedStallTimeout)
+                        if (GameStateManager.PauseSafeTime - bothWaitStart > enhancedStallTimeout)
                         {
                             // Log a warning but DO NOT advance to the next level while
                             // stars are still alive. We only leave this loop when the
@@ -1364,7 +1326,7 @@ public class OrbitalStarManager : MonoBehaviour
                             Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for all NovaStar/DwarfStar instances to despawn at Level {currentSequentialLevel} (sequential sync). Still waiting to avoid overlapping waves.</color>");
                         }
 
-                        yield return new WaitForSeconds(0.5f);
+                        yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                     }
                 }
                 else
@@ -1376,7 +1338,7 @@ public class OrbitalStarManager : MonoBehaviour
                     Debug.Log($"<color=gold>╔═══════════════════════════════════════════════════════════╗</color>");
                     Debug.Log($"<color=gold>║   SEQUENTIAL MODE (SOLO) - SPAWNING NOVASTAR            ║</color>");
                     Debug.Log($"<color=gold>╚═══════════════════════════════════════════════════════════╝</color>");
-                    Debug.Log($"  currentSequentialLevel: {currentSequentialLevel}");
+                    Debug.Log($"  currentSequentialLevel: {novaSequentialLevel}");
                     Debug.Log($"  novaStarsCompletedCount: {novaStarsCompletedCount}");
                     Debug.Log($"  novaStarsActiveCount: {novaStarsActiveCount}");
                     
@@ -1384,86 +1346,76 @@ public class OrbitalStarManager : MonoBehaviour
                     novaStarsCompletedCount = 0;
                     novaStarsActiveCount = 0;
                     
-                    Debug.Log($"<color=gold>  Calling SpawnSingleNovaStarAtLevel({currentSequentialLevel}, 0)...</color>");
+                    Debug.Log($"<color=gold>  Calling SpawnSingleNovaStarAtLevel({novaSequentialLevel}, 0)...</color>");
                     
                     // Spawn only ONE NovaStar at this level in sequential SOLO mode
-                    SpawnSingleNovaStarAtLevel(currentSequentialLevel, 0);
+                    SpawnSingleNovaStarAtLevel(novaSequentialLevel, 0);
                     
                     Debug.Log($"<color=gold>  SpawnNovaStarAtLevel completed!</color>");
                     Debug.Log($"<color=gold>  novaStarsActiveCount after spawn: {novaStarsActiveCount}</color>");
                     
                     // Wait until all NovaStar instances have despawned before advancing.
-                    float novaWaitStart = Time.time;
+                    float novaWaitStart = GameStateManager.PauseSafeTime;
                     while (true)
                     {
                         CheckEnhancedMode();
-                        if (!megaSync && !spawnedReverseDuringSequential && novaHasVariant1Stack && novaHasVariant2Stack)
+                        if (!megaSync && novaHasVariant1Stack && novaHasVariant2Stack)
                         {
-                            if (currentReverseSequentialLevel < 4 || currentReverseSequentialLevel > 6)
+                            if (!spawnedReverseDuringSequential)
                             {
-                                currentReverseSequentialLevel = 6;
+                                SpawnSingleNovaStarAtLevelReverse(novaReverseSequentialLevel, 0f);
+                                spawnedReverseDuringSequential = true;
                             }
 
-                            SpawnSingleNovaStarAtLevelReverse(currentReverseSequentialLevel, 0f);
+                            transitionToStacked = true;
+                            break;
+                        }
+                        if (!megaSync && !spawnedReverseDuringSequential && novaHasVariant1Stack && novaHasVariant2Stack)
+                        {
+                            if (novaReverseSequentialLevel < 4 || novaReverseSequentialLevel > 6)
+                            {
+                                novaReverseSequentialLevel = 6;
+                            }
+
+                            SpawnSingleNovaStarAtLevelReverse(novaReverseSequentialLevel, 0f);
                             spawnedReverseDuringSequential = true;
                         }
 
-                        bool anyNova = FindObjectsOfType<NovaStar>().Length > 0;
-                        if (!anyNova)
+                        GetNovaStarTrackActivity(out bool anyNovaSeq, out _);
+                        if (!anyNovaSeq)
                         {
-                            Debug.Log($"<color=gold>NovaStar completed Level {currentSequentialLevel}!</color>");
+                            Debug.Log($"<color=gold>NovaStar completed Level {novaSequentialLevel}!</color>");
                             break;
                         }
 
-                        if (Time.time - novaWaitStart > enhancedStallTimeout)
+                        if (GameStateManager.PauseSafeTime - novaWaitStart > enhancedStallTimeout)
                         {
-                            Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for NovaStar instances to despawn at Level {currentSequentialLevel} (sequential solo). Still waiting to avoid overlapping waves.</color>");
+                            Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for NovaStar instances to despawn at Level {novaSequentialLevel} (sequential solo). Still waiting to avoid overlapping waves.</color>");
                         }
 
-                        yield return new WaitForSeconds(0.5f);
+                        yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                     }
                 }
-                
-                // Downtime
-                float downtime1 = GetDowntimeForLevel(currentSequentialLevel);
-                if (spawnedReverseDuringSequential)
+
+                if (transitionToStacked)
                 {
-                    float reverseDowntime = GetDowntimeForLevel(currentReverseSequentialLevel);
-                    downtime1 = Mathf.Max(downtime1, reverseDowntime);
+                    yield return null;
+                    continue;
                 }
-                yield return new WaitForSeconds(downtime1);
                 
                 // Progress to next level (1 → 2 → 3)
-                currentSequentialLevel++;
-                if (currentSequentialLevel > 3)
+                novaSequentialLevel++;
+                if (novaSequentialLevel > 3)
                 {
                     if (loopLevels)
                     {
-                        currentSequentialLevel = 1;
+                        novaSequentialLevel = 1;
                         Debug.Log($"<color=gold>SEQUENTIAL MODE: Looping back to Level 1 (1→2→3)</color>");
                     }
                     else
                     {
                         Debug.Log($"<color=gold>SEQUENTIAL MODE: Reached Level 3, stopping</color>");
                         yield break;
-                    }
-                }
-
-                if (spawnedReverseDuringSequential)
-                {
-                    currentReverseSequentialLevel--;
-                    if (currentReverseSequentialLevel < 4)
-                    {
-                        if (loopLevels)
-                        {
-                            currentReverseSequentialLevel = 6;
-                            Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE: Looping back to Level 6 (6→5→4)</color>");
-                        }
-                        else
-                        {
-                            Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE: Reached Level 4, stopping</color>");
-                            yield break;
-                        }
                     }
                 }
                 
@@ -1474,6 +1426,7 @@ public class OrbitalStarManager : MonoBehaviour
             if (novaReverseSequential)
             {
                 bool spawnedSequentialDuringReverse = false;
+                bool transitionToStacked = false;
                 if (shouldSync)
                 {
                     // Check if we just transitioned to sync mode
@@ -1496,7 +1449,7 @@ public class OrbitalStarManager : MonoBehaviour
                             }
 
                             Debug.Log("<color=yellow>Waiting for existing NovaStar/DwarfStar orbits to finish before starting synchronized reverse sequence...</color>");
-                            yield return new WaitForSeconds(0.5f);
+                            yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                         }
 
                         // NOW reset to level 6 after ALL previous orbits completed
@@ -1508,7 +1461,7 @@ public class OrbitalStarManager : MonoBehaviour
                     Debug.Log($"<color=gold>NovaStar SYNCHRONIZED REVERSE SEQUENTIAL: Waiting for DwarfStar coroutine</color>");
                     while (!isDwarfStarEnhanced || dwarfStarSpawnCoroutine == null)
                     {
-                        yield return new WaitForSeconds(0.5f);
+                        yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                     }
                     
                     Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE (SYNC): Spawning level {currentReverseSequentialLevel}</color>");
@@ -1529,7 +1482,7 @@ public class OrbitalStarManager : MonoBehaviour
                     // NovaStar/DwarfStar instances in the scene instead of only the
                     // internal counters so that no new level starts while any previous
                     // orbit is still alive.
-                    float bothRevWaitStart = Time.time;
+                    float bothRevWaitStart = GameStateManager.PauseSafeTime;
                     while (true)
                     {
                         bool anyNova = FindObjectsOfType<NovaStar>().Length > 0;
@@ -1541,7 +1494,7 @@ public class OrbitalStarManager : MonoBehaviour
                             break;
                         }
 
-                        if (Time.time - bothRevWaitStart > enhancedStallTimeout)
+                        if (GameStateManager.PauseSafeTime - bothRevWaitStart > enhancedStallTimeout)
                         {
                             // Log a warning but DO NOT advance to the next level while
                             // stars are still alive. We only leave this loop when the
@@ -1549,7 +1502,7 @@ public class OrbitalStarManager : MonoBehaviour
                             Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for all NovaStar/DwarfStar instances to despawn at Level {currentReverseSequentialLevel} (reverse sync). Still waiting to avoid overlapping waves.</color>");
                         }
 
-                        yield return new WaitForSeconds(0.5f);
+                        yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                     }
                 }
                 else
@@ -1558,94 +1511,84 @@ public class OrbitalStarManager : MonoBehaviour
                     novaWasInSyncMode = false;
                     
                     // SINGLE-STAR REVERSE SEQUENTIAL: Only NovaStar spawns
-                    Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE (SOLO): NovaStar spawning level {currentReverseSequentialLevel}</color>");
+                    Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE (SOLO): NovaStar spawning level {novaReverseSequentialLevel}</color>");
                     
                     // Reset completion counters for NovaStar only
                     novaStarsCompletedCount = 0;
                     novaStarsActiveCount = 0;
                     
                     // Spawn only ONE NovaStar with REVERSE speed in SOLO mode
-                    SpawnSingleNovaStarAtLevelReverse(currentReverseSequentialLevel, 0);
+                    SpawnSingleNovaStarAtLevelReverse(novaReverseSequentialLevel, 0);
                     
-                    Debug.Log($"<color=magenta>SOLO: NovaStar spawned at Level {currentReverseSequentialLevel}</color>");
+                    Debug.Log($"<color=magenta>SOLO: NovaStar spawned at Level {novaReverseSequentialLevel}</color>");
                     
                     // Wait for ALL NovaStar instances to despawn before moving to the
                     // next reverse level. Using actual scene objects here prevents new
                     // waves from starting while any previous orbit is still alive,
                     // which was causing multiple NovaStars to accumulate across levels.
-                    float novaRevWaitStart = Time.time;
+                    float novaRevWaitStart = GameStateManager.PauseSafeTime;
                     while (true)
                     {
                         CheckEnhancedMode();
-                        if (!megaSync && !spawnedSequentialDuringReverse && novaHasVariant1Stack && novaHasVariant2Stack)
+                        if (!megaSync && novaHasVariant1Stack && novaHasVariant2Stack)
                         {
-                            if (currentSequentialLevel < 1 || currentSequentialLevel > 3)
+                            if (!spawnedSequentialDuringReverse)
                             {
-                                currentSequentialLevel = 1;
+                                SpawnSingleNovaStarAtLevel(novaSequentialLevel, 0f);
+                                spawnedSequentialDuringReverse = true;
                             }
 
-                            SpawnSingleNovaStarAtLevel(currentSequentialLevel, 0f);
+                            transitionToStacked = true;
+                            break;
+                        }
+                        if (!megaSync && !spawnedSequentialDuringReverse && novaHasVariant1Stack && novaHasVariant2Stack)
+                        {
+                            if (novaSequentialLevel < 1 || novaSequentialLevel > 3)
+                            {
+                                novaSequentialLevel = 1;
+                            }
+
+                            SpawnSingleNovaStarAtLevel(novaSequentialLevel, 0f);
                             spawnedSequentialDuringReverse = true;
                         }
 
-                        bool anyNova = FindObjectsOfType<NovaStar>().Length > 0;
-                        if (!anyNova)
+                        GetNovaStarTrackActivity(out _, out bool anyNovaRev);
+                        if (!anyNovaRev)
                         {
-                            Debug.Log($"<color=magenta>NovaStar completed Level {currentReverseSequentialLevel}!</color>");
+                            Debug.Log($"<color=magenta>NovaStar completed Level {novaReverseSequentialLevel}!</color>");
                             break;
                         }
 
-                        if (Time.time - novaRevWaitStart > enhancedStallTimeout)
+                        if (GameStateManager.PauseSafeTime - novaRevWaitStart > enhancedStallTimeout)
                         {
                             // Log a warning but keep waiting until all NovaStars are
                             // actually gone to avoid overlapping reverse-sequential waves.
-                            Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for NovaStar reverse sequential completion at Level {currentReverseSequentialLevel}. Still waiting to avoid overlapping waves.</color>");
+                            Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for NovaStar reverse sequential completion at Level {novaReverseSequentialLevel}. Still waiting to avoid overlapping waves.</color>");
                         }
                         
-                        yield return new WaitForSeconds(0.5f);
+                        yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                     }
                 }
-                
-                // Downtime
-                float downtime2 = GetDowntimeForLevel(currentReverseSequentialLevel);
-                if (spawnedSequentialDuringReverse)
+
+                if (transitionToStacked)
                 {
-                    float seqDowntime = GetDowntimeForLevel(currentSequentialLevel);
-                    downtime2 = Mathf.Max(downtime2, seqDowntime);
+                    yield return null;
+                    continue;
                 }
-                yield return new WaitForSeconds(downtime2);
                 
                 // Progress to previous level (6 → 5 → 4)
-                currentReverseSequentialLevel--;
-                if (currentReverseSequentialLevel < 4)
+                novaReverseSequentialLevel--;
+                if (novaReverseSequentialLevel < 4)
                 {
                     if (loopLevels)
                     {
-                        currentReverseSequentialLevel = 6;
+                        novaReverseSequentialLevel = 6;
                         Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE: Looping back to Level 6 (6→5→4)</color>");
                     }
                     else
                     {
                         Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE: Reached Level 4, stopping</color>");
                         yield break;
-                    }
-                }
-
-                if (spawnedSequentialDuringReverse)
-                {
-                    currentSequentialLevel++;
-                    if (currentSequentialLevel > 3)
-                    {
-                        if (loopLevels)
-                        {
-                            currentSequentialLevel = 1;
-                            Debug.Log($"<color=gold>SEQUENTIAL MODE: Looping back to Level 1 (1→2→3)</color>");
-                        }
-                        else
-                        {
-                            Debug.Log($"<color=gold>SEQUENTIAL MODE: Reached Level 3, stopping</color>");
-                            yield break;
-                        }
                     }
                 }
                 
@@ -1686,7 +1629,7 @@ public class OrbitalStarManager : MonoBehaviour
 
                 if (i < levels.Length - 1)
                 {
-                    yield return new WaitForSeconds(enhancedLevelSpawnDelay);
+                    yield return GameStateManager.WaitForPauseSafeSeconds(enhancedLevelSpawnDelay);
                 }
             }
             
@@ -1695,7 +1638,7 @@ public class OrbitalStarManager : MonoBehaviour
             Debug.Log($"<color=gold>NovaStar ENHANCED ({syncStr}): Spawned at {levelStr} levels</color>");
             
             // Wait for all NovaStar to complete, with safety timeout
-            float novaEnhancedWaitStart = Time.time;
+            float novaEnhancedWaitStart = GameStateManager.PauseSafeTime;
             while (true)
             {
                 if (novaStarsActiveCount > 0 && novaStarsCompletedCount >= novaStarsActiveCount)
@@ -1704,20 +1647,20 @@ public class OrbitalStarManager : MonoBehaviour
                     break;
                 }
 
-                if (Time.time - novaEnhancedWaitStart > enhancedStallTimeout)
+                if (GameStateManager.PauseSafeTime - novaEnhancedWaitStart > enhancedStallTimeout)
                 {
                     Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for NovaStar enhanced odd/even completion. ({novaStarsCompletedCount}/{novaStarsActiveCount})</color>");
                     break;
                 }
                 
-                yield return new WaitForSeconds(0.5f);
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
             }
             
             // If synchronized, wait for DwarfStar to also complete
             if (shouldSync)
             {
                 Debug.Log($"<color=gold>NovaStar waiting for DwarfStar to complete...</color>");
-                float dwarfEnhancedWaitStart = Time.time;
+                float dwarfEnhancedWaitStart = GameStateManager.PauseSafeTime;
                 while (true)
                 {
                     bool dwarfComplete = dwarfStarsActiveCount > 0 && dwarfStarsCompletedCount >= dwarfStarsActiveCount;
@@ -1727,13 +1670,13 @@ public class OrbitalStarManager : MonoBehaviour
                         break;
                     }
 
-                    if (Time.time - dwarfEnhancedWaitStart > enhancedStallTimeout)
+                    if (GameStateManager.PauseSafeTime - dwarfEnhancedWaitStart > enhancedStallTimeout)
                     {
                         Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for DwarfStar enhanced completion. ({dwarfStarsCompletedCount}/{dwarfStarsActiveCount})</color>");
                         break;
                     }
 
-                    yield return new WaitForSeconds(0.5f);
+                    yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 }
             }
             
@@ -1744,10 +1687,7 @@ public class OrbitalStarManager : MonoBehaviour
             }
             
             // Wait for downtime before next spawn
-            float downtime = novaStarSpawnOddLevels ? enhancedEvenDowntime : enhancedOddDowntime;
-            yield return new WaitForSeconds(downtime);
-            
-            // If synchronized, toggle the shared flag AFTER downtime
+            // If synchronized, toggle the shared flag
             if (shouldSync)
             {
                 novaStarSpawnOddLevels = !novaStarSpawnOddLevels;
@@ -1761,16 +1701,22 @@ public class OrbitalStarManager : MonoBehaviour
         // CRITICAL FIX: Reset sequential level to 1 when starting enhanced mode
         if (dwarfSequential && !dwarfReverseSequential)
         {
-            currentSequentialLevel = 1;
+            dwarfSequentialLevel = 1;
             Debug.Log($"<color=gold>★ DwarfStar Enhanced: Reset currentSequentialLevel to 1</color>");
         }
         else if (dwarfReverseSequential)
         {
-            currentReverseSequentialLevel = 6;
+            dwarfReverseSequentialLevel = 6;
             Debug.Log($"<color=magenta>★ DwarfStar Enhanced: Reset currentReverseSequentialLevel to 6</color>");
         }
         
         Debug.Log($"<color=gold>DwarfStar Enhanced: Starting cycle!</color>");
+
+        float dwarfStackedSeqNextSpawnTime = 0f;
+        float dwarfStackedRevNextSpawnTime = 0f;
+        bool dwarfStackedSeqWasActive = false;
+        bool dwarfStackedRevWasActive = false;
+        bool dwarfStackedInitialized = false;
         
         while (true)
         {
@@ -1779,7 +1725,7 @@ public class OrbitalStarManager : MonoBehaviour
             // orbits appear while boss cards/menace are active.
             if (bossEventActive)
             {
-                yield return new WaitForSeconds(0.5f);
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 continue;
             }
 
@@ -1848,166 +1794,55 @@ public class OrbitalStarManager : MonoBehaviour
 
             if (dwarfSeqRevStacked)
             {
-                // Ensure the per-mode level trackers are within their expected ranges.
-                if (currentSequentialLevel < 1 || currentSequentialLevel > 3)
+                if (!dwarfStackedInitialized)
                 {
-                    currentSequentialLevel = 1;
-                }
-                if (currentReverseSequentialLevel < 4 || currentReverseSequentialLevel > 6)
-                {
-                    currentReverseSequentialLevel = 6;
+                    dwarfStackedInitialized = true;
+                    dwarfStackedSeqNextSpawnTime = GameStateManager.PauseSafeTime;
+                    dwarfStackedRevNextSpawnTime = GameStateManager.PauseSafeTime;
+                    GetDwarfStarTrackActivity(out dwarfStackedSeqWasActive, out dwarfStackedRevWasActive);
                 }
 
-                Debug.Log($"<color=gold>DwarfStar STACKED SEQ+REV SOLO: spawning Level {currentSequentialLevel} (seq) & Level {currentReverseSequentialLevel} (rev)</color>");
-
-                // Reset Dwarf counters for this paired step.
-                dwarfStarsCompletedCount = 0;
-                dwarfStarsActiveCount = 0;
-
-                // Spawn one sequential DwarfStar at the currentSequentialLevel.
-                SpawnSingleDwarfStarAtLevel(currentSequentialLevel, 0f);
-
-                // Spawn one reverse-sequential DwarfStar at the currentReverseSequentialLevel.
-                SpawnSingleDwarfStarAtLevelReverse(currentReverseSequentialLevel, 0f);
-
-                // Wait until ALL DwarfStars from this step have despawned.
-                float waitStart = Time.time;
-                while (true)
+                if (dwarfSequentialLevel < 1 || dwarfSequentialLevel > 3)
                 {
-                    bool anyDwarf = FindObjectsOfType<DwarfStar>().Length > 0;
-                    if (!anyDwarf)
-                    {
-                        Debug.Log($"<color=gold>DwarfStar STACKED SEQ+REV: both orbits completed (seq L{currentSequentialLevel}, rev L{currentReverseSequentialLevel})</color>");
-                        break;
-                    }
-
-                    if (Time.time - waitStart > enhancedStallTimeout)
-                    {
-                        Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for stacked DwarfStar seq+rev completion at Levels {currentSequentialLevel}/{currentReverseSequentialLevel}. Still waiting to avoid overlapping waves.</color>");
-                    }
-
-                    yield return new WaitForSeconds(0.5f);
+                    dwarfSequentialLevel = 1;
+                }
+                if (dwarfReverseSequentialLevel < 4 || dwarfReverseSequentialLevel > 6)
+                {
+                    dwarfReverseSequentialLevel = 6;
                 }
 
-                float seqDowntime = GetDowntimeForLevel(currentSequentialLevel);
-                float revDowntime = GetDowntimeForLevel(currentReverseSequentialLevel);
-                float stackedDowntime = Mathf.Max(seqDowntime, revDowntime);
-                yield return new WaitForSeconds(stackedDowntime);
+                GetDwarfStarTrackActivity(out bool seqActive, out bool revActive);
 
-                // Advance the forward and reverse tracks: 1→2→3 and 6→5→4.
-                currentSequentialLevel++;
-                if (currentSequentialLevel > 3)
+                if (dwarfStackedSeqWasActive && !seqActive)
                 {
-                    if (loopLevels)
-                    {
-                        currentSequentialLevel = 1;
-                        Debug.Log($"<color=gold>DwarfStar STACKED SEQ: Looping back to Level 1 (1→2→3)</color>");
-                    }
-                    else
-                    {
-                        Debug.Log($"<color=gold>DwarfStar STACKED SEQ: Reached Level 3, stopping</color>");
-                        yield break;
-                    }
-                }
+                    dwarfStackedSeqNextSpawnTime = GameStateManager.PauseSafeTime;
 
-                currentReverseSequentialLevel--;
-                if (currentReverseSequentialLevel < 4)
-                {
-                    if (loopLevels)
-                    {
-                        currentReverseSequentialLevel = 6;
-                        Debug.Log($"<color=magenta>DwarfStar STACKED REV: Looping back to Level 6 (6→5→4)</color>");
-                    }
-                    else
-                    {
-                        Debug.Log($"<color=magenta>DwarfStar STACKED REV: Reached Level 4, stopping</color>");
-                        yield break;
-                    }
-                }
-
-                continue;
-            }
-
-            // In sequential or reverse sequential modes WITHOUT sync, DwarfStar spawns independently
-            if (!shouldSync && dwarfSequential && !dwarfReverseSequential)
-            {
-                // SINGLE-STAR SEQUENTIAL: Only DwarfStar spawns
-                Debug.Log($"<color=gold>SEQUENTIAL MODE (SOLO): DwarfStar spawning level {currentSequentialLevel}</color>");
-                
-                // Reset completion counters for DwarfStar only
-                dwarfStarsCompletedCount = 0;
-                dwarfStarsActiveCount = 0;
-                
-                // Spawn only ONE DwarfStar at this level in sequential SOLO mode
-                SpawnSingleDwarfStarAtLevel(currentSequentialLevel, 0);
-                
-                Debug.Log($"<color=gold>SOLO: DwarfStar spawned at Level {currentSequentialLevel}</color>");
-                
-                // Wait until all DwarfStar instances have despawned before advancing.
-                bool spawnedReverseDuringSequential = false;
-                float dwarfWaitStart = Time.time;
-                while (true)
-                {
-                    CheckEnhancedMode();
-                    if (!megaSyncActive && !spawnedReverseDuringSequential && dwarfHasVariant1Stack && dwarfHasVariant2Stack)
-                    {
-                        if (currentReverseSequentialLevel < 4 || currentReverseSequentialLevel > 6)
-                        {
-                            currentReverseSequentialLevel = 6;
-                        }
-
-                        SpawnSingleDwarfStarAtLevelReverse(currentReverseSequentialLevel, 0f);
-                        spawnedReverseDuringSequential = true;
-                    }
-
-                    bool anyDwarf = FindObjectsOfType<DwarfStar>().Length > 0;
-                    if (!anyDwarf)
-                    {
-                        Debug.Log($"<color=gold>DwarfStar completed Level {currentSequentialLevel}!</color>");
-                        break;
-                    }
-
-                    if (Time.time - dwarfWaitStart > enhancedStallTimeout)
-                    {
-                        Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for DwarfStar instances to despawn at Level {currentSequentialLevel} (sequential solo). Still waiting to avoid overlapping waves.</color>");
-                    }
-
-                    yield return new WaitForSeconds(0.5f);
-                }
-                
-                // Downtime
-                float downtime3 = GetDowntimeForLevel(currentSequentialLevel);
-                if (spawnedReverseDuringSequential)
-                {
-                    float reverseDowntime = GetDowntimeForLevel(currentReverseSequentialLevel);
-                    downtime3 = Mathf.Max(downtime3, reverseDowntime);
-                }
-                yield return new WaitForSeconds(downtime3);
-                
-                // Progress to next level (1 → 2 → 3)
-                currentSequentialLevel++;
-                if (currentSequentialLevel > 3)
-                {
-                    if (loopLevels)
-                    {
-                        currentSequentialLevel = 1;
-                        Debug.Log($"<color=gold>SEQUENTIAL MODE: Looping back to Level 1 (1→2→3)</color>");
-                    }
-                    else
-                    {
-                        Debug.Log($"<color=gold>SEQUENTIAL MODE: Reached Level 3, stopping</color>");
-                        yield break;
-                    }
-                }
-
-                if (spawnedReverseDuringSequential)
-                {
-                    currentReverseSequentialLevel--;
-                    if (currentReverseSequentialLevel < 4)
+                    dwarfSequentialLevel++;
+                    if (dwarfSequentialLevel > 3)
                     {
                         if (loopLevels)
                         {
-                            currentReverseSequentialLevel = 6;
+                            dwarfSequentialLevel = 1;
+                            Debug.Log($"<color=gold>SEQUENTIAL MODE: Looping back to Level 1 (1→2→3)</color>");
+                        }
+                        else
+                        {
+                            Debug.Log($"<color=gold>SEQUENTIAL MODE: Reached Level 3, stopping</color>");
+                            yield break;
+                        }
+                    }
+                }
+
+                if (dwarfStackedRevWasActive && !revActive)
+                {
+                    dwarfStackedRevNextSpawnTime = GameStateManager.PauseSafeTime;
+
+                    dwarfReverseSequentialLevel--;
+                    if (dwarfReverseSequentialLevel < 4)
+                    {
+                        if (loopLevels)
+                        {
+                            dwarfReverseSequentialLevel = 6;
                             Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE: Looping back to Level 6 (6→5→4)</color>");
                         }
                         else
@@ -2017,6 +1852,110 @@ public class OrbitalStarManager : MonoBehaviour
                         }
                     }
                 }
+
+                if (!seqActive && GameStateManager.PauseSafeTime >= dwarfStackedSeqNextSpawnTime)
+                {
+                    SpawnSingleDwarfStarAtLevel(dwarfSequentialLevel, 0f);
+                    seqActive = true;
+                }
+
+                if (!revActive && GameStateManager.PauseSafeTime >= dwarfStackedRevNextSpawnTime)
+                {
+                    SpawnSingleDwarfStarAtLevelReverse(dwarfReverseSequentialLevel, 0f);
+                    revActive = true;
+                }
+
+                dwarfStackedSeqWasActive = seqActive;
+                dwarfStackedRevWasActive = revActive;
+
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.1f);
+                continue;
+            }
+            else
+            {
+                dwarfStackedInitialized = false;
+            }
+
+            // In sequential or reverse sequential modes WITHOUT sync, DwarfStar spawns independently
+            if (!shouldSync && dwarfSequential && !dwarfReverseSequential)
+            {
+                // SINGLE-STAR SEQUENTIAL: Only DwarfStar spawns
+                Debug.Log($"<color=gold>SEQUENTIAL MODE (SOLO): DwarfStar spawning level {dwarfSequentialLevel}</color>");
+                
+                // Reset completion counters for DwarfStar only
+                dwarfStarsCompletedCount = 0;
+                dwarfStarsActiveCount = 0;
+                
+                // Spawn only ONE DwarfStar at this level in sequential SOLO mode
+                SpawnSingleDwarfStarAtLevel(dwarfSequentialLevel, 0);
+                
+                Debug.Log($"<color=gold>SOLO: DwarfStar spawned at Level {dwarfSequentialLevel}</color>");
+                
+                // Wait until all DwarfStar instances have despawned before advancing.
+                bool spawnedReverseDuringSequential = false;
+                bool transitionToStacked = false;
+                float dwarfWaitStart = GameStateManager.PauseSafeTime;
+                while (true)
+                {
+                    CheckEnhancedMode();
+                    if (!megaSyncActive && dwarfHasVariant1Stack && dwarfHasVariant2Stack)
+                    {
+                        if (!spawnedReverseDuringSequential)
+                        {
+                            SpawnSingleDwarfStarAtLevelReverse(dwarfReverseSequentialLevel, 0f);
+                            spawnedReverseDuringSequential = true;
+                        }
+
+                        transitionToStacked = true;
+                        break;
+                    }
+                    if (!megaSyncActive && !spawnedReverseDuringSequential && dwarfHasVariant1Stack && dwarfHasVariant2Stack)
+                    {
+                        if (dwarfReverseSequentialLevel < 4 || dwarfReverseSequentialLevel > 6)
+                        {
+                            dwarfReverseSequentialLevel = 6;
+                        }
+
+                        SpawnSingleDwarfStarAtLevelReverse(dwarfReverseSequentialLevel, 0f);
+                        spawnedReverseDuringSequential = true;
+                    }
+
+                    GetDwarfStarTrackActivity(out bool anyDwarfSeq, out _);
+                    if (!anyDwarfSeq)
+                    {
+                        Debug.Log($"<color=gold>DwarfStar completed Level {dwarfSequentialLevel}!</color>");
+                        break;
+                    }
+
+                    if (GameStateManager.PauseSafeTime - dwarfWaitStart > enhancedStallTimeout)
+                    {
+                        Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for DwarfStar instances to despawn at Level {dwarfSequentialLevel} (sequential solo). Still waiting to avoid overlapping waves.</color>");
+                    }
+
+                    yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
+                }
+
+                if (transitionToStacked)
+                {
+                    yield return null;
+                    continue;
+                }
+                
+                // Progress to next level (1 → 2 → 3)
+                dwarfSequentialLevel++;
+                if (dwarfSequentialLevel > 3)
+                {
+                    if (loopLevels)
+                    {
+                        dwarfSequentialLevel = 1;
+                        Debug.Log($"<color=gold>SEQUENTIAL MODE: Looping back to Level 1 (1→2→3)</color>");
+                    }
+                    else
+                    {
+                        Debug.Log($"<color=gold>SEQUENTIAL MODE: Reached Level 3, stopping</color>");
+                        yield break;
+                    }
+                }
                 
                 continue;
             }
@@ -2024,82 +1963,80 @@ public class OrbitalStarManager : MonoBehaviour
             if (!shouldSync && dwarfReverseSequential)
             {
                 // SINGLE-STAR REVERSE SEQUENTIAL: Only DwarfStar spawns
-                Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE (SOLO): DwarfStar spawning level {currentReverseSequentialLevel}</color>");
+                Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE (SOLO): DwarfStar spawning level {dwarfReverseSequentialLevel}</color>");
                 
                 // Reset completion counters for DwarfStar only
                 dwarfStarsCompletedCount = 0;
                 dwarfStarsActiveCount = 0;
                 
                 // Spawn only ONE DwarfStar with REVERSE speed in SOLO mode
-                SpawnSingleDwarfStarAtLevelReverse(currentReverseSequentialLevel, 0);
+                SpawnSingleDwarfStarAtLevelReverse(dwarfReverseSequentialLevel, 0);
                 
-                Debug.Log($"<color=magenta>SOLO: DwarfStar spawned at Level {currentReverseSequentialLevel}</color>");
+                Debug.Log($"<color=magenta>SOLO: DwarfStar spawned at Level {dwarfReverseSequentialLevel}</color>");
                 
                 // Wait for DwarfStar to complete
                 bool spawnedSequentialDuringReverse = false;
+                bool transitionToStacked = false;
+                float dwarfRevWaitStart = GameStateManager.PauseSafeTime;
                 while (true)
                 {
                     CheckEnhancedMode();
-                    if (!megaSyncActive && !spawnedSequentialDuringReverse && dwarfHasVariant1Stack && dwarfHasVariant2Stack)
+                    if (!megaSyncActive && dwarfHasVariant1Stack && dwarfHasVariant2Stack)
                     {
-                        if (currentSequentialLevel < 1 || currentSequentialLevel > 3)
+                        if (!spawnedSequentialDuringReverse)
                         {
-                            currentSequentialLevel = 1;
+                            SpawnSingleDwarfStarAtLevel(dwarfSequentialLevel, 0f);
+                            spawnedSequentialDuringReverse = true;
                         }
 
-                        SpawnSingleDwarfStarAtLevel(currentSequentialLevel, 0f);
+                        transitionToStacked = true;
+                        break;
+                    }
+                    if (!megaSyncActive && !spawnedSequentialDuringReverse && dwarfHasVariant1Stack && dwarfHasVariant2Stack)
+                    {
+                        if (dwarfSequentialLevel < 1 || dwarfSequentialLevel > 3)
+                        {
+                            dwarfSequentialLevel = 1;
+                        }
+
+                        SpawnSingleDwarfStarAtLevel(dwarfSequentialLevel, 0f);
                         spawnedSequentialDuringReverse = true;
                     }
 
-                    if (dwarfStarsCompletedCount >= dwarfStarsActiveCount && dwarfStarsActiveCount > 0)
+                    GetDwarfStarTrackActivity(out _, out bool anyDwarfRev);
+                    if (!anyDwarfRev)
                     {
-                        Debug.Log($"<color=magenta>DwarfStar completed Level {currentReverseSequentialLevel}!</color>");
+                        Debug.Log($"<color=magenta>DwarfStar completed Level {dwarfReverseSequentialLevel}!</color>");
                         break;
                     }
+
+                    if (GameStateManager.PauseSafeTime - dwarfRevWaitStart > enhancedStallTimeout)
+                    {
+                        Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for DwarfStar reverse sequential completion at Level {dwarfReverseSequentialLevel}. Still waiting to avoid overlapping waves.</color>");
+                    }
                     
-                    yield return new WaitForSeconds(0.5f);
+                    yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 }
-                
-                // Downtime
-                float downtime4 = GetDowntimeForLevel(currentReverseSequentialLevel);
-                if (spawnedSequentialDuringReverse)
+
+                if (transitionToStacked)
                 {
-                    float seqDowntime = GetDowntimeForLevel(currentSequentialLevel);
-                    downtime4 = Mathf.Max(downtime4, seqDowntime);
+                    yield return null;
+                    continue;
                 }
-                yield return new WaitForSeconds(downtime4);
                 
                 // Progress to previous level (6 → 5 → 4)
-                currentReverseSequentialLevel--;
-                if (currentReverseSequentialLevel < 4)
+                dwarfReverseSequentialLevel--;
+                if (dwarfReverseSequentialLevel < 4)
                 {
                     if (loopLevels)
                     {
-                        currentReverseSequentialLevel = 6;
+                        dwarfReverseSequentialLevel = 6;
                         Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE: Looping back to Level 6 (6→5→4)</color>");
                     }
                     else
                     {
                         Debug.Log($"<color=magenta>REVERSE SEQUENTIAL MODE: Reached Level 4, stopping</color>");
                         yield break;
-                    }
-                }
-
-                if (spawnedSequentialDuringReverse)
-                {
-                    currentSequentialLevel++;
-                    if (currentSequentialLevel > 3)
-                    {
-                        if (loopLevels)
-                        {
-                            currentSequentialLevel = 1;
-                            Debug.Log($"<color=gold>SEQUENTIAL MODE: Looping back to Level 1 (1→2→3)</color>");
-                        }
-                        else
-                        {
-                            Debug.Log($"<color=gold>SEQUENTIAL MODE: Reached Level 3, stopping</color>");
-                            yield break;
-                        }
                     }
                 }
                 
@@ -2112,7 +2049,7 @@ public class OrbitalStarManager : MonoBehaviour
                 // Wait for NovaStar to also be in enhanced mode and ready
                 while (!isNovaStarEnhanced || novaStarSpawnCoroutine == null)
                 {
-                    yield return new WaitForSeconds(0.5f);
+                    yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 }
                 
                 // Sync the odd/even toggle with NovaStar
@@ -2136,7 +2073,7 @@ public class OrbitalStarManager : MonoBehaviour
                 
                 if (i < levels.Length - 1)
                 {
-                    yield return new WaitForSeconds(enhancedLevelSpawnDelay);
+                    yield return GameStateManager.WaitForPauseSafeSeconds(enhancedLevelSpawnDelay);
                 }
             }
             
@@ -2145,7 +2082,7 @@ public class OrbitalStarManager : MonoBehaviour
             Debug.Log($"<color=gold>DwarfStar ENHANCED ({syncStr}): Spawned at {levelStr} levels</color>");
             
             // Wait for all DwarfStar to complete, with safety timeout
-            float dwarfEnhancedWaitStart = Time.time;
+            float dwarfEnhancedWaitStart = GameStateManager.PauseSafeTime;
             while (true)
             {
                 if (dwarfStarsActiveCount > 0 && dwarfStarsCompletedCount >= dwarfStarsActiveCount)
@@ -2154,20 +2091,20 @@ public class OrbitalStarManager : MonoBehaviour
                     break;
                 }
 
-                if (Time.time - dwarfEnhancedWaitStart > enhancedStallTimeout)
+                if (GameStateManager.PauseSafeTime - dwarfEnhancedWaitStart > enhancedStallTimeout)
                 {
                     Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for DwarfStar enhanced odd/even completion. ({dwarfStarsCompletedCount}/{dwarfStarsActiveCount})</color>");
                     break;
                 }
                 
-                yield return new WaitForSeconds(0.5f);
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
             }
             
             // If synchronized, wait for NovaStar to also complete
             if (shouldSync)
             {
                 Debug.Log($"<color=gold>DwarfStar waiting for NovaStar to complete...</color>");
-                float novaEnhancedWaitStart = Time.time;
+                float novaEnhancedWaitStart = GameStateManager.PauseSafeTime;
                 while (true)
                 {
                     bool novaComplete = novaStarsActiveCount > 0 && novaStarsCompletedCount >= novaStarsActiveCount;
@@ -2177,13 +2114,13 @@ public class OrbitalStarManager : MonoBehaviour
                         break;
                     }
 
-                    if (Time.time - novaEnhancedWaitStart > enhancedStallTimeout)
+                    if (GameStateManager.PauseSafeTime - novaEnhancedWaitStart > enhancedStallTimeout)
                     {
                         Debug.LogWarning($"<color=yellow>[OrbitalStarManager] Timeout waiting for NovaStar enhanced completion. ({novaStarsCompletedCount}/{novaStarsActiveCount})</color>");
                         break;
                     }
 
-                    yield return new WaitForSeconds(0.5f);
+                    yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
                 }
             }
             
@@ -2194,9 +2131,6 @@ public class OrbitalStarManager : MonoBehaviour
             }
             
             // Wait for downtime before next spawn
-            float downtime = dwarfStarSpawnOddLevels ? enhancedEvenDowntime : enhancedOddDowntime;
-            yield return new WaitForSeconds(downtime);
-            
             // Synchronized toggle is handled by NovaStar (master)
         }
     }
@@ -2234,37 +2168,81 @@ public class OrbitalStarManager : MonoBehaviour
         }
         else
         {
-            // Base mode - start downtime
-            float downtime = GetDowntimeForLevel(level);
-
+            // Base mode - proceed immediately to next level
             if (starType == ProjectileType.NovaStar)
             {
-                novaStarNextSpawnTime = Time.time + downtime;
-                novaStarWaitingForDowntime = false; // Ready to spawn after downtime
+                novaStarWaitingForDowntime = false; // Ready to spawn after orbit completion
                 ProgressNovaStarLevel(); // Progress to next odd level
-                Debug.Log($"<color=orange>NovaStar downtime: {downtime}s, next level: {novaStarCurrentLevel}</color>");
+                Debug.Log($"<color=orange>NovaStar next level: {novaStarCurrentLevel}</color>");
             }
             else if (starType == ProjectileType.DwarfStar)
             {
-                dwarfStarNextSpawnTime = Time.time + downtime;
                 dwarfStarWaitingForDowntime = false;
                 ProgressDwarfStarLevel(); // Progress to next even level
-                Debug.Log($"<color=cyan>DwarfStar downtime: {downtime}s, next level: {dwarfStarCurrentLevel}</color>");
+                Debug.Log($"<color=cyan>DwarfStar next level: {dwarfStarCurrentLevel}</color>");
             }
         }
     }
 
-    private float GetDowntimeForLevel(int level)
+    private void GetNovaStarTrackActivity(out bool sequentialActive, out bool reverseActive)
     {
-        switch (level)
+        sequentialActive = false;
+        reverseActive = false;
+
+        NovaStar[] stars = FindObjectsOfType<NovaStar>();
+        for (int i = 0; i < stars.Length; i++)
         {
-            case 1: return level1Downtime;
-            case 2: return level2Downtime;
-            case 3: return level3Downtime;
-            case 4: return level4Downtime;
-            case 5: return level5Downtime;
-            case 6: return level6Downtime;
-            default: return level1Downtime;
+            NovaStar star = stars[i];
+            if (star == null)
+            {
+                continue;
+            }
+
+            int level = star.currentLevel;
+            if (level >= 1 && level <= 3)
+            {
+                sequentialActive = true;
+            }
+            else if (level >= 4 && level <= 6)
+            {
+                reverseActive = true;
+            }
+
+            if (sequentialActive && reverseActive)
+            {
+                return;
+            }
+        }
+    }
+
+    private void GetDwarfStarTrackActivity(out bool sequentialActive, out bool reverseActive)
+    {
+        sequentialActive = false;
+        reverseActive = false;
+
+        DwarfStar[] stars = FindObjectsOfType<DwarfStar>();
+        for (int i = 0; i < stars.Length; i++)
+        {
+            DwarfStar star = stars[i];
+            if (star == null)
+            {
+                continue;
+            }
+
+            int level = star.currentLevel;
+            if (level >= 1 && level <= 3)
+            {
+                sequentialActive = true;
+            }
+            else if (level >= 4 && level <= 6)
+            {
+                reverseActive = true;
+            }
+
+            if (sequentialActive && reverseActive)
+            {
+                return;
+            }
         }
     }
 
@@ -2372,6 +2350,11 @@ public class OrbitalStarManager : MonoBehaviour
         {
             return new CardModifierStats();
         }
+
+        if (!megaSyncActive)
+        {
+            return ProjectileCardModifiers.Instance.GetCardModifiers(card);
+        }
         
         // Only use shared/averaged modifiers when:
         //   - synchronized spawns are enabled
@@ -2384,15 +2367,6 @@ public class OrbitalStarManager : MonoBehaviour
         if (!synchronizeSpawns || !isNovaStarEnhanced || !isDwarfStarEnhanced)
         {
             return ProjectileCardModifiers.Instance.GetCardModifiers(card);
-        }
-
-        if (!megaSyncActive)
-        {
-            // Standard sync: both stars must be using the SAME non-zero enhanced variant
-            if (novaVariantIndex <= 0 || dwarfVariantIndex <= 0 || novaVariantIndex != dwarfVariantIndex)
-            {
-                return ProjectileCardModifiers.Instance.GetCardModifiers(card);
-            }
         }
 
         ProjectileCards novaCard = GetCardForPrefab(novaStarPrefab);

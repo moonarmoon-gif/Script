@@ -58,6 +58,8 @@ public class CrowEnemy : MonoBehaviour
 
     private int attackActionToken = 0;
 
+    private StaticStatus cachedStaticStatus;
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -139,18 +141,24 @@ public class CrowEnemy : MonoBehaviour
     {
         if (isDead) return;
 
-        bool isMoving = rb.velocity.sqrMagnitude > 0.0001f && !isAttacking;
+        if (IsStaticFrozen())
+        {
+            return;
+        }
+
+        bool isMoving = rb.velocity.sqrMagnitude > 0.0001f && !isAttacking && !attackOnCooldown;
         animator.SetBool("moving", isMoving);
         
         // Idle state only during attack cooldown
         animator.SetBool("idle", !isMoving && !isAttacking && attackOnCooldown);
 
-        if (!isAttacking && !attackOnCooldown && AdvancedPlayerController.Instance != null)
+        if (!isAttacking && !attackOnCooldown && attackRoutine == null && AdvancedPlayerController.Instance != null)
         {
             Vector3 targetPos = CinderbloomTauntTarget.GetTargetPositionForEnemy(gameObject);
             float distance = Vector2.Distance(transform.position, targetPos);
             if (distance <= attackRange)
             {
+                rb.velocity = Vector2.zero;
                 attackRoutine = StartCoroutine(AttackRoutine());
             }
         }
@@ -202,6 +210,17 @@ public class CrowEnemy : MonoBehaviour
             return;
         }
 
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                knockbackEndTime += dt;
+            }
+            return;
+        }
+
         // Handle knockback
         if (Time.time < knockbackEndTime)
         {
@@ -213,7 +232,7 @@ public class CrowEnemy : MonoBehaviour
             knockbackVelocity = Vector2.zero;
         }
 
-        if (isAttacking || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
+        if (isAttacking || attackOnCooldown || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
         {
             rb.velocity = Vector2.zero;
             return;
@@ -222,6 +241,12 @@ public class CrowEnemy : MonoBehaviour
         Vector3 targetPos = CinderbloomTauntTarget.GetTargetPositionForEnemy(gameObject);
         Vector3 toTarget = targetPos - transform.position;
         float distance = toTarget.magnitude;
+
+        if (distance <= attackRange)
+        {
+            rb.velocity = Vector2.zero;
+            return;
+        }
 
         // Stop moving when close enough (but not too close)
         if (distance <= stopDistance)
@@ -243,6 +268,11 @@ public class CrowEnemy : MonoBehaviour
     IEnumerator AttackRoutine()
     {
         int myToken = BeginAttackAction();
+
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || myToken != attackActionToken,
+            () => IsStaticFrozen());
+
         isAttacking = true;
         hasDealtDamageThisAttack = false; // Reset damage flag for this attack
         animator.SetBool("attack", true);
@@ -252,7 +282,10 @@ public class CrowEnemy : MonoBehaviour
         // Wait for FIRST damage delay
         if (firstAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(firstAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstAttackDamageDelayV2,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || myToken != attackActionToken)
@@ -273,6 +306,7 @@ public class CrowEnemy : MonoBehaviour
                 animator.SetBool("attack", false);
                 animator.speed = originalSpeed;
                 isAttacking = false;
+                attackRoutine = null;
                 yield break;
             }
         }
@@ -292,6 +326,10 @@ public class CrowEnemy : MonoBehaviour
 
             if (playerDamageable != null && playerDamageable.IsAlive && AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
             {
+                yield return StaticPauseHelper.WaitWhileStatic(
+                    () => isDead || myToken != attackActionToken,
+                    () => IsStaticFrozen());
+
                 Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position; // Use PLAYER position for damage number
                 Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
                 PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -303,7 +341,10 @@ public class CrowEnemy : MonoBehaviour
                 {
                     if (restAttackDamageDelayV2 > 0f)
                     {
-                        yield return new WaitForSeconds(restAttackDamageDelayV2);
+                        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                            restAttackDamageDelayV2,
+                            () => isDead || myToken != attackActionToken,
+                            () => IsStaticFrozen());
                     }
                 }
             }
@@ -323,7 +364,10 @@ public class CrowEnemy : MonoBehaviour
         float remainingTime = attackDuration - totalDamageTime;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attack", false);
@@ -345,11 +389,20 @@ public class CrowEnemy : MonoBehaviour
         }
         if (cooldown > 0f)
         {
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
         
         attackOnCooldown = false;
         animator.SetBool("idle", false);
+        attackRoutine = null;
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void HandleDeath()
@@ -383,7 +436,10 @@ public class CrowEnemy : MonoBehaviour
         float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
         if (animationDelay > 0)
         {
-            yield return new WaitForSeconds(animationDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                animationDelay,
+                () => false,
+                () => false);
         }
         
         // Fade out
@@ -394,7 +450,11 @@ public class CrowEnemy : MonoBehaviour
             
             while (elapsed < deathFadeOutDuration)
             {
-                elapsed += Time.deltaTime;
+                float dt = GameStateManager.GetPauseSafeDeltaTime();
+                if (dt > 0f)
+                {
+                    elapsed += dt;
+                }
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / deathFadeOutDuration);
                 spriteRenderer.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;

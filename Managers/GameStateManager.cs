@@ -2,6 +2,7 @@ using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine.SceneManagement;
+using UnityEngine.InputSystem;
 
 /// <summary>
 /// Manages game state changes like player death
@@ -9,6 +10,104 @@ using UnityEngine.SceneManagement;
 public class GameStateManager : MonoBehaviour
 {
     public static GameStateManager Instance { get; private set; }
+
+    private static int skipPauseSafeDeltaTimeUntilFrame = -1;
+
+    private static EnemyCardSpawner cachedEnemyCardSpawner;
+    private static EnemySpawner cachedEnemySpawner;
+
+    private static bool manualPauseActive = false;
+    public static bool ManualPauseActive => manualPauseActive;
+
+    private static float pauseSafeTime = 0f;
+    public static float PauseSafeTime => pauseSafeTime;
+
+    public static float GetPauseSafeDeltaTime()
+    {
+        if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.IsSelectionActive())
+        {
+            return 0f;
+        }
+
+        if (Time.timeScale <= 0.0001f)
+        {
+            return 0f;
+        }
+
+        if (Time.frameCount <= skipPauseSafeDeltaTimeUntilFrame)
+        {
+            return 0f;
+        }
+
+        return Time.deltaTime;
+    }
+
+    public static float GetRunTimerDeltaTime()
+    {
+        float dt = GetPauseSafeDeltaTime();
+        if (dt <= 0f)
+        {
+            return 0f;
+        }
+
+        if (Instance != null && Instance.PlayerIsDead)
+        {
+            return 0f;
+        }
+
+        if (IsBossOrPostBossDelayActive())
+        {
+            return 0f;
+        }
+
+        return dt;
+    }
+
+    private static bool IsBossOrPostBossDelayActive()
+    {
+        if (cachedEnemyCardSpawner == null)
+        {
+            cachedEnemyCardSpawner = Object.FindObjectOfType<EnemyCardSpawner>();
+        }
+
+        if (cachedEnemyCardSpawner != null)
+        {
+            if (cachedEnemyCardSpawner.IsBossEventActive || cachedEnemyCardSpawner.IsPostBossRefillDelayActive)
+            {
+                return true;
+            }
+        }
+
+        if (cachedEnemySpawner == null)
+        {
+            cachedEnemySpawner = Object.FindObjectOfType<EnemySpawner>();
+        }
+
+        if (cachedEnemySpawner != null)
+        {
+            if (cachedEnemySpawner.IsBossEventActive || cachedEnemySpawner.IsPostBossRefillDelayActive || cachedEnemySpawner.IsPostBossSpawnDelayActive)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static IEnumerator WaitForPauseSafeSeconds(float seconds)
+    {
+        if (seconds <= 0f)
+        {
+            yield break;
+        }
+
+        float elapsed = 0f;
+        while (elapsed < seconds)
+        {
+            elapsed += GetPauseSafeDeltaTime();
+            yield return null;
+        }
+    }
 
     private bool playerIsDead = false;
     public bool PlayerIsDead => playerIsDead;
@@ -33,10 +132,75 @@ public class GameStateManager : MonoBehaviour
         }
     }
 
+    private void OnApplicationFocus(bool hasFocus)
+    {
+        if (!hasFocus)
+        {
+            return;
+        }
+
+        skipPauseSafeDeltaTimeUntilFrame = Mathf.Max(skipPauseSafeDeltaTimeUntilFrame, Time.frameCount + 1);
+    }
+
+    private void OnApplicationPause(bool pauseStatus)
+    {
+        if (pauseStatus)
+        {
+            return;
+        }
+
+        skipPauseSafeDeltaTimeUntilFrame = Mathf.Max(skipPauseSafeDeltaTimeUntilFrame, Time.frameCount + 1);
+    }
+
     private void Start()
     {
         SceneManager.sceneLoaded += HandleSceneLoaded;
         TryBindToPlayerDeath();
+        DisableJoiningIfNoPlayerPrefab();
+    }
+
+    private void Update()
+    {
+        if (!playerIsDead && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
+        {
+            if (SkillTreeUI.Instance != null && SkillTreeUI.Instance.IsOpen)
+            {
+                return;
+            }
+
+            CardSelectionManager selection = CardSelectionManager.Instance;
+            if (selection == null || !selection.IsSelectionActive())
+            {
+                ToggleManualPause();
+            }
+        }
+
+        pauseSafeTime += GetPauseSafeDeltaTime();
+    }
+
+    public static void ToggleManualPause()
+    {
+        SetManualPause(!manualPauseActive);
+    }
+
+    public static void SetManualPause(bool active)
+    {
+        manualPauseActive = active;
+
+        if (manualPauseActive)
+        {
+            Time.timeScale = 0f;
+        }
+        else
+        {
+            CardSelectionManager selection = CardSelectionManager.Instance;
+            if (selection == null || !selection.IsSelectionActive())
+            {
+                Time.timeScale = 1f;
+            }
+        }
+
+        skipPauseSafeDeltaTimeUntilFrame = Mathf.Max(skipPauseSafeDeltaTimeUntilFrame, Time.frameCount + 1);
     }
 
     private void OnDestroy()
@@ -50,6 +214,24 @@ public class GameStateManager : MonoBehaviour
         playerIsDead = false;
         UnbindFromPlayerDeath();
         TryBindToPlayerDeath();
+        DisableJoiningIfNoPlayerPrefab();
+    }
+
+    private void DisableJoiningIfNoPlayerPrefab()
+    {
+        PlayerInputManager mgr = FindObjectOfType<PlayerInputManager>();
+        if (mgr == null)
+        {
+            return;
+        }
+
+        if (mgr.playerPrefab != null)
+        {
+            return;
+        }
+
+        mgr.DisableJoining();
+        mgr.joinBehavior = PlayerJoinBehavior.JoinPlayersManually;
     }
 
     private void TryBindToPlayerDeath()

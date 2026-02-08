@@ -61,6 +61,8 @@ public class FireWizardEnemy : MonoBehaviour
     private bool isPlayerDead;
     private int attackActionToken = 0;
 
+    private StaticStatus cachedStaticStatus;
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -127,6 +129,11 @@ public class FireWizardEnemy : MonoBehaviour
     {
         if (isDead || isPlayerDead) return;
 
+        if (IsStaticFrozen())
+        {
+            return;
+        }
+
         if (!isAttacking && !attackOnCooldown && AdvancedPlayerController.Instance != null)
         {
             float distance = Vector2.Distance(transform.position, AdvancedPlayerController.Instance.transform.position);
@@ -161,6 +168,11 @@ public class FireWizardEnemy : MonoBehaviour
         }
         
         if (isDead) return;
+
+        if (IsStaticFrozen())
+        {
+            return;
+        }
 
         // CRITICAL: Use different movement booleans based on flip state
         bool ismoving = rb.velocity.sqrMagnitude > 0.0001f && !isAttacking;
@@ -227,6 +239,12 @@ public class FireWizardEnemy : MonoBehaviour
             return;
         }
 
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            return;
+        }
+
         // Handle knockback
         if (Time.time < knockbackEndTime)
         {
@@ -267,6 +285,11 @@ public class FireWizardEnemy : MonoBehaviour
     IEnumerator AttackRoutine()
     {
         int myToken = BeginAttackAction();
+
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || isPlayerDead || myToken != attackActionToken,
+            () => IsStaticFrozen());
+
         isAttacking = true;
         hasDealtDamageThisAttack = false;
         animator.SetBool("attack", true);
@@ -275,7 +298,10 @@ public class FireWizardEnemy : MonoBehaviour
 
         if (firstAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(firstAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstAttackDamageDelayV2,
+                () => isDead || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isPlayerDead || myToken != attackActionToken)
@@ -330,6 +356,10 @@ public class FireWizardEnemy : MonoBehaviour
             
             if (playerDamageable != null && playerDamageable.IsAlive && AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
             {
+                yield return StaticPauseHelper.WaitWhileStatic(
+                    () => isDead || isPlayerDead || myToken != attackActionToken,
+                    () => IsStaticFrozen());
+
                 Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
                 Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
                 PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -340,7 +370,10 @@ public class FireWizardEnemy : MonoBehaviour
                 {
                     if (restAttackDamageDelayV2 > 0f)
                     {
-                        yield return new WaitForSeconds(restAttackDamageDelayV2);
+                        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                            restAttackDamageDelayV2,
+                            () => isDead || isPlayerDead || myToken != attackActionToken,
+                            () => IsStaticFrozen());
                     }
                 }
             }
@@ -358,7 +391,10 @@ public class FireWizardEnemy : MonoBehaviour
         float remainingTime = attackDuration - totalDamageTime;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attack", false);
@@ -378,12 +414,20 @@ public class FireWizardEnemy : MonoBehaviour
         }
         if (cooldown > 0f)
         {
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         attackOnCooldown = false;
         animator.SetBool("idle", false);
         attackRoutine = null;
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void HandleDeath()

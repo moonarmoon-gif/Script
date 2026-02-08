@@ -59,7 +59,7 @@ public class FocusLowFavour : FavourEffect
         currentMaxStacks = Mathf.Max(0, MaxStacks);
 
         lastKnownHealth = playerHealth.CurrentHealth;
-        lastHpDamageTime = Time.time;
+        lastHpDamageTime = GameStateManager.PauseSafeTime;
         focusStacksGranted = 0;
 
         if (!subscribedToHealth)
@@ -95,7 +95,7 @@ public class FocusLowFavour : FavourEffect
         }
 
         float window = Mathf.Max(0f, NoHpDamageWindowSeconds);
-        if (Time.time < lastHpDamageTime + window)
+        if (GameStateManager.PauseSafeTime < lastHpDamageTime + window)
         {
             return;
         }
@@ -120,7 +120,7 @@ public class FocusLowFavour : FavourEffect
         focusStacksGranted += toAdd;
 
         // Require another full window without HP damage before granting more.
-        lastHpDamageTime = Time.time;
+        lastHpDamageTime = GameStateManager.PauseSafeTime;
     }
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)
@@ -149,7 +149,7 @@ public class FocusLowFavour : FavourEffect
         // when damage is absorbed entirely by shields).
         if (current < lastKnownHealth - 0.01f)
         {
-            lastHpDamageTime = Time.time;
+            lastHpDamageTime = GameStateManager.PauseSafeTime;
 
             // As soon as the player takes real HP damage, remove all Focus
             // stacks granted by this favour so the buff truly only applies

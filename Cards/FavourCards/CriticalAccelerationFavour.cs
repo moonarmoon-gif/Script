@@ -61,7 +61,7 @@ public class CriticalAccelerationFavour : FavourEffect
         }
 
         critCount = 0;
-        windowStartTime = Time.time;
+        windowStartTime = GameStateManager.PauseSafeTime;
         initialized = true;
 
         currentMaxStack = Mathf.Max(1, MaxStack);
@@ -106,7 +106,7 @@ public class CriticalAccelerationFavour : FavourEffect
         int required = Mathf.Max(1, CritRequired);
         float limit = Mathf.Max(0f, TimeLimit);
 
-        float now = Time.time;
+        float now = GameStateManager.PauseSafeTime;
 
         // Reset window if time limit has passed since first crit in the window.
         if (now - windowStartTime > limit)

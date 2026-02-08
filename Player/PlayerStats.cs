@@ -178,7 +178,13 @@ public class PlayerStats : MonoBehaviour
             int furyStacks = statusController.GetStacks(StatusId.Fury);
             if (furyStacks > 0)
             {
-                furyFlat = Mathf.Max(0, furyStacks);
+                float per = 1f;
+                if (StatusControllerManager.Instance != null)
+                {
+                    per = StatusControllerManager.Instance.FuryAttackBonusPerStack;
+                }
+
+                furyFlat = Mathf.Max(0f, per * furyStacks);
             }
         }
 

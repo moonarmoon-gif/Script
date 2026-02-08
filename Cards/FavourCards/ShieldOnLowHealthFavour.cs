@@ -82,14 +82,14 @@ public class ShieldOnLowHealthFavour : FavourEffect
 
         if (!shieldActive)
         {
-            if (healthPercent <= threshold && Time.time >= lastTriggerTime + CooldownSeconds)
+            if (healthPercent <= threshold && GameStateManager.PauseSafeTime >= lastTriggerTime + CooldownSeconds)
             {
                 ActivateShield();
             }
         }
         else
         {
-            if (ShieldDecayPerTick > 0f && ShieldDecayTickInterval > 0f && Time.time >= nextDecayTime)
+            if (ShieldDecayPerTick > 0f && ShieldDecayTickInterval > 0f && GameStateManager.PauseSafeTime >= nextDecayTime)
             {
                 currentShield -= ShieldDecayPerTick;
 
@@ -99,7 +99,7 @@ public class ShieldOnLowHealthFavour : FavourEffect
                     shieldActive = false;
                 }
 
-                nextDecayTime = Time.time + ShieldDecayTickInterval;
+                nextDecayTime = GameStateManager.PauseSafeTime + ShieldDecayTickInterval;
             }
         }
     }
@@ -145,7 +145,7 @@ public class ShieldOnLowHealthFavour : FavourEffect
         int multiplier = Mathf.Max(1, cardStacks);
         currentShield = baseShield * multiplier;
         shieldActive = true;
-        lastTriggerTime = Time.time;
-        nextDecayTime = Time.time + ShieldDecayTickInterval;
+        lastTriggerTime = GameStateManager.PauseSafeTime;
+        nextDecayTime = GameStateManager.PauseSafeTime + ShieldDecayTickInterval;
     }
 }

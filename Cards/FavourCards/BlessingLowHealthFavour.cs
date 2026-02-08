@@ -65,7 +65,7 @@ public class BlessingLowHealthFavour : FavourEffect
 
         HealthRegen += Mathf.Max(0f, BonusHealthRegen);
 
-        if (currentAppliedRegenBonus > 0f && Time.time < regenBuffEndTime)
+        if (currentAppliedRegenBonus > 0f && GameStateManager.PauseSafeTime < regenBuffEndTime)
         {
             ApplyRegenBonus();
         }
@@ -78,7 +78,7 @@ public class BlessingLowHealthFavour : FavourEffect
             return;
         }
 
-        if (currentAppliedRegenBonus > 0f && Time.time >= regenBuffEndTime)
+        if (currentAppliedRegenBonus > 0f && GameStateManager.PauseSafeTime >= regenBuffEndTime)
         {
             RemoveRegenBonus();
         }
@@ -88,7 +88,7 @@ public class BlessingLowHealthFavour : FavourEffect
             ? playerHealth.CurrentHealth / playerHealth.MaxHealth
             : 0f;
 
-        if (healthFraction <= threshold && Time.time >= lastTriggerTime + Cooldown)
+        if (healthFraction <= threshold && GameStateManager.PauseSafeTime >= lastTriggerTime + Cooldown)
         {
             ActivateBlessing();
         }
@@ -121,8 +121,8 @@ public class BlessingLowHealthFavour : FavourEffect
         statusController.AddStatus(StatusId.Blessing, 1, duration);
 
         ApplyRegenBonus();
-        regenBuffEndTime = Time.time + duration;
-        lastTriggerTime = Time.time;
+        regenBuffEndTime = GameStateManager.PauseSafeTime + duration;
+        lastTriggerTime = GameStateManager.PauseSafeTime;
     }
 
     private void ApplyRegenBonus()

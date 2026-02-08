@@ -1,14 +1,11 @@
 using UnityEngine;
 using System.Collections;
+using System.Collections.Generic;
 
 [RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(Collider2D))]
 public class PlayerProjectiles : MonoBehaviour
 {
-    [Header("Spawn Point")]
-    [Tooltip("Custom spawn point for this projectile (overrides FirePoint from AdvancedPlayerController)")]
-    [SerializeField] private Transform customSpawnPoint;
-
     [Header("Motion")]
     [SerializeField] private float speed = 15f;
     [SerializeField] private float lifetimeSeconds = 5f;
@@ -65,6 +62,9 @@ public class PlayerProjectiles : MonoBehaviour
     [SerializeField] private bool hitEffectRotateToVelocity = true;
     [SerializeField] private bool hitEffectKeepInitialRotation = false;
 
+    [Header("ElectroBall")]
+    public bool IsElectroBall = false;
+
     [Header("Impact Orientation")]
     [SerializeField] private ImpactOrientationMode impactOrientation = ImpactOrientationMode.SurfaceNormal;
     [SerializeField] private float impactZOffset = 0f;
@@ -106,6 +106,8 @@ public class PlayerProjectiles : MonoBehaviour
     private FavourEffectManager favourEffectManager;
     private PlayerStats cachedPlayerStats;
     private float baseDamageAfterCards;
+
+    private Dictionary<int, float> electroBallHitEffectRotationByEnemyId;
 
     public enum ImpactOrientationMode
     {
@@ -170,7 +172,7 @@ public class PlayerProjectiles : MonoBehaviour
         float desired = targetAngle + facingCorrection + additionalRotationOffsetDeg;
 
         float current = transform.eulerAngles.z;
-        float step = maxRotationDegreesPerSecond * Time.deltaTime;
+        float step = maxRotationDegreesPerSecond * GameStateManager.GetPauseSafeDeltaTime();
         float newAngle = Mathf.MoveTowardsAngle(current, desired, step);
         transform.rotation = Quaternion.Euler(0f, 0f, newAngle);
     }
@@ -201,11 +203,6 @@ public class PlayerProjectiles : MonoBehaviour
         float top = camPos.y + halfHeight + offset;
 
         return pos.x < left || pos.x > right || pos.y < bottom || pos.y > top;
-    }
-
-    public Transform GetCustomSpawnPoint()
-    {
-        return customSpawnPoint;
     }
 
     public Vector2 GetSpawnOffset(Vector2 direction)
@@ -306,7 +303,7 @@ public class PlayerProjectiles : MonoBehaviour
             {
                 if (lastFireTimes.ContainsKey(prefabKey))
                 {
-                    if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
+                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < finalCooldown)
                     {
                         Debug.Log($"FireBolt ({prefabKey}) on cooldown");
                         Destroy(gameObject);
@@ -324,7 +321,7 @@ public class PlayerProjectiles : MonoBehaviour
 
             if (useInternalCooldown)
             {
-                lastFireTimes[prefabKey] = Time.time;
+                lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
             }
         }
         else
@@ -356,7 +353,7 @@ public class PlayerProjectiles : MonoBehaviour
             transform.rotation = Quaternion.Euler(0f, 0f, finalAngle);
         }
 
-        Destroy(gameObject, finalLifetime);
+        PauseSafeSelfDestruct.Schedule(gameObject, finalLifetime);
         StartTrailSfx();
     }
 
@@ -368,6 +365,11 @@ public class PlayerProjectiles : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        if (IsClickHitboxCollider(other))
+        {
+            return;
+        }
+
         ProjectilePiercing piercing = GetComponent<ProjectilePiercing>();
         bool allowPierce = piercing != null && piercing.pierceCount > 0;
 
@@ -417,7 +419,9 @@ public class PlayerProjectiles : MonoBehaviour
                 {
                     DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire
                         ? DamageNumberManager.DamageType.Fire
-                        : DamageNumberManager.DamageType.Ice;
+                        : (projectileType == ProjectileType.Thunder || projectileType == ProjectileType.ThunderDisc
+                            ? DamageNumberManager.DamageType.Thunder
+                            : DamageNumberManager.DamageType.Ice);
                     enemyHealth.SetLastIncomingDamageType(damageType);
                 }
 
@@ -437,7 +441,9 @@ public class PlayerProjectiles : MonoBehaviour
                     staticEffect.TryApplyStatic(other.gameObject, hitPoint);
                 }
 
-                TryPlayHitEffect(effectBasePosition);
+                Component damageableComponentForFx = damageable as Component;
+                GameObject enemyObjectForFx = damageableComponentForFx != null ? damageableComponentForFx.gameObject : other.gameObject;
+                TryPlayHitEffect(effectBasePosition, enemyObjectForFx);
 
                 if (allowPierce)
                 {
@@ -510,12 +516,14 @@ public class PlayerProjectiles : MonoBehaviour
                 {
                     DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire
                         ? DamageNumberManager.DamageType.Fire
-                        : DamageNumberManager.DamageType.Ice;
+                        : (projectileType == ProjectileType.Thunder || projectileType == ProjectileType.ThunderDisc
+                            ? DamageNumberManager.DamageType.Thunder
+                            : DamageNumberManager.DamageType.Ice);
                     enemyHealth.SetLastIncomingDamageType(damageType);
                 }
 
                 damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
-                lastDamageTime = Time.time;
+                lastDamageTime = GameStateManager.PauseSafeTime;
                 hasHitEnemy = true;
 
                 StatusController.TryApplyBurnFromProjectile(gameObject, collision.gameObject, hitPoint, finalDamage);
@@ -532,7 +540,11 @@ public class PlayerProjectiles : MonoBehaviour
                     staticEffect.TryApplyStatic(collision.gameObject, hitPoint);
                 }
 
-                TryPlayHitEffect(hitPoint);
+                Component damageableComponentForFx = damageable as Component;
+                GameObject enemyObjectForFx = damageableComponentForFx != null
+                    ? damageableComponentForFx.gameObject
+                    : collision.gameObject;
+                TryPlayHitEffect(hitPoint, enemyObjectForFx);
 
                 HandleImpact(hitPoint, hitNormal, collision.collider.transform);
                 Destroy(gameObject);
@@ -550,7 +562,7 @@ public class PlayerProjectiles : MonoBehaviour
         {
             Vector3 hitPoint = collision.GetContact(0).point;
             Vector3 hitNormal = collision.GetContact(0).normal;
-            TryPlayHitEffect(hitPoint);
+            TryPlayHitEffect(hitPoint, null);
             HandleImpact(hitPoint, hitNormal, collision.collider.transform);
         }
         Destroy(gameObject);
@@ -624,7 +636,7 @@ public class PlayerProjectiles : MonoBehaviour
         return Vector2.zero;
     }
 
-    private void TryPlayHitEffect(Vector3 basePosition)
+    private void TryPlayHitEffect(Vector3 basePosition, GameObject enemyObject)
     {
         if (hitEffectPrefab == null) return;
 
@@ -633,16 +645,17 @@ public class PlayerProjectiles : MonoBehaviour
 
         if (hitEffectTimingAdjustment < 0f)
         {
-            StartCoroutine(SpawnHitEffectDelayed(effectPosition, -hitEffectTimingAdjustment));
+            StartCoroutine(SpawnHitEffectDelayed(effectPosition, -hitEffectTimingAdjustment, enemyObject));
         }
         else
         {
-            SpawnHitEffectImmediate(effectPosition);
+            SpawnHitEffectImmediate(effectPosition, enemyObject);
         }
     }
 
-    private void SpawnHitEffectImmediate(Vector3 position)
+    private void SpawnHitEffectImmediate(Vector3 position, GameObject enemyObject)
     {
+        float extraRotation = GetElectroBallHitEffectRotationOffsetForEnemy(enemyObject);
         Quaternion rotation = transform.rotation;
 
         if (!hitEffectKeepInitialRotation)
@@ -655,7 +668,7 @@ public class PlayerProjectiles : MonoBehaviour
                 {
                     float targetAngle = Mathf.Atan2(v.y, v.x) * Mathf.Rad2Deg;
                     float facingCorrection = (int)hitEffectSpriteFacing;
-                    float desired = targetAngle + facingCorrection + hitEffectAdditionalRotationOffsetDeg;
+                    float desired = targetAngle + facingCorrection + hitEffectAdditionalRotationOffsetDeg + extraRotation;
                     rotation = Quaternion.Euler(0f, 0f, desired);
                     appliedFromVelocity = true;
                 }
@@ -664,7 +677,7 @@ public class PlayerProjectiles : MonoBehaviour
             if (!appliedFromVelocity)
             {
                 float baseAngle = transform.eulerAngles.z;
-                float desired = baseAngle + (int)hitEffectSpriteFacing + hitEffectAdditionalRotationOffsetDeg;
+                float desired = baseAngle + (int)hitEffectSpriteFacing + hitEffectAdditionalRotationOffsetDeg + extraRotation;
                 rotation = Quaternion.Euler(0f, 0f, desired);
             }
         }
@@ -678,14 +691,56 @@ public class PlayerProjectiles : MonoBehaviour
 
         if (hitEffectDuration > 0f)
         {
-            Destroy(fx, hitEffectDuration);
+            PauseSafeSelfDestruct.Schedule(fx, hitEffectDuration);
         }
     }
 
-    private IEnumerator SpawnHitEffectDelayed(Vector3 position, float delay)
+    private IEnumerator SpawnHitEffectDelayed(Vector3 position, float delay, GameObject enemyObject)
     {
-        yield return new WaitForSeconds(delay);
-        SpawnHitEffectImmediate(position);
+        yield return GameStateManager.WaitForPauseSafeSeconds(delay);
+        SpawnHitEffectImmediate(position, enemyObject);
+    }
+
+    private float GetElectroBallHitEffectRotationOffsetForEnemy(GameObject enemyObject)
+    {
+        if (!IsElectroBall || enemyObject == null)
+        {
+            return 0f;
+        }
+
+        int id = enemyObject.GetInstanceID();
+        if (electroBallHitEffectRotationByEnemyId == null)
+        {
+            electroBallHitEffectRotationByEnemyId = new Dictionary<int, float>();
+        }
+
+        if (!electroBallHitEffectRotationByEnemyId.TryGetValue(id, out float rot))
+        {
+            rot = Random.Range(0f, 360f);
+            electroBallHitEffectRotationByEnemyId[id] = rot;
+        }
+
+        return rot;
+    }
+
+    private bool IsClickHitboxCollider(Collider2D other)
+    {
+        if (other == null)
+        {
+            return false;
+        }
+
+        Transform t = other.transform;
+        while (t != null)
+        {
+            if (t.name == "ClickHitbox")
+            {
+                return true;
+            }
+            t = t.parent;
+        }
+
+        return false;
     }
 
     private void EnsureTrailAudioSource()
@@ -756,7 +811,7 @@ public class PlayerProjectiles : MonoBehaviour
 
         while (t < duration && source != null)
         {
-            t += Time.deltaTime;
+            t += GameStateManager.GetPauseSafeDeltaTime();
             float k = Mathf.Clamp01(1f - (t / duration));
             source.volume = startVolume * k;
             yield return null;

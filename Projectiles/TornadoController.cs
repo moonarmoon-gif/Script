@@ -142,7 +142,7 @@ public class TornadoController : MonoBehaviour, IInstantModifiable
 
     private void Update()
     {
-        lifeTimer += Time.deltaTime;
+        lifeTimer += GameStateManager.GetPauseSafeDeltaTime();
         if (lifeTimer >= lifetime)
         {
             Debug.Log("Tornado lifetime expired");
@@ -154,7 +154,7 @@ public class TornadoController : MonoBehaviour, IInstantModifiable
 
         if (!reachedTarget)
         {
-            Vector3 newPosition = Vector3.MoveTowards(transform.position, targetPosition, speed * Time.deltaTime);
+            Vector3 newPosition = Vector3.MoveTowards(transform.position, targetPosition, speed * GameStateManager.GetPauseSafeDeltaTime());
             if (Vector3.Distance(newPosition, targetPosition) < 0.01f)
             {
                 transform.position = targetPosition;
@@ -184,7 +184,7 @@ public class TornadoController : MonoBehaviour, IInstantModifiable
         if (impactEffect != null)
         {
             GameObject effect = Instantiate(impactEffect, transform.position, Quaternion.identity);
-            Destroy(effect, effectDuration);
+            PauseSafeSelfDestruct.Schedule(effect, effectDuration);
         }
         
         // Trigger collider remains active to continue dealing damage
@@ -193,12 +193,32 @@ public class TornadoController : MonoBehaviour, IInstantModifiable
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        Transform t = other != null ? other.transform : null;
+        while (t != null)
+        {
+            if (t.name == "ClickHitbox")
+            {
+                return;
+            }
+            t = t.parent;
+        }
+
         Debug.Log($"<color=yellow>Tornado OnTriggerEnter2D: {other.gameObject.name}, layer: {other.gameObject.layer}, stationary: {reachedTarget}</color>");
         ApplyDamage(other);
     }
 
     private void OnTriggerStay2D(Collider2D other)
     {
+        Transform t = other != null ? other.transform : null;
+        while (t != null)
+        {
+            if (t.name == "ClickHitbox")
+            {
+                return;
+            }
+            t = t.parent;
+        }
+
         // Only log occasionally to avoid spam
         if (Time.frameCount % 30 == 0) // Log every 30 frames (~0.5s)
         {
@@ -245,7 +265,7 @@ public class TornadoController : MonoBehaviour, IInstantModifiable
         int enemyID = other.GetInstanceID();
         if (lastDamageTimes.ContainsKey(enemyID))
         {
-            if (Time.time - lastDamageTimes[enemyID] < damageInterval)
+            if (GameStateManager.PauseSafeTime - lastDamageTimes[enemyID] < damageInterval)
             {
                 return; // Too soon to damage this enemy again
             }
@@ -303,7 +323,7 @@ public class TornadoController : MonoBehaviour, IInstantModifiable
             damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
             
             // Update last damage time for THIS SPECIFIC ENEMY
-            lastDamageTimes[enemyID] = Time.time;
+            lastDamageTimes[enemyID] = GameStateManager.PauseSafeTime;
 
             // Apply status effects using shared BurnEffect/SlowEffect components
             StatusController.TryApplyBurnFromProjectile(gameObject, other.gameObject, hitPoint, finalDamage);
@@ -351,11 +371,11 @@ public class TornadoController : MonoBehaviour, IInstantModifiable
 
     public static bool CanCast(PlayerMana playerMana)
     {
-        if (Time.time - lastCastTime < Cooldown) return false;
+        if (GameStateManager.PauseSafeTime - lastCastTime < Cooldown) return false;
         return playerMana != null && playerMana.Spend(ManaCost);
     }
 
-    public static void RecordCast() => lastCastTime = Time.time;
+    public static void RecordCast() => lastCastTime = GameStateManager.PauseSafeTime;
 
     public static void ApplyBossCooldownReduction(float reductionPercent)
     {
@@ -367,7 +387,7 @@ public class TornadoController : MonoBehaviour, IInstantModifiable
         float baseCooldown = Cooldown;
         float reducedCooldown = baseCooldown * (1f - reductionPercent);
         Cooldown = Mathf.Max(0.1f, reducedCooldown);
-        lastCastTime = Time.time;
+        lastCastTime = GameStateManager.PauseSafeTime;
 
         Debug.Log($"<color=cyan>[Tornado] Boss cooldown reduction applied: base {baseCooldown:F2}s -> {Cooldown:F2}s (reduction {reductionPercent * 100f:F0}%)</color>");
     }

@@ -60,7 +60,7 @@ public class DefenseLowFavour : FavourEffect
         }
 
         float interval = Mathf.Max(0f, Interval);
-        nextTickTime = interval > 0f ? Time.time + interval : float.PositiveInfinity;
+        nextTickTime = interval > 0f ? GameStateManager.PauseSafeTime + interval : float.PositiveInfinity;
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -103,7 +103,7 @@ public class DefenseLowFavour : FavourEffect
             return;
         }
 
-        if (Time.time < nextTickTime)
+        if (GameStateManager.PauseSafeTime < nextTickTime)
         {
             return;
         }
@@ -112,7 +112,7 @@ public class DefenseLowFavour : FavourEffect
         if (existing >= currentMaxStacks)
         {
             // Already at or above cap; just schedule next check.
-            nextTickTime = Time.time + interval;
+            nextTickTime = GameStateManager.PauseSafeTime + interval;
             return;
         }
 
@@ -123,6 +123,6 @@ public class DefenseLowFavour : FavourEffect
             statusController.AddStatus(StatusId.Defense, toAdd, -1f);
         }
 
-        nextTickTime = Time.time + interval;
+        nextTickTime = GameStateManager.PauseSafeTime + interval;
     }
 }

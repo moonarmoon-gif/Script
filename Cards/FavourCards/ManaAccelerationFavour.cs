@@ -6,6 +6,7 @@ public class ManaAccelerationFavour : FavourEffect
     [Header("Mana Acceleration Settings")]
     public int AccelerationGain = 1;
     public float ManaThreshold = 90f;
+    public float ManaCheck = 1f;
 
     [Header("Enhanced")]
     public int BonusAccelerationGain = 1;
@@ -66,7 +67,7 @@ public class ManaAccelerationFavour : FavourEffect
             return;
         }
 
-        rescanTimer = 0.1f;
+        rescanTimer = Mathf.Max(0.01f, ManaCheck);
         UpdateAccelerationStacks(false);
     }
 
@@ -90,6 +91,7 @@ public class ManaAccelerationFavour : FavourEffect
         }
 
         int desired = Mathf.Max(0, AccelerationGain);
+        stacksGranted = Mathf.Max(0, statusController.GetStacks(StatusId.Acceleration, sourceKey));
         if (desired <= 0)
         {
             if (stacksGranted > 0)

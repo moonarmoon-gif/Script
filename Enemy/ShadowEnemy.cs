@@ -135,6 +135,8 @@ public class ShadowEnemy : MonoBehaviour
     float bounceSpeedBonus;
     float lastSpeedIncreaseTime;
 
+    private StaticStatus cachedStaticStatus;
+
     // Collision phasing
     Dictionary<Collider2D, float> shadowCollisionTimes = new Dictionary<Collider2D, float>();
     HashSet<Collider2D> phasingColliders = new HashSet<Collider2D>();
@@ -337,6 +339,13 @@ public class ShadowEnemy : MonoBehaviour
 
     void Update()
     {
+        if (isDead) return;
+
+        if (IsStaticFrozen())
+        {
+            return;
+        }
+
         bool playerDead = isPlayerDead || player == null ||
                          (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled);
 
@@ -391,6 +400,21 @@ public class ShadowEnemy : MonoBehaviour
     {
         bool playerDead = isPlayerDead || player == null ||
                          (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled);
+
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                slideEndTime += dt;
+                lastSpeedIncreaseTime += dt;
+                sidestepUntil += dt;
+                sidestepBlock += dt;
+            }
+            return;
+        }
 
         if (isDead || playerDead)
         {
@@ -602,8 +626,10 @@ public class ShadowEnemy : MonoBehaviour
         anim.speed = attackAnimSpeed;
         anim.SetBool("IsBounceAttacking", true);
 
-        // CRITICAL: Allow interruption for specified duration at start of animation
-        yield return new WaitForSeconds(bounceAttackInterruptionWindow);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            bounceAttackInterruptionWindow,
+            () => isDead || isPlayerDead || myToken != bounceAttackActionToken,
+            () => IsStaticFrozen());
         canBeInterrupted = false;
 
         if (isDead || isPlayerDead || myToken != bounceAttackActionToken)
@@ -619,7 +645,10 @@ public class ShadowEnemy : MonoBehaviour
         float remainingDamageDelay = Mathf.Max(0f, bounceAttackDamageDelayV2 - bounceAttackInterruptionWindow);
         if (remainingDamageDelay > 0)
         {
-            yield return new WaitForSeconds(remainingDamageDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingDamageDelay,
+                () => isDead || isPlayerDead || myToken != bounceAttackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isPlayerDead || myToken != bounceAttackActionToken)
@@ -633,6 +662,10 @@ public class ShadowEnemy : MonoBehaviour
 
         if (player != null && playerDamageable != null && playerDamageable.IsAlive)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isPlayerDead || myToken != bounceAttackActionToken,
+                () => IsStaticFrozen());
+
             float finalDamage = bounceAttackDamageV2 + (bounceSpeedBonus * bounceAttackDamageMultiplier);
             Vector3 hitPoint = player.position;
             Vector3 hitNormal = (transform.position - hitPoint).normalized;
@@ -645,7 +678,10 @@ public class ShadowEnemy : MonoBehaviour
         float remainingDuration = bounceAttackAnimationDuration - totalWaitedTime;
         if (remainingDuration > 0)
         {
-            yield return new WaitForSeconds(remainingDuration);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingDuration,
+                () => isDead || isPlayerDead || myToken != bounceAttackActionToken,
+                () => IsStaticFrozen());
         }
 
         isSliding = false;
@@ -670,11 +706,17 @@ public class ShadowEnemy : MonoBehaviour
         }
         if (cooldown > 0f)
         {
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || isPlayerDead || myToken != bounceAttackActionToken,
+                () => IsStaticFrozen());
         }
         attackOnCooldown = false;
 
-        yield return new WaitForSeconds(postBounceAttackDelay);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            postBounceAttackDelay,
+            () => isDead || isPlayerDead || myToken != bounceAttackActionToken,
+            () => IsStaticFrozen());
     }
 
     IEnumerator AttackRoutine()
@@ -689,7 +731,10 @@ public class ShadowEnemy : MonoBehaviour
         // Wait for damage delay in animation
         if (attackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(attackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                attackDamageDelayV2,
+                () => isDead || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isPlayerDead || myToken != attackActionToken)
@@ -704,6 +749,10 @@ public class ShadowEnemy : MonoBehaviour
         // Deal normal attack damage at specified timing
         if (playerDamageable != null && playerDamageable.IsAlive)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
+
             Vector3 hitPoint = transform.position;
             Vector3 hitNormal = (player.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -715,7 +764,10 @@ public class ShadowEnemy : MonoBehaviour
         float remainingAttackTime = (attackDuration / Mathf.Max(0.01f, attackAnimSpeed)) - Mathf.Max(0f, attackDamageDelayV2);
         if (remainingAttackTime > 0f)
         {
-            yield return new WaitForSeconds(remainingAttackTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingAttackTime,
+                () => isDead || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         anim.SetBool("IsAttacking", false);
@@ -736,7 +788,10 @@ public class ShadowEnemy : MonoBehaviour
         }
         if (cooldown > 0f)
         {
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
         attackOnCooldown = false;
     }
@@ -755,7 +810,10 @@ public class ShadowEnemy : MonoBehaviour
         rb.velocity = Vector2.zero;
         anim.SetBool("IsBounceInterrupted", true);
 
-        yield return new WaitForSeconds(bounceInterruptionDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            bounceInterruptionDuration,
+            () => isDead || isPlayerDead,
+            () => IsStaticFrozen());
 
         anim.SetBool("IsBounceInterrupted", false);
         isBounceInterrupted = false;
@@ -790,6 +848,11 @@ public class ShadowEnemy : MonoBehaviour
         }
 
         bounceInterruptRoutine = null;
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void OnDamageTaken(float damage, Vector3 hitPoint, Vector3 hitNormal)

@@ -50,6 +50,7 @@ public class ResetLevelButton : MonoBehaviour
             CardSelectionManager.Instance.ForceCloseSelectionUI();
         }
 
+        GameStateManager.SetManualPause(false);
         Time.timeScale = 1f;
 
         if (GameStateManager.Instance != null)

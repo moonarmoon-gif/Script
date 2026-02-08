@@ -35,6 +35,7 @@ public class HolyShield : MonoBehaviour, IDamageable
     private Collider2D ownerCollider;
     private float baseMaxHealth;
     private float baseRespawnDelay;
+    private Vector2 baseSpawnOffset;
     private Vector3 baseScale;
     private Color[] originalColors;
 
@@ -58,6 +59,7 @@ public class HolyShield : MonoBehaviour, IDamageable
         }
         baseMaxHealth = maxHealth;
         baseRespawnDelay = respawnDelay;
+        baseSpawnOffset = spawnOffset;
         baseScale = transform.localScale;
         currentHealth = maxHealth;
 
@@ -113,18 +115,12 @@ public class HolyShield : MonoBehaviour, IDamageable
             currentHealth = Mathf.Min(maxHealth, currentHealth + modifiers.shieldHealthBonus);
         }
 
-        respawnDelay = Mathf.Max(0.1f, baseRespawnDelay * (1f - modifiers.cooldownReductionPercent / 100f));
-        if (MinCooldownManager.Instance != null)
-        {
-            respawnDelay = MinCooldownManager.Instance.ClampCooldown(card, Mathf.Max(0.1f, baseRespawnDelay * (1f - modifiers.cooldownReductionPercent / 100f)));
-        }
-
         if (modifiers.sizeMultiplier != 1f)
         {
             transform.localScale = baseScale * modifiers.sizeMultiplier;
         }
 
-        Vector3 targetPos = spawnPosition + (Vector3)spawnOffset;
+        Vector3 targetPos = spawnPosition + (Vector3)baseSpawnOffset;
         transform.position = targetPos;
 
         if (playerCollider != null)
@@ -149,7 +145,7 @@ public class HolyShield : MonoBehaviour, IDamageable
         }
 
         isBroken = false;
-        lastDamageTime = Time.time;
+        lastDamageTime = GameStateManager.PauseSafeTime;
         activeShield = this;
 
         hasEverSpawned = true;
@@ -223,24 +219,47 @@ public class HolyShield : MonoBehaviour, IDamageable
             return;
         }
 
+        ProjectileCards card = ProjectileCardModifiers.Instance != null
+            ? ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject)
+            : null;
+
+        CardModifierStats modifiers = new CardModifierStats();
+        if (card != null && ProjectileCardModifiers.Instance != null)
+        {
+            modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
+        }
+
+        float baseRecharge = 0f;
+        ReflectShield prefabShield = reflectShieldPrefab.GetComponent<ReflectShield>();
+        if (prefabShield != null)
+        {
+            baseRecharge = prefabShield.ReflectRechargeDuration;
+        }
+        float effectiveRecharge = ComputeEffectiveCooldownSeconds(baseRecharge, card, modifiers);
+        if (MinCooldownManager.Instance != null)
+        {
+            effectiveRecharge = Mathf.Max(MinCooldownManager.Instance.HolyShield, effectiveRecharge);
+        }
+
         if (ReflectShield.ActiveShield == null)
         {
             GameObject obj = Instantiate(reflectShieldPrefab, transform.position, Quaternion.identity);
             ReflectShield shield = obj.GetComponent<ReflectShield>();
             if (shield != null)
             {
-                shield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level));
+                shield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level), effectiveRecharge);
             }
             return;
         }
 
         if (!alreadyHad || !ReflectShield.ActiveShield.IsAlive)
         {
-            ReflectShield.ActiveShield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level));
+            ReflectShield.ActiveShield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level), effectiveRecharge);
         }
         else
         {
             ReflectShield.ActiveShield.SetMaxCharges(Mathf.Max(1, level));
+            ReflectShield.ActiveShield.SetRechargeDuration(effectiveRecharge);
         }
     }
 
@@ -251,24 +270,47 @@ public class HolyShield : MonoBehaviour, IDamageable
             return;
         }
 
+        ProjectileCards card = ProjectileCardModifiers.Instance != null
+            ? ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject)
+            : null;
+
+        CardModifierStats modifiers = new CardModifierStats();
+        if (card != null && ProjectileCardModifiers.Instance != null)
+        {
+            modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
+        }
+
+        float baseRecharge = 0f;
+        NullifyShield prefabShield = nullifyShieldPrefab.GetComponent<NullifyShield>();
+        if (prefabShield != null)
+        {
+            baseRecharge = prefabShield.NullifyRechargeDuration;
+        }
+        float effectiveRecharge = ComputeEffectiveCooldownSeconds(baseRecharge, card, modifiers);
+        if (MinCooldownManager.Instance != null)
+        {
+            effectiveRecharge = Mathf.Max(MinCooldownManager.Instance.HolyShield, effectiveRecharge);
+        }
+
         if (NullifyShield.ActiveShield == null)
         {
             GameObject obj = Instantiate(nullifyShieldPrefab, transform.position, Quaternion.identity);
             NullifyShield shield = obj.GetComponent<NullifyShield>();
             if (shield != null)
             {
-                shield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level));
+                shield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level), effectiveRecharge);
             }
             return;
         }
 
         if (!alreadyHad || !NullifyShield.ActiveShield.IsAlive)
         {
-            NullifyShield.ActiveShield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level));
+            NullifyShield.ActiveShield.Initialize(transform.position, ownerCollider, Mathf.Max(1, level), effectiveRecharge);
         }
         else
         {
             NullifyShield.ActiveShield.SetMaxCharges(Mathf.Max(1, level));
+            NullifyShield.ActiveShield.SetRechargeDuration(effectiveRecharge);
         }
     }
 
@@ -325,7 +367,7 @@ public class HolyShield : MonoBehaviour, IDamageable
             }
         }
 
-        lastDamageTime = Time.time;
+        lastDamageTime = GameStateManager.PauseSafeTime;
         currentHealth = Mathf.Max(0f, currentHealth - finalAmount);
 
         if (DamageNumberManager.Instance != null)
@@ -346,17 +388,16 @@ public class HolyShield : MonoBehaviour, IDamageable
             return;
         }
 
-        if (currentHealth < maxHealth && Time.time - lastDamageTime >= regenDelay)
+        if (currentHealth < maxHealth && GameStateManager.PauseSafeTime - lastDamageTime >= regenDelay)
         {
             if (maxHealth > 0f && regenPerSecond > 0f)
             {
                 // regenPerSecond is treated as a percentage value (5 = 5% of maxHealth per second)
                 float healFractionPerSecond = regenPerSecond / 100f;
-                float heal = maxHealth * healFractionPerSecond * Time.deltaTime;
+                float heal = maxHealth * healFractionPerSecond * GameStateManager.GetPauseSafeDeltaTime();
                 currentHealth = Mathf.Min(maxHealth, currentHealth + heal);
             }
         }
-
     }
 
     private void BreakShield()
@@ -366,8 +407,12 @@ public class HolyShield : MonoBehaviour, IDamageable
             return;
         }
 
+        DestroyReflectShield();
+        DestroyNullifyShield();
+        activeVariantMask = 0;
+
         isBroken = true;
-        lastDestroyedTime = Time.time;
+        lastDestroyedTime = GameStateManager.PauseSafeTime;
         if (activeShield == this)
         {
             activeShield = null;
@@ -417,7 +462,7 @@ public class HolyShield : MonoBehaviour, IDamageable
 
         while (elapsed < fadeOutDuration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float t = Mathf.Clamp01(elapsed / fadeOutDuration);
             float alphaMul = 1f - t;
 
@@ -475,7 +520,7 @@ public class HolyShield : MonoBehaviour, IDamageable
         float elapsed = 0f;
         while (elapsed < fadeInDuration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float t = Mathf.Clamp01(elapsed / fadeInDuration);
 
             for (int i = 0; i < count; i++)
@@ -503,11 +548,22 @@ public class HolyShield : MonoBehaviour, IDamageable
 
     private System.Collections.IEnumerator RespawnRoutine()
     {
-        yield return new WaitForSeconds(respawnDelay);
+        ProjectileCards card = ProjectileCardModifiers.Instance != null
+            ? ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject)
+            : null;
+
+        CardModifierStats modifiers = new CardModifierStats();
+        if (card != null && ProjectileCardModifiers.Instance != null)
+        {
+            modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
+        }
+
+        float effectiveRespawnDelay = ComputeEffectiveCooldownSeconds(baseRespawnDelay, card, modifiers);
+        yield return GameStateManager.WaitForPauseSafeSeconds(effectiveRespawnDelay);
 
         currentHealth = maxHealth;
         isBroken = false;
-        lastDamageTime = Time.time;
+        lastDamageTime = GameStateManager.PauseSafeTime;
 
         if (shieldCollider != null)
         {
@@ -527,10 +583,6 @@ public class HolyShield : MonoBehaviour, IDamageable
         }
 
         activeShield = this;
-
-        ProjectileCards card = ProjectileCardModifiers.Instance != null
-            ? ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject)
-            : null;
         if (card != null && ProjectileCardLevelSystem.Instance != null)
         {
             int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
@@ -542,6 +594,48 @@ public class HolyShield : MonoBehaviour, IDamageable
         {
             StartCoroutine(FadeIn());
         }
+    }
+
+    private float ComputeEffectiveCooldownSeconds(float baseSeconds, ProjectileCards card, CardModifierStats modifiers)
+    {
+        if (baseSeconds <= 0f)
+        {
+            return 0f;
+        }
+
+        float value = Mathf.Max(0.1f, baseSeconds * (1f - modifiers.cooldownReductionPercent / 100f));
+
+        PlayerStats stats = null;
+        if (ownerCollider != null)
+        {
+            stats = ownerCollider.GetComponent<PlayerStats>();
+        }
+        if (stats != null && stats.projectileCooldownReduction > 0f)
+        {
+            value = value / (1f + Mathf.Max(0f, stats.projectileCooldownReduction));
+        }
+
+        if (MinCooldownManager.Instance != null)
+        {
+            value = MinCooldownManager.Instance.ClampCooldown(card, value);
+        }
+        else
+        {
+            value = Mathf.Max(0.1f, value);
+        }
+
+        return value;
+    }
+
+    private void OnDestroy()
+    {
+        if (activeShield == this)
+        {
+            activeShield = null;
+        }
+
+        DestroyReflectShield();
+        DestroyNullifyShield();
     }
 
     public static void ResetRunState()

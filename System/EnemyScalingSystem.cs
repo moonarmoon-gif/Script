@@ -94,8 +94,8 @@ public class EnemyScalingSystem : MonoBehaviour
     {
         // Don't scale during boss events
         if (isPaused) return;
-        
-        timeSinceLastScale += Time.deltaTime;
+
+        timeSinceLastScale += GameStateManager.GetPauseSafeDeltaTime();
         
         if (timeSinceLastScale >= scalingInterval)
         {

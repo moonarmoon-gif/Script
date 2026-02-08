@@ -118,10 +118,20 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
     [Tooltip("Fade-out time when the projectile ends.")]
     [SerializeField] public float trailFadeOutSeconds = 0.12f;
 
+    [Header("Trail Effect")]
+    public GameObject TrailPrefab;
+    public GameObject Trail1Position;
+    public GameObject Trail2Position;
+    public float TrailEffectTime;
+    public float TrailEffectInterval;
+    public float TrailSpeed = 1f;
+
     private Rigidbody2D _rigidbody2D;
     private Collider2D _collider2D;
     private AudioSource _trailSource;
     private Coroutine _fadeOutRoutine;
+
+    private Coroutine _trailEffectRoutine;
 
     private PlayerStats cachedPlayerStats;
     private float baseDamageAfterCards;
@@ -203,6 +213,7 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
     private void OnDisable()
     {
+        StopTrailEffects();
         StopTrailSfx(true);
     }
 
@@ -225,7 +236,7 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
         float desired = targetAngle + facingCorrection + additionalRotationOffsetDeg;
 
         float current = transform.eulerAngles.z;
-        float step = maxRotationDegreesPerSecond * Time.deltaTime;
+        float step = maxRotationDegreesPerSecond * GameStateManager.GetPauseSafeDeltaTime();
         float newAngle = Mathf.MoveTowardsAngle(current, desired, step);
         transform.rotation = Quaternion.Euler(0f, 0f, newAngle);
     }
@@ -461,14 +472,14 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             {
                 if (!bypassEnhancedFirstSpawnCooldown && lastFireTimes.ContainsKey(prefabKey))
                 {
-                    if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
+                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < finalCooldown)
                     {
                         Destroy(gameObject);
                         return;
                     }
                 }
 
-                lastFireTimes[prefabKey] = Time.time;
+                lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
             }
         }
         else
@@ -528,21 +539,44 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
         piercing.SetMaxPierces(finalPierceCount);
 
-        Destroy(gameObject, finalLifetime);
+        PauseSafeSelfDestruct.Schedule(gameObject, finalLifetime);
+        StartTrailEffects();
         StartTrailSfx();
     }
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        if (IsClickHitboxCollider(other))
+        {
+            return;
+        }
+
         ProjectilePiercing piercing = GetComponentInParent<ProjectilePiercing>();
         if (piercing == null)
         {
             piercing = GetComponent<ProjectilePiercing>();
         }
 
-        if (((1 << other.gameObject.layer) & enemyLayer) != 0)
+        bool isEnemyLayer = ((1 << other.gameObject.layer) & enemyLayer) != 0;
+        EnemyHealth enemyHealth = other.GetComponent<EnemyHealth>() ?? other.GetComponentInParent<EnemyHealth>();
+
+        GameObject enemyKey = null;
+        Transform enemyTransform = null;
+
+        if (enemyHealth != null)
         {
-            if (piercing != null && piercing.HasHitEnemy(other.gameObject))
+            enemyKey = enemyHealth.gameObject;
+            enemyTransform = enemyHealth.transform;
+        }
+        else if (isEnemyLayer)
+        {
+            enemyKey = other.gameObject;
+            enemyTransform = other.transform;
+        }
+
+        if (enemyKey != null)
+        {
+            if (piercing != null && piercing.HasHitEnemy(enemyKey))
             {
                 return;
             }
@@ -551,11 +585,11 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             bool enemyOnLeftSide;
             if (cam != null)
             {
-                enemyOnLeftSide = other.transform.position.x < cam.transform.position.x;
+                enemyOnLeftSide = enemyTransform.position.x < cam.transform.position.x;
             }
             else
             {
-                enemyOnLeftSide = other.transform.position.x < transform.position.x;
+                enemyOnLeftSide = enemyTransform.position.x < transform.position.x;
             }
 
             if (enemyOnLeftSide && transform.position.y < YaxisIgnoreLeftEnemies)
@@ -564,15 +598,36 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             }
 
             IDamageable damageable = other.GetComponent<IDamageable>() ?? other.GetComponentInParent<IDamageable>();
-
-            if (damageable != null && damageable.IsAlive)
+            if (damageable == null && enemyKey != null)
             {
-                if (Time.time - lastDamageTime < damageCooldown)
+                damageable = enemyKey.GetComponent<IDamageable>() ?? enemyKey.GetComponentInParent<IDamageable>();
+            }
+
+            if (damageable == null)
+            {
+                if (enemyHealth != null)
                 {
                     return;
                 }
 
-                if (!OffscreenDamageChecker.CanTakeDamage(other.transform.position))
+                Vector3 hitPoint = other.ClosestPoint(transform.position);
+                Vector3 hitNormal = (transform.position - hitPoint).normalized;
+
+                TryPlayHitEffect(hitPoint);
+
+                HandleImpact(hitPoint, hitNormal, other.transform);
+                Destroy(gameObject);
+                return;
+            }
+
+            if (damageable != null && damageable.IsAlive)
+            {
+                if (GameStateManager.PauseSafeTime - lastDamageTime < damageCooldown)
+                {
+                    return;
+                }
+
+                if (!OffscreenDamageChecker.CanTakeDamage(enemyTransform.position))
                 {
                     return;
                 }
@@ -584,8 +639,7 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
                 float baseDamageForEnemy = baseDamageAfterCards > 0f ? baseDamageAfterCards : damage;
                 float finalDamage = baseDamageForEnemy;
 
-                Component damageableComponent = damageable as Component;
-                GameObject enemyObject = damageableComponent != null ? damageableComponent.gameObject : null;
+                GameObject enemyObject = enemyKey;
 
                 if (cachedPlayerStats != null)
                 {
@@ -594,10 +648,10 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
                 if (enemyObject != null)
                 {
-                    EnemyHealth enemyHealth = enemyObject.GetComponent<EnemyHealth>() ?? enemyObject.GetComponentInParent<EnemyHealth>();
-                    if (enemyHealth != null)
+                    EnemyHealth resolvedEnemyHealth = enemyObject.GetComponent<EnemyHealth>() ?? enemyObject.GetComponentInParent<EnemyHealth>();
+                    if (resolvedEnemyHealth != null)
                     {
-                        enemyHealth.SetLastIncomingDamageType(DamageNumberManager.DamageType.Ice);
+                        resolvedEnemyHealth.SetLastIncomingDamageType(DamageNumberManager.DamageType.Ice);
                     }
                 }
 
@@ -606,32 +660,32 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
                 SlowEffect slowEffect = GetComponent<SlowEffect>();
                 if (slowEffect != null)
                 {
-                    slowEffect.TryApplySlow(other.gameObject, hitPoint);
+                    slowEffect.TryApplySlow(enemyKey, hitPoint);
                 }
 
                 StaticEffect staticEffect = GetComponent<StaticEffect>();
                 if (staticEffect != null)
                 {
-                    staticEffect.TryApplyStatic(other.gameObject, hitPoint);
+                    staticEffect.TryApplyStatic(enemyKey, hitPoint);
                 }
 
-                lastDamageTime = Time.time;
+                lastDamageTime = GameStateManager.PauseSafeTime;
 
                 TryPlayHitEffect(effectBasePosition);
 
                 if (piercing != null)
                 {
-                    bool shouldContinue = piercing.OnEnemyHit(other.gameObject);
+                    bool shouldContinue = piercing.OnEnemyHit(enemyKey);
                     if (!shouldContinue)
                     {
-                        HandleImpact(hitPoint, hitNormal, other.transform);
+                        HandleImpact(hitPoint, hitNormal, enemyTransform);
                         Destroy(gameObject);
                         return;
                     }
                 }
                 else
                 {
-                    HandleImpact(hitPoint, hitNormal, other.transform);
+                    HandleImpact(hitPoint, hitNormal, enemyTransform);
                     Destroy(gameObject);
                     return;
                 }
@@ -657,6 +711,26 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             HandleImpact(hitPoint, hitNormal, other.transform);
             Destroy(gameObject);
         }
+    }
+
+    private bool IsClickHitboxCollider(Collider2D other)
+    {
+        if (other == null)
+        {
+            return false;
+        }
+
+        Transform t = other.transform;
+        while (t != null)
+        {
+            if (t.name == "ClickHitbox")
+            {
+                return true;
+            }
+            t = t.parent;
+        }
+
+        return false;
     }
 
     private void HandleImpact(Vector3 point, Vector3 normal, Transform hitParent)
@@ -731,13 +805,13 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
         if (hitEffectDuration > 0f)
         {
-            Destroy(fx, hitEffectDuration);
+            PauseSafeSelfDestruct.Schedule(fx, hitEffectDuration);
         }
     }
 
     private IEnumerator SpawnHitEffectDelayed(Vector3 position, float delay)
     {
-        yield return new WaitForSeconds(delay);
+        yield return GameStateManager.WaitForPauseSafeSeconds(delay);
 
         if (hitEffectPrefab != null)
         {
@@ -750,6 +824,7 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
         if (_trailSource == null)
         {
             _trailSource = GetComponent<AudioSource>();
+
             if (_trailSource == null)
             {
                 _trailSource = gameObject.AddComponent<AudioSource>();
@@ -763,6 +838,95 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
         _trailSource.rolloffMode = AudioRolloffMode.Linear;
         _trailSource.minDistance = 1f;
         _trailSource.maxDistance = 30f;
+    }
+
+    private void StartTrailEffects()
+    {
+        if (TrailPrefab == null)
+        {
+            return;
+        }
+
+        if (Trail1Position == null || Trail2Position == null)
+        {
+            return;
+        }
+
+        if (TrailEffectTime <= 0f || TrailEffectInterval <= 0f)
+        {
+            return;
+        }
+
+        StopTrailEffects();
+        _trailEffectRoutine = StartCoroutine(TrailEffectRoutine());
+    }
+
+    private void StopTrailEffects()
+    {
+        if (_trailEffectRoutine != null)
+        {
+            StopCoroutine(_trailEffectRoutine);
+            _trailEffectRoutine = null;
+        }
+    }
+
+    private IEnumerator TrailEffectRoutine()
+    {
+        while (true)
+        {
+            SpawnTrailAt(Trail1Position.transform.position);
+            SpawnTrailAt(Trail2Position.transform.position);
+
+            float elapsed = 0f;
+            while (elapsed < TrailEffectInterval)
+            {
+                elapsed += GameStateManager.GetPauseSafeDeltaTime();
+                yield return null;
+            }
+        }
+    }
+
+    private void SpawnTrailAt(Vector3 position)
+    {
+        if (TrailPrefab == null)
+        {
+            return;
+        }
+
+        GameObject trailObj = Instantiate(TrailPrefab, position, transform.rotation);
+        if (TrailEffectTime > 0f)
+        {
+            PauseSafeSelfDestruct.Schedule(trailObj, TrailEffectTime);
+        }
+
+        Vector2 oppositeDir = Vector2.zero;
+        if (_rigidbody2D != null && _rigidbody2D.velocity.sqrMagnitude > 0.0001f)
+        {
+            oppositeDir = -_rigidbody2D.velocity.normalized;
+        }
+        else if (directionSet && initialDirection.sqrMagnitude > 0.0001f)
+        {
+            oppositeDir = -initialDirection.normalized;
+        }
+
+        if (oppositeDir != Vector2.zero && TrailSpeed != 0f)
+        {
+            TalonTrailMover mover = trailObj.AddComponent<TalonTrailMover>();
+            mover.Direction = oppositeDir;
+            mover.Speed = TrailSpeed;
+        }
+    }
+
+    public sealed class TalonTrailMover : MonoBehaviour
+    {
+        public Vector2 Direction;
+        public float Speed;
+
+        private void Update()
+        {
+            float dt = GameStateManager.GetPauseSafeDeltaTime();
+            transform.position += (Vector3)(Direction * Speed * dt);
+        }
     }
 
     private void StartTrailSfx()
@@ -813,7 +977,7 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
         while (t < duration && source != null)
         {
-            t += Time.deltaTime;
+            t += GameStateManager.GetPauseSafeDeltaTime();
             float k = Mathf.Clamp01(1f - (t / duration));
             source.volume = startVolume * k;
             yield return null;

@@ -105,6 +105,40 @@ public static class DamageAoeScope
     public static void EndAoeDamage() => IsAoeDamage = false;
 }
 
+public static class EnemyDamagePopupScope
+{
+    private static int suppressCount;
+
+    public static bool SuppressPopups => suppressCount > 0;
+
+    public static void BeginSuppressPopups()
+    {
+        suppressCount++;
+    }
+
+    public static void EndSuppressPopups()
+    {
+        suppressCount = Mathf.Max(0, suppressCount - 1);
+    }
+}
+
+public static class OffscreenDamageBypassScope
+{
+    private static int bypassCount;
+
+    public static bool AllowOffscreenDamage => bypassCount > 0;
+
+    public static void BeginAllowOffscreenDamage()
+    {
+        bypassCount++;
+    }
+
+    public static void EndAllowOffscreenDamage()
+    {
+        bypassCount = Mathf.Max(0, bypassCount - 1);
+    }
+}
+
 [System.Serializable]
 public class ActiveStatus
 {
@@ -184,7 +218,7 @@ public class StatusController : MonoBehaviour
         if (before > after)
         {
             float absorbed = before - after;
-            if (absorbed > 0f && !StatusDamageScope.IsStatusTick && DamageNumberManager.Instance != null)
+            if (absorbed > 0f && !StatusDamageScope.IsStatusTick && DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
             {
                 EnemyHealth enemyHealth = cachedEnemyHealth;
                 if (enemyHealth != null && enemyHealth.IsAlive)
@@ -428,6 +462,30 @@ public class StatusController : MonoBehaviour
         return total;
     }
 
+    public int GetStacks(StatusId id, int sourceKey)
+    {
+        if (sourceKey == 0)
+        {
+            return GetStacks(id);
+        }
+
+        int total = 0;
+        for (int i = 0; i < activeStatuses.Count; i++)
+        {
+            ActiveStatus status = activeStatuses[i];
+            if (status.id != id || status.sourceKey != sourceKey)
+            {
+                continue;
+            }
+
+            if (status.stacks > 0)
+            {
+                total += status.stacks;
+            }
+        }
+        return total;
+    }
+
     public bool HasStatus(StatusId id) => GetStacks(id) > 0;
 
     public bool ConsumeStacks(StatusId id, int count)
@@ -546,7 +604,7 @@ public class StatusController : MonoBehaviour
 
         hasOffCameraSpeedBoost = true;
         offCameraSpeedBoostMultiplier = multiplier;
-        offCameraSpeedBoostEndTime = Time.time + durationSeconds;
+        offCameraSpeedBoostEndTime = GameStateManager.PauseSafeTime + durationSeconds;
         offCameraSpeedBoostViewportOffset = viewportOffset;
     }
 
@@ -603,7 +661,7 @@ public class StatusController : MonoBehaviour
                 onCamera = OffscreenDamageChecker.CanTakeDamage(transform.position);
             }
 
-            bool expired = Time.time >= offCameraSpeedBoostEndTime;
+            bool expired = GameStateManager.PauseSafeTime >= offCameraSpeedBoostEndTime;
             if (expired || onCamera)
             {
                 hasOffCameraSpeedBoost = false;
@@ -870,7 +928,7 @@ public class StatusController : MonoBehaviour
 
         if (isContinuousProjectile)
         {
-            float now = Time.time;
+            float now = GameStateManager.PauseSafeTime;
 
             if (weakContinuousWindowEndTime > 0f && now < weakContinuousWindowEndTime)
             {
@@ -1108,7 +1166,7 @@ public class StatusController : MonoBehaviour
 
     private void Update()
     {
-        if (hasOffCameraSpeedBoost && Time.time >= offCameraSpeedBoostEndTime)
+        if (hasOffCameraSpeedBoost && GameStateManager.PauseSafeTime >= offCameraSpeedBoostEndTime)
         {
             hasOffCameraSpeedBoost = false;
             offCameraSpeedBoostMultiplier = 1f;
@@ -1120,7 +1178,7 @@ public class StatusController : MonoBehaviour
             return;
         }
 
-        float dt = Time.deltaTime;
+        float dt = GameStateManager.GetPauseSafeDeltaTime();
         if (dt <= 0f)
         {
             return;

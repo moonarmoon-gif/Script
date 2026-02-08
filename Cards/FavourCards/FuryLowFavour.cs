@@ -1,20 +1,24 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
-[CreateAssetMenu(fileName = "FuryLowFavour", menuName = "Favour Effects/Fury Low")]
-public class FuryLowFavour : FavourEffect
+[CreateAssetMenu(fileName = "RageLowFavour", menuName = "Favour Effects/Rage Low")]
+public class RageLowFavour : FavourEffect
 {
     [Header("Fury Low Settings")]
     [Tooltip("Base number of Fury stacks granted when this favour is first picked.")]
-    public int FuryAmount = 2;
+    [FormerlySerializedAs("FuryAmount")]
+    public int RageAmount = 2;
 
     [Header("Enhanced")]
     [Tooltip("Additional Fury stacks granted each time this favour is picked again (enhanced).")]
-    public int BonusFury = 2;
+    [FormerlySerializedAs("BonusFury")]
+    public int BonusRage = 2;
 
-    private int currentFuryAmount = 0;
+    private int currentRageAmount = 0;
     private PlayerHealth playerHealth;
     private StatusController statusController;
-    private int furyStacksGranted;
+    private int rageStacksGranted;
+    private int sourceKey;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
@@ -38,10 +42,16 @@ public class FuryLowFavour : FavourEffect
             return;
         }
 
-        currentFuryAmount = Mathf.Max(0, FuryAmount);
-        furyStacksGranted = 0;
+        sourceKey = Mathf.Abs(GetInstanceID());
+        if (sourceKey == 0)
+        {
+            sourceKey = 1;
+        }
 
-        UpdateFuryStacks();
+        currentRageAmount = Mathf.Max(0, RageAmount);
+        rageStacksGranted = 0;
+
+        UpdateRageStacks();
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -51,10 +61,10 @@ public class FuryLowFavour : FavourEffect
             OnApply(player, manager, sourceCard);
         }
 
-        int bonus = Mathf.Max(0, BonusFury);
-        currentFuryAmount += bonus;
+        int bonus = Mathf.Max(0, BonusRage);
+        currentRageAmount += bonus;
 
-        UpdateFuryStacks();
+        UpdateRageStacks();
     }
 
     public override void OnUpdate(GameObject player, FavourEffectManager manager, float deltaTime)
@@ -64,27 +74,29 @@ public class FuryLowFavour : FavourEffect
             return;
         }
 
-        UpdateFuryStacks();
+        UpdateRageStacks();
     }
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)
     {
-        if (statusController != null && furyStacksGranted > 0)
+        if (statusController != null && rageStacksGranted > 0)
         {
-            statusController.ConsumeStacks(StatusId.Rage, furyStacksGranted);
+            statusController.ConsumeStacks(StatusId.Rage, rageStacksGranted, sourceKey);
         }
 
-        furyStacksGranted = 0;
+        rageStacksGranted = 0;
         playerHealth = null;
         statusController = null;
     }
 
-    private void UpdateFuryStacks()
+    private void UpdateRageStacks()
     {
-        if (playerHealth == null || statusController == null || currentFuryAmount <= 0)
+        if (playerHealth == null || statusController == null || currentRageAmount <= 0)
         {
             return;
         }
+
+        rageStacksGranted = Mathf.Max(0, statusController.GetStacks(StatusId.Rage, sourceKey));
 
         float max = playerHealth.MaxHealth;
         if (max <= 0f)
@@ -103,21 +115,30 @@ public class FuryLowFavour : FavourEffect
 
         if (fraction <= thresholdFraction)
         {
-            int desiredStacks = currentFuryAmount;
-            int delta = desiredStacks - furyStacksGranted;
+            int desiredStacks = currentRageAmount;
+            int delta = desiredStacks - rageStacksGranted;
             if (delta > 0)
             {
-                statusController.AddStatus(StatusId.Rage, delta, -1f);
-                furyStacksGranted += delta;
+                statusController.AddStatus(StatusId.Rage, delta, -1f, 0f, null, sourceKey);
+                rageStacksGranted += delta;
+            }
+            else if (delta < 0)
+            {
+                statusController.ConsumeStacks(StatusId.Rage, -delta, sourceKey);
+                rageStacksGranted += delta;
             }
         }
         else
         {
-            if (furyStacksGranted > 0)
+            if (rageStacksGranted > 0)
             {
-                statusController.ConsumeStacks(StatusId.Rage, furyStacksGranted);
-                furyStacksGranted = 0;
+                statusController.ConsumeStacks(StatusId.Rage, rageStacksGranted, sourceKey);
+                rageStacksGranted = 0;
             }
         }
     }
+}
+
+public class FuryLowFavour : RageLowFavour
+{
 }

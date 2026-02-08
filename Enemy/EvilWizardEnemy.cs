@@ -63,6 +63,8 @@ public class EvilWizardEnemy : MonoBehaviour
 
     private int attackActionToken = 0;
 
+	private StaticStatus cachedStaticStatus;
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -129,6 +131,11 @@ public class EvilWizardEnemy : MonoBehaviour
     {
 
         if (spriteFlipOffset == null || isDead) return;
+
+		if (IsStaticFrozen())
+		{
+			return;
+		}
 
         // Check if moving/movingflip animation is playing
         bool isMoving = animator.GetBool("moving") || animator.GetBool("movingflip");
@@ -232,6 +239,12 @@ public class EvilWizardEnemy : MonoBehaviour
             return;
         }
 
+		if (IsStaticFrozen())
+		{
+			rb.velocity = Vector2.zero;
+			return;
+		}
+
         // Handle knockback
         if (Time.time < knockbackEndTime)
         {
@@ -284,7 +297,7 @@ public class EvilWizardEnemy : MonoBehaviour
         // Wait for first attack damage delay
         if (firstAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(firstAttackDamageDelayV2);
+			yield return WaitForSecondsPauseSafeAndStatic(firstAttackDamageDelayV2, myToken);
         }
 
         if (isDead || myToken != attackActionToken)
@@ -300,6 +313,7 @@ public class EvilWizardEnemy : MonoBehaviour
         if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive && 
             AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
+			yield return WaitWhileStatic(myToken);
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -320,7 +334,7 @@ public class EvilWizardEnemy : MonoBehaviour
         float remainingTime = firstAttackDuration - firstAttackDamageDelayV2;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+			yield return WaitForSecondsPauseSafeAndStatic(remainingTime, myToken);
         }
 
         if (isDead || myToken != attackActionToken)
@@ -342,7 +356,7 @@ public class EvilWizardEnemy : MonoBehaviour
         // Wait for second attack damage delay
         if (secondAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(secondAttackDamageDelayV2);
+			yield return WaitForSecondsPauseSafeAndStatic(secondAttackDamageDelayV2, myToken);
         }
 
         if (isDead || myToken != attackActionToken)
@@ -358,6 +372,7 @@ public class EvilWizardEnemy : MonoBehaviour
         if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive && 
             AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
+			yield return WaitWhileStatic(myToken);
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -378,7 +393,7 @@ public class EvilWizardEnemy : MonoBehaviour
         remainingTime = secondAttackDuration - secondAttackDamageDelayV2;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+			yield return WaitForSecondsPauseSafeAndStatic(remainingTime, myToken);
         }
 
         animator.SetBool("attack2", false);
@@ -408,7 +423,7 @@ public class EvilWizardEnemy : MonoBehaviour
             attackOnCooldown = true;
             animator.SetBool("idle", true);
 
-            yield return new WaitForSeconds(cooldown);
+			yield return WaitForSecondsPauseSafeAndStatic(cooldown, myToken);
             
             attackOnCooldown = false;
             animator.SetBool("idle", false);
@@ -416,15 +431,67 @@ public class EvilWizardEnemy : MonoBehaviour
         }
     }
 
+    private bool IsStaticFrozen()
+    {
+        if (cachedStaticStatus == null)
+        {
+            cachedStaticStatus = GetComponent<StaticStatus>();
+        }
+
+        return cachedStaticStatus != null && cachedStaticStatus.IsInStaticPeriod;
+    }
+
+    private IEnumerator WaitForSecondsPauseSafeAndStatic(float seconds, int myToken)
+    {
+        if (seconds <= 0f)
+        {
+            yield break;
+        }
+
+        float elapsed = 0f;
+        while (elapsed < seconds)
+        {
+            if (isDead || myToken != attackActionToken)
+            {
+                yield break;
+            }
+
+            if (IsStaticFrozen())
+            {
+                yield return null;
+                continue;
+            }
+
+            float dt = GameStateManager.GetPauseSafeDeltaTime();
+            if (dt > 0f)
+            {
+                elapsed += dt;
+            }
+            yield return null;
+        }
+
+        yield return WaitWhileStatic(myToken);
+    }
+
+    private IEnumerator WaitWhileStatic(int myToken)
+    {
+        while (IsStaticFrozen())
+        {
+            if (isDead || myToken != attackActionToken)
+            {
+                yield break;
+            }
+            yield return null;
+        }
+    }
+
     void LateUpdate()
     {
         if (spriteFlipOffset == null) return;
 
-        // Check animation states
         bool isWalking = animator.GetBool("moving") || animator.GetBool("movingflip");
         bool isDying = animator.GetBool("dead") || animator.GetBool("deadflip");
 
-        // Disable SpriteFlipOffset during walking or death
         if (isWalking || isDying)
         {
             spriteFlipOffset.SetColliderOffsetEnabled(false);
@@ -432,7 +499,6 @@ public class EvilWizardEnemy : MonoBehaviour
         }
         else
         {
-            // Enable SpriteFlipOffset for all other states
             spriteFlipOffset.SetColliderOffsetEnabled(true);
             spriteFlipOffset.SetShadowOffsetEnabled(true);
         }

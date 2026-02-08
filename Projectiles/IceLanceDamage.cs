@@ -33,6 +33,16 @@ public class IceLanceDamage : MonoBehaviour
     
     private void OnTriggerEnter2D(Collider2D other)
     {
+        Transform t = other != null ? other.transform : null;
+        while (t != null)
+        {
+            if (t.name == "ClickHitbox")
+            {
+                return;
+            }
+            t = t.parent;
+        }
+
         if (((1 << other.gameObject.layer) & enemyLayer) == 0) return;
         
         // Check if already damaged this enemy (ONLY DAMAGE ONCE PER LANCE)
@@ -91,7 +101,7 @@ public class IceLanceDamage : MonoBehaviour
                     Debug.Log($"<color=cyan>IceLance hit effect parented to {other.gameObject.name}</color>");
                 }
                 
-                Destroy(effect, hitEffectDuration);
+                PauseSafeSelfDestruct.Schedule(effect, hitEffectDuration);
             }
             
             // Apply slow effect

@@ -112,6 +112,8 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
     private int attackActionToken = 0;
     private int chargeActionToken = 0;
 
+    private StaticStatus cachedStaticStatus;
+
     private float defaultMass;
 
     void Awake()
@@ -244,8 +246,11 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         health.enabled = false;
         
         Debug.Log($"<color=green>Skeleton summoning for {summonAnimationDuration}s (invulnerable)</color>");
-        
-        yield return new WaitForSeconds(summonAnimationDuration);
+
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            summonAnimationDuration,
+            () => isDead,
+            () => IsStaticFrozen());
         
         animator.SetBool("summon", false);
         animator.SetBool("digout", false);
@@ -269,7 +274,10 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         Debug.Log($"<color=green>Skeleton post-summon idle for {postSummonIdleTime:F2}s</color>");
         
         animator.SetBool("idle", true);
-        yield return new WaitForSeconds(postSummonIdleTime);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            postSummonIdleTime,
+            () => isDead,
+            () => IsStaticFrozen());
         animator.SetBool("idle", false);
         
         isSummoning = false;
@@ -280,7 +288,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
     {
         if (isDead || isSummoning || isPlayerDead) return;
 
-        if (isStaticFrozen) return;
+        if (IsStaticFrozen()) return;
 
         // While charging, suppress walk/idle and let charge-specific animations play
         if (isCharging)
@@ -399,10 +407,10 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         float elapsed = 0f;
         while (elapsed < IdleTransitionDuration)
         {
-            if (isDead)
+            if (IsStaticFrozen())
             {
-                idleTransitionRoutine = null;
-                yield break;
+                yield return null;
+                continue;
             }
 
             elapsed += Time.deltaTime;
@@ -487,7 +495,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
             return;
         }
 
-        if (isStaticFrozen)
+        if (IsStaticFrozen())
         {
             rb.velocity = Vector2.zero;
             return;
@@ -577,7 +585,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
             float elapsedWindup = 0f;
             while (elapsedWindup < chargeWindup)
             {
-                if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
+                if (isDead || isSummoning || isPlayerDead || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
                 {
                     isCharging = false;
                     SetChargeMassActive(false);
@@ -589,6 +597,13 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
                     animator.SetBool("chargeendflip", false);
                     chargeRoutine = null;
                     yield break;
+                }
+
+                if (IsStaticFrozen())
+                {
+                    rb.velocity = Vector2.zero;
+                    yield return null;
+                    continue;
                 }
 
                 // Keep facing target during windup
@@ -603,7 +618,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
                 yield return null;
             }
         }
-        else if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
+        else if (isDead || isSummoning || isPlayerDead || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
         {
             isCharging = false;
             SetChargeMassActive(false);
@@ -637,9 +652,16 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         float t = 0f;
         while (t < chargeDashDuration)
         {
-            if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
+            if (isDead || isSummoning || isPlayerDead || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
             {
                 break;
+            }
+
+            if (IsStaticFrozen())
+            {
+                rb.velocity = Vector2.zero;
+                yield return null;
+                continue;
             }
 
             targetPos = CinderbloomTauntTarget.GetTargetPositionForEnemy(gameObject);
@@ -656,7 +678,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
             yield return new WaitForFixedUpdate();
         }
 
-        if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
+        if (isDead || isSummoning || isPlayerDead || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
         {
             isCharging = false;
             SetChargeMassActive(false);
@@ -689,9 +711,16 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
 
         while (chargeEndElapsed < ChargeEndDuration)
         {
-            if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
+            if (isDead || isSummoning || isPlayerDead || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
             {
                 break;
+            }
+
+            if (IsStaticFrozen())
+            {
+                rb.velocity = Vector2.zero;
+                yield return null;
+                continue;
             }
 
             if (chargeEndElapsed < slideDuration)
@@ -707,7 +736,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
             yield return new WaitForFixedUpdate();
         }
 
-        if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
+        if (isDead || isSummoning || isPlayerDead || myToken != chargeActionToken || AdvancedPlayerController.Instance == null || !AdvancedPlayerController.Instance.enabled)
         {
             isCharging = false;
             animator.SetBool("chargestart", false);
@@ -733,7 +762,10 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         // Charge cooldown
         if (chargeCooldown > 0f)
         {
-            yield return new WaitForSeconds(chargeCooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                chargeCooldown,
+                () => isDead || isSummoning || isPlayerDead || myToken != chargeActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isSummoning || isPlayerDead || myToken != chargeActionToken)
@@ -758,10 +790,13 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         // Wait for FIRST damage delay
         if (firstAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(firstAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstAttackDamageDelayV2,
+                () => isDead || isSummoning || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
-        if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != attackActionToken)
+        if (isDead || isSummoning || isPlayerDead || myToken != attackActionToken)
         {
             animator.SetBool("attack", false);
             animator.speed = originalSpeed;
@@ -790,7 +825,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         int instances = Mathf.Max(1, damageInstancesPerAttackV2);
         for (int i = 0; i < instances; i++)
         {
-            if (isDead || isSummoning || isPlayerDead || isStaticFrozen || myToken != attackActionToken)
+            if (isDead || isSummoning || isPlayerDead || myToken != attackActionToken)
             {
                 animator.SetBool("attack", false);
                 animator.speed = originalSpeed;
@@ -798,6 +833,10 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
                 attackRoutine = null;
                 yield break;
             }
+
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isSummoning || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
 
             Transform attackTarget = tauntHelper != null ? tauntHelper.GetAttackTarget() : null;
             if (attackTarget != null)
@@ -825,7 +864,10 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
                 {
                     if (restAttackDamageDelayV2 > 0f)
                     {
-                        yield return new WaitForSeconds(restAttackDamageDelayV2);
+                        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                            restAttackDamageDelayV2,
+                            () => isDead || isSummoning || isPlayerDead || myToken != attackActionToken,
+                            () => IsStaticFrozen());
                     }
                 }
             }
@@ -844,7 +886,10 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         float remainingTime = attackDuration - totalDamageTime;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || isSummoning || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attack", false);
@@ -865,7 +910,10 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         }
         if (cooldown > 0f)
         {
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || isSummoning || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         attackOnCooldown = false;
@@ -944,7 +992,7 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
         if (animationDelay > 0f)
         {
-            yield return new WaitForSeconds(animationDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(animationDelay, null, null);
         }
 
         if (spriteRenderer != null && deathFadeOutDuration > 0f)
@@ -1002,46 +1050,6 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
 
         isStaticFrozen = true;
 
-        // Interrupt melee attack and enforce full cooldown
-        if (attackRoutine != null)
-        {
-            CancelAttackAction();
-            StopCoroutine(attackRoutine);
-            attackRoutine = null;
-            isAttacking = false;
-            animator.SetBool("attack", false);
-
-            if (!attackOnCooldown && attackCooldown > 0f)
-            {
-                attackOnCooldown = true;
-                if (staticAttackCooldownRoutine != null)
-                {
-                    StopCoroutine(staticAttackCooldownRoutine);
-                }
-                staticAttackCooldownRoutine = StartCoroutine(AttackCooldownAfterStatic());
-            }
-        }
-
-        // Interrupt active charge and enforce full charge cooldown
-        if (chargeRoutine != null)
-        {
-            CancelChargeAction();
-            StopCoroutine(chargeRoutine);
-            chargeRoutine = null;
-            rb.velocity = Vector2.zero;
-
-            isCharging = false;
-            SetChargeMassActive(false);
-            chargeOnCooldown = true;
-            lastChargeEndTime = Time.time;
-
-            if (staticChargeCooldownRoutine != null)
-            {
-                StopCoroutine(staticChargeCooldownRoutine);
-            }
-            staticChargeCooldownRoutine = StartCoroutine(ChargeCooldownAfterStatic());
-        }
-
     }
 
     public void OnStaticEnd()
@@ -1049,16 +1057,13 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         if (isDead || isSummoning) return;
 
         isStaticFrozen = false;
+    }
 
-        // Ensure interrupted attack/charge animations do not resume once
-        // StaticStatus restores animator speed.
-        animator.SetBool("attack", false);
-        animator.SetBool("chargestart", false);
-        animator.SetBool("chargeloop", false);
-        animator.SetBool("chargeend", false);
-        animator.SetBool("chargestartflip", false);
-        animator.SetBool("chargeloopflip", false);
-        animator.SetBool("chargeendflip", false);
+    private bool IsStaticFrozen()
+    {
+        bool frozen = StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
+        isStaticFrozen = frozen;
+        return frozen;
     }
 
     private IEnumerator AttackCooldownAfterStatic()
@@ -1070,7 +1075,10 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         }
         if (wait > 0f)
         {
-            yield return new WaitForSeconds(Mathf.Max(0f, wait));
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                Mathf.Max(0f, wait),
+                () => isDead || isSummoning || isPlayerDead,
+                () => IsStaticFrozen());
         }
 
         attackOnCooldown = false;
@@ -1083,7 +1091,10 @@ public class SkellySmithEnemy : MonoBehaviour, IStaticInterruptHandler
         float wait = Mathf.Max(0f, chargeCooldown);
         if (wait > 0f)
         {
-            yield return new WaitForSeconds(wait);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                wait,
+                () => isDead || isSummoning || isPlayerDead,
+                () => IsStaticFrozen());
         }
 
         chargeOnCooldown = false;

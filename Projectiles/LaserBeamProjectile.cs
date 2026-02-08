@@ -178,7 +178,7 @@ public class LaserBeamProjectile : MonoBehaviour
         if (!isActive) return;
         
         // Update lifetime
-        lifeTimer += Time.deltaTime;
+        lifeTimer += GameStateManager.GetPauseSafeDeltaTime();
         if (lifeTimer >= lifetime)
         {
             DestroyLaser();
@@ -199,7 +199,7 @@ public class LaserBeamProjectile : MonoBehaviour
             float desired = targetAngle + facingCorrection + additionalRotationOffsetDeg;
             
             float current = transform.eulerAngles.z;
-            float step = maxRotationDegreesPerSecond * Time.deltaTime;
+            float step = maxRotationDegreesPerSecond * GameStateManager.GetPauseSafeDeltaTime();
             float newAngle = Mathf.MoveTowardsAngle(current, desired, step);
             transform.rotation = Quaternion.Euler(0f, 0f, newAngle);
         }
@@ -270,18 +270,36 @@ public class LaserBeamProjectile : MonoBehaviour
         }
         
         StopTrailSfx(false);
-        Destroy(gameObject, trailLifetime); // Wait for trail to fade
+        PauseSafeSelfDestruct.Schedule(gameObject, trailLifetime); // Wait for trail to fade
     }
     
     private void OnTriggerEnter2D(Collider2D other)
     {
         if (!isActive) return;
+        Transform t = other != null ? other.transform : null;
+        while (t != null)
+        {
+            if (t.name == "ClickHitbox")
+            {
+                return;
+            }
+            t = t.parent;
+        }
         ApplyDamage(other);
     }
     
     private void OnTriggerStay2D(Collider2D other)
     {
         if (!isActive) return;
+        Transform t = other != null ? other.transform : null;
+        while (t != null)
+        {
+            if (t.name == "ClickHitbox")
+            {
+                return;
+            }
+            t = t.parent;
+        }
         ApplyDamage(other);
     }
     
@@ -296,7 +314,7 @@ public class LaserBeamProjectile : MonoBehaviour
         // Check damage cooldown for this specific enemy
         if (lastDamageTimes.ContainsKey(other))
         {
-            if (Time.time - lastDamageTimes[other] < damageInterval)
+            if (GameStateManager.PauseSafeTime - lastDamageTimes[other] < damageInterval)
             {
                 return; // Too soon to damage this enemy again
             }
@@ -334,7 +352,7 @@ public class LaserBeamProjectile : MonoBehaviour
             damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
 
             // Update last damage time for this enemy
-            lastDamageTimes[other] = Time.time;
+            lastDamageTimes[other] = GameStateManager.PauseSafeTime;
 
             Debug.Log($"<color=orange>Laser dealt {finalDamage} damage to {other.gameObject.name}</color>");
         }
@@ -355,7 +373,7 @@ public class LaserBeamProjectile : MonoBehaviour
             
             if (hitEffectDuration > 0f)
             {
-                Destroy(vfx, hitEffectDuration);
+                PauseSafeSelfDestruct.Schedule(vfx, hitEffectDuration);
             }
         }
         
@@ -453,7 +471,7 @@ public class LaserBeamProjectile : MonoBehaviour
         
         while (t < duration && source != null)
         {
-            t += Time.deltaTime;
+            t += GameStateManager.GetPauseSafeDeltaTime();
             float k = Mathf.Clamp01(1f - (t / duration));
             source.volume = startVolume * k;
             yield return null;

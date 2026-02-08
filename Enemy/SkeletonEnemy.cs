@@ -70,6 +70,8 @@ public class SkeletonEnemy : MonoBehaviour
 
     private int attackActionToken = 0;
 
+    private StaticStatus cachedStaticStatus;
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -156,7 +158,10 @@ public class SkeletonEnemy : MonoBehaviour
         
         Debug.Log($"<color=green>Skeleton summoning for {summonAnimationDuration}s (invulnerable)</color>");
         
-        yield return new WaitForSeconds(summonAnimationDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            summonAnimationDuration,
+            () => isDead,
+            () => IsStaticFrozen());
         
         animator.SetBool("summon", false);
         
@@ -179,7 +184,10 @@ public class SkeletonEnemy : MonoBehaviour
         Debug.Log($"<color=green>Skeleton post-summon idle for {postSummonIdleTime:F2}s</color>");
         
         animator.SetBool("idle", true);
-        yield return new WaitForSeconds(postSummonIdleTime);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            postSummonIdleTime,
+            () => isDead,
+            () => IsStaticFrozen());
         animator.SetBool("idle", false);
         
         isSummoning = false;
@@ -189,6 +197,11 @@ public class SkeletonEnemy : MonoBehaviour
     void Update()
     {
         if (isDead || isSummoning) return;
+
+        if (IsStaticFrozen())
+        {
+            return;
+        }
 
         bool isMoving = rb.velocity.sqrMagnitude > 0.0001f && !isAttacking;
         animator.SetBool("moving", isMoving);
@@ -272,6 +285,17 @@ public class SkeletonEnemy : MonoBehaviour
             return;
         }
 
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                knockbackEndTime += dt;
+            }
+            return;
+        }
+
         // Handle knockback
         if (Time.time < knockbackEndTime)
         {
@@ -323,7 +347,10 @@ public class SkeletonEnemy : MonoBehaviour
         // Wait for FIRST damage delay
         if (firstAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(firstAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstAttackDamageDelayV2,
+                () => isDead || isSummoning || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isSummoning || myToken != attackActionToken)
@@ -364,6 +391,10 @@ public class SkeletonEnemy : MonoBehaviour
                 yield break;
             }
 
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isSummoning || myToken != attackActionToken,
+                () => IsStaticFrozen());
+
             Transform attackTarget = tauntHelper != null ? tauntHelper.GetAttackTarget() : null;
             if (attackTarget != null)
             {
@@ -390,7 +421,10 @@ public class SkeletonEnemy : MonoBehaviour
                 {
                     if (restAttackDamageDelayV2 > 0f)
                     {
-                        yield return new WaitForSeconds(restAttackDamageDelayV2);
+                        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                            restAttackDamageDelayV2,
+                            () => isDead || isSummoning || myToken != attackActionToken,
+                            () => IsStaticFrozen());
                     }
                 }
             }
@@ -409,7 +443,10 @@ public class SkeletonEnemy : MonoBehaviour
         float remainingTime = attackDuration - totalDamageTime;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || isSummoning || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attack", false);
@@ -430,12 +467,20 @@ public class SkeletonEnemy : MonoBehaviour
         }
         if (cooldown > 0f)
         {
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || isSummoning || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         attackOnCooldown = false;
         animator.SetBool("idle", false);
         attackRoutine = null;
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void LateUpdate()

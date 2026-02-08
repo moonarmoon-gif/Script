@@ -95,7 +95,7 @@ public class FavourEffectManager : MonoBehaviour
 
     private void Update()
     {
-        float deltaTime = Time.deltaTime;
+        float deltaTime = GameStateManager.GetPauseSafeDeltaTime();
         for (int i = 0; i < activeEffects.Count; i++)
         {
             FavourEffect effect = activeEffects[i].effectInstance;

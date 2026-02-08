@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public class MinCooldownManager : MonoBehaviour
 {
@@ -12,6 +13,8 @@ public class MinCooldownManager : MonoBehaviour
     public float ElementalBeamV2 = 0.1f;
     public float FireTalon = 0.2f;
     public float IceTalon = 0.2f;
+    [FormerlySerializedAs("ElectroBall")]
+    public float ElectroBallMinCooldown = 0.1f;
     public float HolyShield = 0.1f;
     public float NuclearStrike = 0.1f;
     public float ThunderBird = 0.1f;
@@ -89,6 +92,11 @@ public class MinCooldownManager : MonoBehaviour
         if (prefab.GetComponent<ProjectileIceTalon>() != null)
         {
             return IceTalon;
+        }
+
+        if (prefab.GetComponent<ElectroBall>() != null)
+        {
+            return ElectroBallMinCooldown;
         }
 
         if (prefab.GetComponent<HolyShield>() != null)

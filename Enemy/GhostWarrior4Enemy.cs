@@ -84,6 +84,7 @@ public class GhostWarrior4Enemy : MonoBehaviour
     private SpriteFlipOffset spriteFlipOffset;
 
     private bool isDead;
+    private bool isPlayerDead;
     private bool isAttacking;
     private bool attackOnCooldown;
     private Coroutine attackRoutine;
@@ -95,6 +96,8 @@ public class GhostWarrior4Enemy : MonoBehaviour
     private bool wasOffsetDrivenByAnim = false;
 
     private int attackActionToken = 0;
+
+    private StaticStatus cachedStaticStatus;
 
     // Ghost4 shield channel state
     private bool shieldChannelUsedThisLife = false;
@@ -158,7 +161,14 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
     void Update()
     {
-        if (spriteFlipOffset == null || isDead) return;
+        if (spriteFlipOffset == null) return;
+        if (isDead) return;
+        if (isPlayerDead) return;
+
+        if (IsStaticFrozen())
+        {
+            return;
+        }
 
         bool offsetDrivenByAnim =
             animator.GetBool("moving") || animator.GetBool("movingflip") ||
@@ -380,7 +390,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
         animator.SetBool("swordin", true);
         if (SwordInAnimationDuration > 0f)
         {
-            yield return new WaitForSeconds(SwordInAnimationDuration);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                SwordInAnimationDuration,
+                () => isDead,
+                () => IsStaticFrozen());
         }
         animator.SetBool("swordin", false);
 
@@ -398,12 +411,20 @@ public class GhostWarrior4Enemy : MonoBehaviour
         {
             if (isDead) yield break;
 
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead,
+                () => IsStaticFrozen());
+
             if (statusController != null && shieldPerTick > 0f)
             {
                 statusController.AddShield(shieldPerTick);
             }
 
-            yield return new WaitForSeconds(interval);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                interval,
+                () => isDead,
+                () => IsStaticFrozen());
+
             elapsed += interval;
         }
 
@@ -413,7 +434,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         if (SwordOutAnimationDuration > 0f)
         {
-            yield return new WaitForSeconds(SwordOutAnimationDuration);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                SwordOutAnimationDuration,
+                () => isDead,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("swordout", false);
@@ -427,7 +451,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
         float delay = Mathf.Max(0f, PreAttackDelay);
         if (delay > 0f)
         {
-            yield return new WaitForSeconds(delay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                delay,
+                () => isDead || isChannelingShield,
+                () => IsStaticFrozen());
         }
 
         preAttackDelayRoutine = null;
@@ -453,78 +480,29 @@ public class GhostWarrior4Enemy : MonoBehaviour
         preAttackDelayReady = true;
     }
 
-    void OnPlayerDeath()
-    {
-        rb.velocity = Vector2.zero;
-
-        if (attackRoutine != null)
-        {
-            StopCoroutine(attackRoutine);
-            attackRoutine = null;
-        }
-        if (preAttackDelayRoutine != null)
-        {
-            StopCoroutine(preAttackDelayRoutine);
-            preAttackDelayRoutine = null;
-        }
-        if (shieldChannelRoutine != null)
-        {
-            StopCoroutine(shieldChannelRoutine);
-            shieldChannelRoutine = null;
-        }
-
-        preAttackDelayReady = false;
-        wasInAttackRange = false;
-        isAttacking = false;
-        attackOnCooldown = false;
-        isChannelingShield = false;
-
-        animator.SetBool("swordin", false);
-        animator.SetBool("swordout", false);
-
-        ClearAllAttackAnims();
-
-        animator.SetBool("moving", false);
-        animator.SetBool("movingflip", false);
-        animator.SetBool("idle", true);
-        CancelAttackAction();
-    }
-
-    public void ApplyKnockback(Vector2 direction, float force)
-    {
-        if (isDead) return;
-
-        knockbackVelocity = direction.normalized * force * knockbackIntensity;
-        knockbackEndTime = Time.time + knockbackDuration;
-
-        if (!isChannelingShield)
-        {
-            if (attackRoutine != null)
-            {
-                StopCoroutine(attackRoutine);
-                attackRoutine = null;
-            }
-            if (preAttackDelayRoutine != null)
-            {
-                StopCoroutine(preAttackDelayRoutine);
-                preAttackDelayRoutine = null;
-                preAttackDelayReady = false;
-                wasInAttackRange = false;
-            }
-            isAttacking = false;
-
-            ClearAllAttackAnims();
-
-            attackOnCooldown = false;
-            CancelAttackAction();
-        }
-    }
-
     void FixedUpdate()
     {
         if (isDead)
         {
             rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (isPlayerDead)
+        {
+            rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                knockbackEndTime += dt;
+            }
             return;
         }
 
@@ -640,7 +618,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         if (firstAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(firstAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstAttackDamageDelayV2,
+                () => isDead || isChannelingShield || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isChannelingShield || myToken != attackActionToken)
@@ -655,6 +636,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
         if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive &&
             AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isChannelingShield || myToken != attackActionToken,
+                () => IsStaticFrozen());
+
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -673,7 +658,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
         float remainingTime = firstAttackDuration - elapsedAttackTime;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || isChannelingShield || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isChannelingShield || myToken != attackActionToken)
@@ -692,7 +680,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         if (secondAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(secondAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                secondAttackDamageDelayV2,
+                () => isDead || isChannelingShield || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isChannelingShield || myToken != attackActionToken)
@@ -707,6 +698,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
         if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive &&
             AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isChannelingShield || myToken != attackActionToken,
+                () => IsStaticFrozen());
+
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -724,7 +719,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
         remainingTime = secondAttackDuration - secondAttackDamageDelayV2;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || isChannelingShield || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isChannelingShield || myToken != attackActionToken)
@@ -743,7 +741,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
         if (thirdAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(thirdAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                thirdAttackDamageDelayV2,
+                () => isDead || isChannelingShield || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isChannelingShield || myToken != attackActionToken)
@@ -758,6 +759,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
         if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive &&
             AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isChannelingShield || myToken != attackActionToken,
+                () => IsStaticFrozen());
+
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -779,7 +784,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
         remainingTime = thirdAttackDuration - thirdAttackDamageDelayV2;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || isChannelingShield || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         ClearAllAttackAnims();
@@ -807,12 +815,47 @@ public class GhostWarrior4Enemy : MonoBehaviour
             attackOnCooldown = true;
             animator.SetBool("idle", true);
 
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || isChannelingShield || myToken != attackActionToken,
+                () => IsStaticFrozen());
 
             attackOnCooldown = false;
             animator.SetBool("idle", false);
             attackRoutine = null;
         }
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
+    }
+
+    void OnPlayerDeath()
+    {
+        if (isDead || isPlayerDead) return;
+
+        isPlayerDead = true;
+
+        CancelAttackAndPreAttack();
+
+        if (shieldChannelRoutine != null)
+        {
+            StopCoroutine(shieldChannelRoutine);
+            shieldChannelRoutine = null;
+        }
+
+        isChannelingShield = false;
+
+        rb.velocity = Vector2.zero;
+
+        animator.speed = 1f;
+        animator.SetBool("swordin", false);
+        animator.SetBool("swordout", false);
+        animator.SetBool("moving", false);
+        animator.SetBool("movingflip", false);
+        ClearAllAttackAnims();
+        animator.SetBool("idle", true);
     }
 
     void HandleDeath()
@@ -852,7 +895,10 @@ public class GhostWarrior4Enemy : MonoBehaviour
         float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
         if (animationDelay > 0)
         {
-            yield return new WaitForSeconds(animationDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                animationDelay,
+                () => false,
+                () => false);
         }
 
         if (spriteRenderer != null)
@@ -862,7 +908,11 @@ public class GhostWarrior4Enemy : MonoBehaviour
 
             while (elapsed < deathFadeOutDuration)
             {
-                elapsed += Time.deltaTime;
+                float dt = GameStateManager.GetPauseSafeDeltaTime();
+                if (dt > 0f)
+                {
+                    elapsed += dt;
+                }
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / deathFadeOutDuration);
                 spriteRenderer.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;

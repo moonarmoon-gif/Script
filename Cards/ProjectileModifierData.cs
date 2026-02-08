@@ -14,6 +14,10 @@ public class ProjectileModifierData
         CooldownReduction,
         ManaCostReduction,
         DamageIncrease,
+        BurnChance,
+        SlowChance,
+        StaticChance,
+        SpecialChance,
         ExplosionRadius,
         StrikeZoneRadius,
         ProjectileCount,
@@ -130,6 +134,18 @@ public class ProjectileModifierData
                     // Flat damage increase (no percentage)
                     desc = $"+{value:F0} Damage";
                     break;
+                case ModifierType.BurnChance:
+                    desc = value < 1f ? $"+{value:F2}% Burn Chance" : $"+{value:F0}% Burn Chance";
+                    break;
+                case ModifierType.SlowChance:
+                    desc = value < 1f ? $"+{value:F2}% Slow Chance" : $"+{value:F0}% Slow Chance";
+                    break;
+                case ModifierType.StaticChance:
+                    desc = value < 1f ? $"+{value:F2}% Static Chance" : $"+{value:F0}% Static Chance";
+                    break;
+                case ModifierType.SpecialChance:
+                    desc = value < 1f ? $"+{value:F2}% Special Chance" : $"+{value:F0}% Special Chance";
+                    break;
                 case ModifierType.ExplosionRadius:
                     // Raw value, not percentage
                     desc = $"+{value:F1} Explosion Radius";
@@ -200,6 +216,14 @@ public class ProjectileModifierData
             case ModifierType.DamageIncrease:
                 // Flat damage increase (no percentage symbol)
                 return format.Replace("{value}", $"+{value:F0}").Replace("{type}", "Damage");
+            case ModifierType.BurnChance:
+                return format.Replace("{value}", value < 1f ? $"+{value:F2}%" : $"+{value:F0}%").Replace("{type}", "Burn Chance");
+            case ModifierType.SlowChance:
+                return format.Replace("{value}", value < 1f ? $"+{value:F2}%" : $"+{value:F0}%").Replace("{type}", "Slow Chance");
+            case ModifierType.StaticChance:
+                return format.Replace("{value}", value < 1f ? $"+{value:F2}%" : $"+{value:F0}%").Replace("{type}", "Static Chance");
+            case ModifierType.SpecialChance:
+                return format.Replace("{value}", value < 1f ? $"+{value:F2}%" : $"+{value:F0}%").Replace("{type}", "Special Chance");
             case ModifierType.ExplosionRadius:
                 return format.Replace("{value}", $"+{value:F1}").Replace("{type}", "Explosion Radius");
             case ModifierType.StrikeZoneRadius:
@@ -243,8 +267,10 @@ public class ProjectileModifierData
             case ModifierType.ManaCostReduction:
                 stats.projectileManaCostReduction += value / 100f;
                 break;
-            case ModifierType.DamageIncrease:
-                stats.projectileFlatDamage += value;
+            case ModifierType.StaticChance:
+                stats.statusEffectChance += value;
+                break;
+            case ModifierType.SpecialChance:
                 break;
             case ModifierType.ExplosionRadius:
                 stats.explosionRadiusBonus += value; // Raw value, not percentage

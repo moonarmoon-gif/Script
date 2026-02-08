@@ -60,7 +60,7 @@ public class ManaShieldFavour : FavourEffect
         if (stacks <= 0)
         {
             stacks = 1;
-            lastDamageTime = Time.time;
+            lastDamageTime = GameStateManager.PauseSafeTime;
             RecalculateMaxShield(true);
         }
         else
@@ -69,7 +69,7 @@ public class ManaShieldFavour : FavourEffect
             RecalculateMaxShield(false);
         }
 
-        nextRegenTime = Time.time + ShieldRegenTickInterval;
+        nextRegenTime = GameStateManager.PauseSafeTime + ShieldRegenTickInterval;
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -102,7 +102,7 @@ public class ManaShieldFavour : FavourEffect
             return;
         }
 
-        lastDamageTime = Time.time;
+        lastDamageTime = GameStateManager.PauseSafeTime;
 
         if (currentShield <= 0f)
         {
@@ -136,12 +136,12 @@ public class ManaShieldFavour : FavourEffect
             return;
         }
 
-        if (Time.time - lastDamageTime < RegenTimer)
+        if (GameStateManager.PauseSafeTime - lastDamageTime < RegenTimer)
         {
             return;
         }
 
-        if (Time.time < nextRegenTime)
+        if (GameStateManager.PauseSafeTime < nextRegenTime)
         {
             return;
         }
@@ -152,7 +152,7 @@ public class ManaShieldFavour : FavourEffect
             currentShield = Mathf.Min(maxShield, currentShield + amount);
         }
 
-        nextRegenTime = Time.time + ShieldRegenTickInterval;
+        nextRegenTime = GameStateManager.PauseSafeTime + ShieldRegenTickInterval;
     }
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
 public class EnemyStatUIManager : MonoBehaviour
@@ -11,11 +12,26 @@ public class EnemyStatUIManager : MonoBehaviour
 
     [Header("Click Detection")]
     [SerializeField] private LayerMask enemyClickMask = ~0;
+    [SerializeField] private string clickHitboxObjectName = "ClickHitbox";
 
     [Header("Panel Settings")]
     [SerializeField] private Vector2 panelOffsetPixels = new Vector2(60f, 0f);
-    [SerializeField] private float panelScale = 1f;
+    [SerializeField] private Vector2 flipPanelOffsetPixels = new Vector2(-60f, 0f);
+    [SerializeField] private float panelScale = 1.5f;
     [SerializeField] private float panelUpdateIntervalSeconds = 0.05f;
+
+    [Serializable]
+    public class EnemyPanelOffsets
+    {
+        public string enemyName;
+        public Vector2 panelOffsetPixels;
+        public Vector2 flipPanelOffsetPixels;
+        public float panelScale = 1.5f;
+    }
+
+    [Header("Per-Enemy Panel Offsets")]
+    [SerializeField] private bool usePerEnemyPanelOffsets = true;
+    [SerializeField] private List<EnemyPanelOffsets> perEnemyPanelOffsets = new List<EnemyPanelOffsets>();
 
     [Header("Debug")]
     [SerializeField] private bool debugLogging = false;
@@ -30,8 +46,59 @@ public class EnemyStatUIManager : MonoBehaviour
     private bool lastSelectionActive;
 
     public Vector2 PanelOffsetPixels => panelOffsetPixels;
+    public Vector2 FlipPanelOffsetPixels
+    {
+        get => flipPanelOffsetPixels;
+        set => flipPanelOffsetPixels = value;
+    }
     public float PanelScale => panelScale;
     public float PanelUpdateIntervalSeconds => panelUpdateIntervalSeconds;
+
+    public Vector2 GetPanelOffsetPixelsForEnemy(EnemyHealth enemyHealth, bool flipped)
+    {
+        Vector2 fallback = flipped ? flipPanelOffsetPixels : panelOffsetPixels;
+        if (!usePerEnemyPanelOffsets || enemyHealth == null)
+        {
+            return fallback;
+        }
+
+        string enemyName = enemyHealth.gameObject.name.Replace("(Clone)", "").Trim();
+        for (int i = 0; i < perEnemyPanelOffsets.Count; i++)
+        {
+            EnemyPanelOffsets entry = perEnemyPanelOffsets[i];
+            if (entry != null && entry.enemyName == enemyName)
+            {
+                return flipped ? entry.flipPanelOffsetPixels : entry.panelOffsetPixels;
+            }
+        }
+
+        return fallback;
+    }
+
+    public float GetPanelScaleForEnemy(EnemyHealth enemyHealth)
+    {
+        float fallback = panelScale;
+        if (!usePerEnemyPanelOffsets || enemyHealth == null)
+        {
+            return fallback;
+        }
+
+        string enemyName = enemyHealth.gameObject.name.Replace("(Clone)", "").Trim();
+        for (int i = 0; i < perEnemyPanelOffsets.Count; i++)
+        {
+            EnemyPanelOffsets entry = perEnemyPanelOffsets[i];
+            if (entry != null && entry.enemyName == enemyName)
+            {
+                if (entry.panelScale > 0f)
+                {
+                    return entry.panelScale;
+                }
+                return fallback;
+            }
+        }
+
+        return fallback;
+    }
 
     private void Awake()
     {
@@ -133,6 +200,25 @@ public class EnemyStatUIManager : MonoBehaviour
             return;
         }
 
+        if (EventSystem.current != null)
+        {
+            bool isOverUi = EventSystem.current.IsPointerOverGameObject();
+            if (!isOverUi && Touchscreen.current != null)
+            {
+                var touch = Touchscreen.current.primaryTouch;
+                if (touch != null)
+                {
+                    int touchId = touch.touchId.ReadValue();
+                    isOverUi = EventSystem.current.IsPointerOverGameObject(touchId);
+                }
+            }
+
+            if (isOverUi)
+            {
+                return;
+            }
+        }
+
         if (debugLogging)
         {
             Debug.Log($"[EnemyStatUIManager] Pointer press at screen={pointerPos}");
@@ -167,48 +253,34 @@ public class EnemyStatUIManager : MonoBehaviour
 
         EnemyHealth enemyHealth = null;
 
-        RaycastHit2D hit2d = Physics2D.GetRayIntersection(ray, 9999f, enemyClickMask);
-        if (hit2d.collider != null)
+        RaycastHit2D[] hits2d = Physics2D.GetRayIntersectionAll(ray, 9999f, enemyClickMask);
+        for (int i = 0; i < hits2d.Length; i++)
         {
-            enemyHealth = hit2d.collider.GetComponent<EnemyHealth>() ?? hit2d.collider.GetComponentInParent<EnemyHealth>();
-        }
-
-        if (enemyHealth == null)
-        {
-            Collider2D hit = Physics2D.OverlapPoint(p2, enemyClickMask);
-            if (hit != null)
+            if (hits2d[i].collider == null)
             {
-                enemyHealth = hit.GetComponent<EnemyHealth>() ?? hit.GetComponentInParent<EnemyHealth>();
+                continue;
+            }
+
+            if (TryGetEnemyFromClickHitbox(hits2d[i].collider, out enemyHealth))
+            {
+                break;
             }
         }
 
         if (enemyHealth == null)
         {
-            Collider2D[] hits = Physics2D.OverlapPointAll(p2);
-            for (int i = 0; i < hits.Length; i++)
+            Collider2D[] overlaps = Physics2D.OverlapPointAll(p2, enemyClickMask);
+            for (int i = 0; i < overlaps.Length; i++)
             {
-                if (hits[i] == null)
+                if (overlaps[i] == null)
                 {
                     continue;
                 }
 
-                enemyHealth = hits[i].GetComponent<EnemyHealth>() ?? hits[i].GetComponentInParent<EnemyHealth>();
-                if (enemyHealth != null)
+                if (TryGetEnemyFromClickHitbox(overlaps[i], out enemyHealth))
                 {
                     break;
                 }
-            }
-        }
-
-        if (enemyHealth == null)
-        {
-            if (Physics.Raycast(ray, out RaycastHit hit3d, 9999f, enemyClickMask))
-            {
-                enemyHealth = hit3d.collider.GetComponent<EnemyHealth>() ?? hit3d.collider.GetComponentInParent<EnemyHealth>();
-            }
-            else if (Physics.Raycast(ray, out hit3d, 9999f))
-            {
-                enemyHealth = hit3d.collider.GetComponent<EnemyHealth>() ?? hit3d.collider.GetComponentInParent<EnemyHealth>();
             }
         }
 
@@ -228,13 +300,47 @@ public class EnemyStatUIManager : MonoBehaviour
         OpenOrBringToFront(enemyHealth);
     }
 
+    private bool TryGetEnemyFromClickHitbox(Collider2D hitCollider, out EnemyHealth enemyHealth)
+    {
+        enemyHealth = null;
+        if (hitCollider == null)
+        {
+            return false;
+        }
+
+        if (!hitCollider.isTrigger)
+        {
+            return false;
+        }
+
+        Transform t = hitCollider.transform;
+        bool matched = false;
+        while (t != null)
+        {
+            if (t.name == clickHitboxObjectName)
+            {
+                matched = true;
+                break;
+            }
+            t = t.parent;
+        }
+
+        if (!matched)
+        {
+            return false;
+        }
+
+        enemyHealth = hitCollider.GetComponentInParent<EnemyHealth>();
+        return enemyHealth != null;
+    }
+
     private void OpenOrBringToFront(EnemyHealth enemyHealth)
     {
         int key = enemyHealth.GetInstanceID();
 
         if (panelsByEnemyId.TryGetValue(key, out EnemyStatUIPanel existing) && existing != null)
         {
-            existing.BringToFront(nextSortingOrder++);
+            existing.Close();
             return;
         }
 

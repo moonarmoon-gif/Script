@@ -63,6 +63,7 @@ public class ProjectileFreezeManager : MonoBehaviour
         // Freeze all active projectiles
         FreezeProjectileType<ProjectileFireTalon>();
         FreezeProjectileType<ProjectileIceTalon>();
+        FreezeProjectileType<ElectroBall>();
         FreezeProjectileType<ElementalBeam>();
         FreezeProjectileType<PlayerProjectiles>();
         FreezeProjectileType<FireMine>();

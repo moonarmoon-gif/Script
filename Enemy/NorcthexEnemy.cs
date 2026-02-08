@@ -107,6 +107,9 @@ public class NorcthexEnemy : MonoBehaviour
     [Tooltip("Damage increase percentage per summon wave for summoned enemies (1 = +1% per wave, multiplicative)")]
     [SerializeField] private float summonDamageIncreasePercent = 1f;
 
+    [Tooltip("When enabled, SummonHealth/DamageIncreasePercent scales multiplicatively per wave. When disabled, it scales additively (+% each wave).")]
+    public bool useMultiplicativeSummonScaling = false;
+
     [Header("Summon Base Percentages")]
     [Tooltip("Base health percent of Norcthex's max health given to each summoned enemy (0.05 = 5%).")]
     public float summonBaseHealthPercent = 0.05f;
@@ -260,6 +263,8 @@ public class NorcthexEnemy : MonoBehaviour
     private Vector3 lastTeleportPosition = new Vector3(999999f, 999999f, 0f);
     private bool hasTeleportedAtLeastOnce;
 
+    private StaticStatus cachedStaticStatus;
+
     private void ResetAnimatorBools()
     {
         if (animator == null) return;
@@ -367,6 +372,11 @@ public class NorcthexEnemy : MonoBehaviour
     {
         if (isDead) return;
 
+        if (IsStaticFrozen())
+        {
+            return;
+        }
+
         bool oldFlipX = spriteRenderer != null && spriteRenderer.flipX;
         if (AdvancedPlayerController.Instance != null)
         {
@@ -443,6 +453,18 @@ public class NorcthexEnemy : MonoBehaviour
             return;
         }
 
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                knockbackEndTime += dt;
+            }
+            return;
+        }
+
         if (Time.time < knockbackEndTime)
         {
             rb.velocity = knockbackVelocity;
@@ -478,10 +500,17 @@ public class NorcthexEnemy : MonoBehaviour
         }
         if (initialDelay > 0f)
         {
-            yield return new WaitForSeconds(initialDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                initialDelay,
+                () => isDead,
+                () => IsStaticFrozen());
         }
         if (!isDead)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead,
+                () => IsStaticFrozen());
+
             yield return StartCoroutine(PerformSummon());
 
             if (PostInitialSummonIdleTime > 0f)
@@ -497,13 +526,28 @@ public class NorcthexEnemy : MonoBehaviour
                 }
                 if (firstIdle > 0f)
                 {
-                    yield return new WaitForSeconds(firstIdle);
+                    yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                        firstIdle,
+                        () => isDead,
+                        () => IsStaticFrozen());
                 }
             }
         }
 
         while (!isDead && AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
+            if (IsStaticFrozen())
+            {
+                float dt = GameStateManager.GetPauseSafeDeltaTime();
+                if (dt > 0f)
+                {
+                    nextSummonTime += dt;
+                }
+
+                yield return null;
+                continue;
+            }
+
             bool canSummon = Time.time >= nextSummonTime;
 
             if (canSummon)
@@ -521,7 +565,10 @@ public class NorcthexEnemy : MonoBehaviour
                 }
                 if (idleTime > 0f)
                 {
-                    yield return new WaitForSeconds(idleTime);
+                    yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                        idleTime,
+                        () => isDead,
+                        () => IsStaticFrozen());
                 }
                 continue;
             }
@@ -560,7 +607,10 @@ public class NorcthexEnemy : MonoBehaviour
                 }
                 if (teleIdle > 0f)
                 {
-                    yield return new WaitForSeconds(teleIdle);
+                    yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                        teleIdle,
+                        () => isDead,
+                        () => IsStaticFrozen());
                 }
             }
             else
@@ -582,7 +632,10 @@ public class NorcthexEnemy : MonoBehaviour
                 }
                 if (postAttackIdle > 0f)
                 {
-                    yield return new WaitForSeconds(postAttackIdle);
+                    yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                        postAttackIdle,
+                        () => isDead,
+                        () => IsStaticFrozen());
                 }
             }
         }
@@ -619,7 +672,10 @@ public class NorcthexEnemy : MonoBehaviour
         animator.SetBool("idle", false);
         animator.SetBool("teleportin", true);
 
-        yield return new WaitForSeconds(teleportInDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            teleportInDuration,
+            () => isDead,
+            () => IsStaticFrozen());
 
         ResetAnimatorBools();
         animator.SetBool("idle", true);
@@ -638,7 +694,10 @@ public class NorcthexEnemy : MonoBehaviour
         animator.SetBool("idle", false);
         animator.SetBool("teleportout", true);
 
-        yield return new WaitForSeconds(teleportOutDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            teleportOutDuration,
+            () => isDead,
+            () => IsStaticFrozen());
 
         if (isDead)
         {
@@ -758,7 +817,10 @@ public class NorcthexEnemy : MonoBehaviour
         animator.SetBool("idle", false);
         animator.SetBool("teleportin", true);
 
-        yield return new WaitForSeconds(teleportInDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            teleportInDuration,
+            () => isDead,
+            () => IsStaticFrozen());
 
         if (isDead)
         {
@@ -778,7 +840,10 @@ public class NorcthexEnemy : MonoBehaviour
 
         ResetAnimatorBools();
         animator.SetBool("attackstart", true);
-        yield return new WaitForSeconds(attackStartDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            attackStartDuration,
+            () => isDead,
+            () => IsStaticFrozen());
         animator.SetBool("attackstart", false);
 
         animator.SetBool("attack", true);
@@ -788,20 +853,42 @@ public class NorcthexEnemy : MonoBehaviour
 
         while (elapsed < attackDuration)
         {
+            if (isDead)
+            {
+                yield break;
+            }
+
+            if (IsStaticFrozen())
+            {
+                yield return null;
+                continue;
+            }
+
             if (!projectileSpawned && elapsed >= projectileSpawnTiming)
             {
+                yield return StaticPauseHelper.WaitWhileStatic(
+                    () => isDead,
+                    () => IsStaticFrozen());
+
                 SpawnProjectile();
                 projectileSpawned = true;
             }
 
-            elapsed += Time.deltaTime;
+            float dt = GameStateManager.GetPauseSafeDeltaTime();
+            if (dt > 0f)
+            {
+                elapsed += dt;
+            }
             yield return null;
         }
 
         animator.SetBool("attack", false);
 
         animator.SetBool("attackend", true);
-        yield return new WaitForSeconds(attackEndDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            attackEndDuration,
+            () => isDead,
+            () => IsStaticFrozen());
         animator.SetBool("attackend", false);
 
         ResetAnimatorBools();
@@ -816,12 +903,19 @@ public class NorcthexEnemy : MonoBehaviour
         animator.SetBool("specialattack", true);
 
         float castDuration = Mathf.Max(0.1f, specialAttackDuration);
-        yield return new WaitForSeconds(castDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            castDuration,
+            () => isDead,
+            () => IsStaticFrozen());
 
         animator.SetBool("specialattack", false);
 
         ResetAnimatorBools();
         animator.SetBool("idle", true);
+
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead,
+            () => IsStaticFrozen());
 
         SummonEnemiesWithNearFarLogic();
 
@@ -853,8 +947,17 @@ public class NorcthexEnemy : MonoBehaviour
         float healthStep = Mathf.Max(0f, summonHealthIncreasePercent) / 100f;
         float damageStep = Mathf.Max(0f, summonDamageIncreasePercent) / 100f;
         int extraWaves = Mathf.Max(0, totalSummonWaves - 1);
-        summonHealthMultiplier = 1f + healthStep * extraWaves;
-        summonDamageMultiplier = 1f + damageStep * extraWaves;
+
+        if (useMultiplicativeSummonScaling)
+        {
+            summonHealthMultiplier = Mathf.Pow(1f + healthStep, extraWaves);
+            summonDamageMultiplier = Mathf.Pow(1f + damageStep, extraWaves);
+        }
+        else
+        {
+            summonHealthMultiplier = 1f + healthStep * extraWaves;
+            summonDamageMultiplier = 1f + damageStep * extraWaves;
+        }
 
         List<Vector2> spawnedPositions = new List<Vector2>();
         int successfulSummons = 0;
@@ -1004,18 +1107,26 @@ public class NorcthexEnemy : MonoBehaviour
             return;
         }
 
-        for (int i = 0; i < activeSummons.Count; i++)
+        EnemyDamagePopupScope.BeginSuppressPopups();
+        try
         {
-            EnemyHealth summoned = activeSummons[i];
-            if (summoned == null) continue;
-
-            if (summoned.IsAlive)
+            for (int i = 0; i < activeSummons.Count; i++)
             {
-                Vector3 hitPoint = summoned.transform.position;
-                Vector3 hitNormal = Vector3.up;
-                float lethalDamage = summoned.MaxHealth + 999f;
-                summoned.TakeDamage(lethalDamage, hitPoint, hitNormal);
+                EnemyHealth summoned = activeSummons[i];
+                if (summoned == null) continue;
+
+                if (summoned.IsAlive)
+                {
+                    Vector3 hitPoint = summoned.transform.position;
+                    Vector3 hitNormal = Vector3.up;
+                    float lethalDamage = summoned.MaxHealth + 999f;
+                    summoned.TakeDamage(lethalDamage, hitPoint, hitNormal);
+                }
             }
+        }
+        finally
+        {
+            EnemyDamagePopupScope.EndSuppressPopups();
         }
 
         activeSummons.Clear();
@@ -1326,8 +1437,19 @@ public class NorcthexEnemy : MonoBehaviour
         }
 
         Vector3 spawnPos = firePoint.position;
-        Vector3 targetPos = AdvancedPlayerController.Instance.transform.position;
-        Vector2 dir = (targetPos - spawnPos).normalized;
+        Transform playerTransform = AdvancedPlayerController.Instance.transform;
+        Vector3 targetPos = playerTransform.position;
+        Collider2D playerCol = AdvancedPlayerController.Instance.GetComponent<Collider2D>();
+        if (playerCol == null)
+        {
+            playerCol = AdvancedPlayerController.Instance.GetComponentInChildren<Collider2D>();
+        }
+        if (playerCol != null)
+        {
+            targetPos = playerCol.bounds.center;
+        }
+
+        Vector2 dir = ((Vector2)targetPos - (Vector2)spawnPos).normalized;
 
         GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
 
@@ -1413,26 +1535,56 @@ public class NorcthexEnemy : MonoBehaviour
         float cleanupDelay = Mathf.Max(0f, deathCleanupDelay);
         if (cleanupDelay > 0f)
         {
-            yield return new WaitForSeconds(cleanupDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cleanupDelay,
+                () => false,
+                IsStaticFrozen);
         }
 
         float fadeDuration = Mathf.Max(0f, DeathFadeOutDuration);
-        if (fadeDuration > 0f && spriteRenderer != null)
+        SpriteRenderer shadowRenderer = null;
+        if (spriteFlipOffset != null && spriteFlipOffset.shadowTransform != null)
         {
-            Color startColor = spriteRenderer.color;
+            shadowRenderer = spriteFlipOffset.shadowTransform.GetComponent<SpriteRenderer>();
+        }
+
+        if (fadeDuration > 0f && (spriteRenderer != null || shadowRenderer != null))
+        {
+            Color startColor = spriteRenderer != null ? spriteRenderer.color : default;
+            Color shadowStartColor = shadowRenderer != null ? shadowRenderer.color : default;
             float elapsed = 0f;
             while (elapsed < fadeDuration)
             {
-                elapsed += Time.deltaTime;
+                float dt = GameStateManager.GetPauseSafeDeltaTime();
+                if (dt > 0f)
+                {
+                    elapsed += dt;
+                }
                 float t = Mathf.Clamp01(elapsed / fadeDuration);
-                Color c = startColor;
-                c.a = Mathf.Lerp(startColor.a, 0f, t);
-                spriteRenderer.color = c;
+
+                if (spriteRenderer != null)
+                {
+                    Color c = startColor;
+                    c.a = Mathf.Lerp(startColor.a, 0f, t);
+                    spriteRenderer.color = c;
+                }
+
+                if (shadowRenderer != null)
+                {
+                    Color c = shadowStartColor;
+                    c.a = Mathf.Lerp(shadowStartColor.a, 0f, t);
+                    shadowRenderer.color = c;
+                }
                 yield return null;
             }
         }
 
         Destroy(gameObject);
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void OnCollisionEnter2D(Collision2D collision)

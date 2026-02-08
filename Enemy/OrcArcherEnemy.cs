@@ -55,6 +55,7 @@ public class OrcArcherEnemy : MonoBehaviour
     private Transform player;
     private Vector2 currentVelocity;
     private SpriteFlipOffset spriteFlipOffset;
+    private StaticStatus cachedStaticStatus;
 
     private bool isDead;
     private bool isPlayerDead;
@@ -120,6 +121,11 @@ public class OrcArcherEnemy : MonoBehaviour
         attackActionToken++;
     }
 
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
+    }
+
     void OnEnable()
     {
         if (health != null)
@@ -159,6 +165,8 @@ public class OrcArcherEnemy : MonoBehaviour
             animator.SetBool("reload", false);
             return;
         }
+
+        if (IsStaticFrozen()) return;
 
         animator.SetBool("idle", !isMoving && !isAttacking);
 
@@ -223,6 +231,18 @@ public class OrcArcherEnemy : MonoBehaviour
             rb.velocity = Vector2.zero;
             isMoving = false;
             StopAllActions();
+            return;
+        }
+
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            isMoving = false;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f && Time.time < knockbackEndTime)
+            {
+                knockbackEndTime += dt;
+            }
             return;
         }
 
@@ -294,7 +314,10 @@ public class OrcArcherEnemy : MonoBehaviour
         float startTime = Mathf.Max(0f, AttackStartAnimationTime);
         if (startTime > 0f)
         {
-            yield return new WaitForSeconds(startTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                startTime,
+                () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isPlayerDead || myToken != attackActionToken || player == null)
@@ -318,12 +341,26 @@ public class OrcArcherEnemy : MonoBehaviour
             animator.speed = comboSpeed;
 
             animator.SetBool("attackshot", true);
+
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                () => IsStaticFrozen());
+
+            if (isDead || isPlayerDead || myToken != attackActionToken || player == null)
+            {
+                EndAttackEarly();
+                yield break;
+            }
+
             FireOneProjectile();
 
             float shotTime = Mathf.Max(0f, AttackShotAnimationTime) / comboSpeed;
             if (shotTime > 0f)
             {
-                yield return new WaitForSeconds(shotTime);
+                yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                    shotTime,
+                    () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                    () => IsStaticFrozen());
             }
 
             animator.SetBool("attackshot", false);
@@ -335,7 +372,10 @@ public class OrcArcherEnemy : MonoBehaviour
                 float reloadTime = Mathf.Max(0f, ReloadAnimationTime) / comboSpeed;
                 if (reloadTime > 0f)
                 {
-                    yield return new WaitForSeconds(reloadTime);
+                    yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                        reloadTime,
+                        () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                        () => IsStaticFrozen());
                 }
 
                 animator.SetBool("reload", false);
@@ -349,8 +389,12 @@ public class OrcArcherEnemy : MonoBehaviour
         float finalReloadTime = Mathf.Max(0f, LastReloadAnimationTime) / finalComboSpeed;
         if (finalReloadTime > 0f)
         {
-            yield return new WaitForSeconds(finalReloadTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                finalReloadTime,
+                () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                () => IsStaticFrozen());
         }
+
         animator.SetBool("reload", false);
 
         animator.SetBool("attacktoidle", true);
@@ -358,7 +402,10 @@ public class OrcArcherEnemy : MonoBehaviour
         float toIdleTime = Mathf.Max(0f, AttackToIdleAnimationTime) / finalComboSpeed;
         if (toIdleTime > 0f)
         {
-            yield return new WaitForSeconds(toIdleTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                toIdleTime,
+                () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attacktoidle", false);
@@ -371,10 +418,14 @@ public class OrcArcherEnemy : MonoBehaviour
         {
             cooldown += statusController.GetLethargyAttackCooldownBonus();
         }
+
         if (cooldown > 0f)
         {
             animator.SetBool("idle", true);
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || isPlayerDead || myToken != attackActionToken || player == null,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("idle", false);
@@ -404,7 +455,19 @@ public class OrcArcherEnemy : MonoBehaviour
         }
 
         Vector3 spawnPos = firePoint != null ? firePoint.position : transform.position;
-        Vector2 dir = (player.position - spawnPos).normalized;
+
+        Vector3 targetPos = player.position;
+        Collider2D playerCol = player.GetComponent<Collider2D>();
+        if (playerCol == null)
+        {
+            playerCol = player.GetComponentInChildren<Collider2D>();
+        }
+        if (playerCol != null)
+        {
+            targetPos = playerCol.bounds.center;
+        }
+
+        Vector2 dir = ((Vector2)targetPos - (Vector2)spawnPos).normalized;
 
         GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
         if (proj.TryGetComponent<NecromancerProjectile>(out var necroProj))
@@ -502,7 +565,10 @@ public class OrcArcherEnemy : MonoBehaviour
         float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
         if (animationDelay > 0f)
         {
-            yield return new WaitForSeconds(animationDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                animationDelay,
+                () => false,
+                () => IsStaticFrozen());
         }
 
         if (spriteRenderer != null && deathFadeOutDuration > 0f)
@@ -512,7 +578,7 @@ public class OrcArcherEnemy : MonoBehaviour
 
             while (elapsed < deathFadeOutDuration)
             {
-                elapsed += Time.deltaTime;
+                elapsed += GameStateManager.GetPauseSafeDeltaTime();
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / deathFadeOutDuration);
                 spriteRenderer.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;

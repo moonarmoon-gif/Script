@@ -260,7 +260,7 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
         currentDamage = baseDamage * Mathf.Pow(damageScalingPerLevel, currentLevel - 1);
 
         damageInterval = 1f / damageInstancesPerSecond;
-        nextDamageTime = Time.time + damageInterval;
+        nextDamageTime = GameStateManager.PauseSafeTime + damageInterval;
 
         baseDamageRadius = damageRadius;
         if (baseSpeed <= 0f)
@@ -336,7 +336,7 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
         float elapsed = 0f;
         while (elapsed < fadeInDuration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             color.a = Mathf.Lerp(0f, 1f, elapsed / fadeInDuration);
             spriteRenderer.color = color;
             yield return null;
@@ -356,7 +356,7 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
 
                 float effectiveSpeed = currentSpeed;
 
-                float angleStep = (effectiveSpeed / GetCurrentLevelRadius()) * Mathf.Rad2Deg * Time.deltaTime;
+                float angleStep = (effectiveSpeed / GetCurrentLevelRadius()) * Mathf.Rad2Deg * GameStateManager.GetPauseSafeDeltaTime();
 
                 currentAngle += angleStep;
 
@@ -420,7 +420,7 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
                         break;
                     }
 
-                    float angleChange = currentSpeed * Time.deltaTime;
+                    float angleChange = currentSpeed * GameStateManager.GetPauseSafeDeltaTime();
                     currentAngle += angleChange;
 
                     float angleRad = currentAngle * Mathf.Deg2Rad;
@@ -436,7 +436,7 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
         if (additionalOrbitDelay > 0f)
         {
             Debug.Log($"<color=magenta>DwarfStar: Waiting additional {additionalOrbitDelay:F2}s before completion</color>");
-            yield return new WaitForSeconds(additionalOrbitDelay);
+            yield return GameStateManager.WaitForPauseSafeSeconds(additionalOrbitDelay);
         }
 
         if (currentLevel > 1)
@@ -513,10 +513,10 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
 
     private void Update()
     {
-        if (Time.time >= nextDamageTime)
+        if (GameStateManager.PauseSafeTime >= nextDamageTime)
         {
             DealDamageToEnemiesInRadius();
-            nextDamageTime = Time.time + damageInterval;
+            nextDamageTime = GameStateManager.PauseSafeTime + damageInterval;
         }
     }
 

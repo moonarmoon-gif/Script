@@ -56,6 +56,9 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     // fallback 0 number respects the projectile's elemental damage color.
     private DamageNumberManager.DamageType lastIncomingDamageType = DamageNumberManager.DamageType.Fire;
 
+    public bool LastHitWasExecute { get; private set; }
+    public bool LastHitExecutePopupShown { get; private set; }
+
     public void SetLastIncomingDamageType(DamageNumberManager.DamageType damageType)
     {
         lastIncomingDamageType = damageType;
@@ -119,6 +122,9 @@ public class EnemyHealth : MonoBehaviour, IDamageable
 
     public void TakeDamage(float amount, Vector3 hitPoint, Vector3 hitNormal)
     {
+        LastHitWasExecute = false;
+        LastHitExecutePopupShown = false;
+
         if (amount < 0f || !IsAlive) return;
 
         bool isStatusTickLocal = StatusDamageScope.IsStatusTick;
@@ -146,7 +152,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         // Preserve the original gameplay rule: if enabled, enemies cannot take damage while off-camera.
         // (We still separately suppress off-camera damage popups below for any sources that call into
         // TakeDamage while off-camera.)
-        if (requireOnCameraForDamage && !isOnCameraNow)
+        if (requireOnCameraForDamage && !isOnCameraNow && !OffscreenDamageBypassScope.AllowOffscreenDamage)
         {
             if (isStatusTickLocal)
             {
@@ -196,7 +202,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                 // IMMUNE takes priority over NULLIFY for fully negated hits.
                 if (statusController.HasStatus(StatusId.Immune))
                 {
-                    if (isOnCameraNow && DamageNumberManager.Instance != null)
+                    if (isOnCameraNow && DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
                     {
                         Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
                         DamageNumberManager.Instance.ShowImmune(anchor);
@@ -210,7 +216,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                 int nullifyStacksAfter = statusController.GetStacks(StatusId.Nullify);
                 if (!DamageAoeScope.IsAoeDamage && isPlayerProjectile && nullifyStacksBefore > 0 && nullifyStacksAfter < nullifyStacksBefore)
                 {
-                    if (isOnCameraNow && DamageNumberManager.Instance != null)
+                    if (isOnCameraNow && DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
                     {
                         Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
                         DamageNumberManager.Instance.ShowNullify(anchor);
@@ -328,20 +334,20 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                     if (thresholdPercent > 0f && MaxHealth > 0f)
                     {
                         EnemyCardTag tag = GetComponent<EnemyCardTag>() ?? GetComponentInParent<EnemyCardTag>();
-                        if (tag == null || tag.rarity != CardRarity.Boss)
+                        float hpAfter = Mathf.Max(0f, CurrentHealth - finalAmount);
+                        float hpPercentAfter = (hpAfter / MaxHealth) * 100f;
+                        if (hpPercentAfter <= thresholdPercent)
                         {
-                            float hpAfter = Mathf.Max(0f, CurrentHealth - finalAmount);
-                            float hpPercentAfter = (hpAfter / MaxHealth) * 100f;
-                            if (hpPercentAfter <= thresholdPercent)
-                            {
-                                float killDamage = MaxHealth * 1000f;
-                                finalAmount = killDamage;
+                            float killDamage = MaxHealth * 1000f;
+                            finalAmount = killDamage;
 
-                                if (isOnCameraNow && DamageNumberManager.Instance != null)
-                                {
-                                    Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
-                                    DamageNumberManager.Instance.ShowExecuted(anchor);
-                                }
+                            LastHitWasExecute = true;
+
+                            if (isOnCameraNow && DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
+                            {
+                                Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
+                                DamageNumberManager.Instance.ShowExecuted(anchor);
+                                LastHitExecutePopupShown = true;
                             }
                         }
                     }
@@ -352,7 +358,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         // At this point, finalAmount is the fully resolved damage after all
         // mitigation (Defense, Armor, Vulnerable, Condemn, DeathMark, etc.)
         // AND after shield absorption.
-        if (isOnCameraNow && DamageNumberManager.Instance != null && !StatusDamageScope.IsStatusTick)
+        if (isOnCameraNow && DamageNumberManager.Instance != null && !StatusDamageScope.IsStatusTick && !EnemyDamagePopupScope.SuppressPopups)
         {
             float baseDamageForPopup = finalAmount;
 

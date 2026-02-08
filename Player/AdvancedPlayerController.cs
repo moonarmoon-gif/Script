@@ -17,10 +17,15 @@ public class AdvancedPlayerController : MonoBehaviour
     [SerializeField] private Animator animator;
     [SerializeField] private float movespeed;
     [SerializeField] private Transform firePoint;
+    [SerializeField] private Transform activeFirePoint;
+
     [Tooltip("Firepoint for ElementalBeam when firing at enemies on the LEFT side of screen")]
     public Transform elementalBeamFirePointLeft;
     [Tooltip("Firepoint for ElementalBeam when firing at enemies on the RIGHT side of screen")]
     public Transform elementalBeamFirePointRight;
+
+    public Transform ActiveFirePoint => activeFirePoint != null ? activeFirePoint : (firePoint != null ? firePoint : transform);
+    public Transform FirePoint => firePoint != null ? firePoint : transform;
 
     [Header("Projectile Pairs - Set 1 (Fireball/Icicle)")]
     [SerializeField] private GameObject fireballPrefab;
@@ -56,14 +61,6 @@ public class AdvancedPlayerController : MonoBehaviour
     [Tooltip("Optional corner D of auto-fire area (e.g., bottom-left)")]
     [SerializeField] private Transform autoFirePointD;
 
-    [Header("Projectile Pairs - Set 2 (Tornado)")]
-    [SerializeField] private GameObject fireTornadoPrefab;
-    [SerializeField] private GameObject iceTornadoPrefab;
-
-    [Header("Projectile Pairs - Set 3 (Custom)")]
-    [SerializeField] private GameObject fireCustom1Prefab;
-    [SerializeField] private GameObject iceCustom1Prefab;
-
     [Header("References")]
     public Camera cam;
     public Input_System playerControls;
@@ -92,10 +89,6 @@ public class AdvancedPlayerController : MonoBehaviour
 
     private float lastFireballFireTime = -999f;
     private float lastIcicleFireTime = -999f;
-    private float lastFireTornadoFireTime = -999f;
-    private float lastIceTornadoFireTime = -999f;
-    private float lastFireCustom1FireTime = -999f;
-    private float lastIceCustom1FireTime = -999f;
 
     private Dictionary<string, float> cardCooldownTimes = new Dictionary<string, float>();
 
@@ -308,19 +301,10 @@ public class AdvancedPlayerController : MonoBehaviour
         {
             currentProjectileSet = 0;
         }
-        else if (Keyboard.current.digit2Key.wasPressedThisFrame)
-        {
-            currentProjectileSet = 1;
-        }
-        else if (Keyboard.current.digit3Key.wasPressedThisFrame)
-        {
-            currentProjectileSet = 2;
-        }
 
         if (Keyboard.current.spaceKey.wasPressedThisFrame)
         {
             sidesSwapped = !sidesSwapped;
-            SwapActiveTornadoes();
         }
 
         if (enableAutoFire && activeProjectileCard != null)
@@ -329,7 +313,7 @@ public class AdvancedPlayerController : MonoBehaviour
             float iceCooldown = GetProjectileCooldown(iciclePrefab);
             float cooldownToUse = useIndependentCooldowns ? Mathf.Min(fireCooldown, iceCooldown) : Mathf.Max(fireCooldown, iceCooldown);
 
-            if (Time.time - lastAutoFireTime >= cooldownToUse)
+            if (GameStateManager.PauseSafeTime - lastAutoFireTime >= cooldownToUse)
             {
                 TryAutoFire();
             }
@@ -365,7 +349,7 @@ public class AdvancedPlayerController : MonoBehaviour
     {
         if (pendingPredictions.Count == 0) return;
 
-        float now = Time.time;
+        float now = GameStateManager.PauseSafeTime;
         bool changed = false;
 
         for (int i = pendingPredictions.Count - 1; i >= 0; i--)
@@ -533,7 +517,6 @@ public class AdvancedPlayerController : MonoBehaviour
     private void HandleDualHorizontalSwipe()
     {
         sidesSwapped = !sidesSwapped;
-        SwapActiveTornadoes();
     }
 
     [Header("Directional Swipe Projectiles")]
@@ -556,7 +539,7 @@ public class AdvancedPlayerController : MonoBehaviour
     {
         if (isDead || playerMana == null) return;
 
-        if (Time.time - lastFireTime < minFireInterval)
+        if (GameStateManager.PauseSafeTime - lastFireTime < minFireInterval)
         {
             return;
         }
@@ -572,21 +555,23 @@ public class AdvancedPlayerController : MonoBehaviour
             return;
         }
 
-        if (Time.time - lastFireTime < minFireInterval)
+        if (GameStateManager.PauseSafeTime - lastFireTime < minFireInterval)
         {
-            Debug.Log($"<color=orange>FireProjectile blocked: Too soon! {Time.time - lastFireTime:F3}s < {minFireInterval}s</color>");
+            Debug.Log($"<color=orange>FireProjectile blocked: Too soon! {GameStateManager.PauseSafeTime - lastFireTime:F3}s < {minFireInterval}s</color>");
             return;
         }
 
-        lastFireTime = Time.time;
+        lastFireTime = GameStateManager.PauseSafeTime;
+
+        Transform spawnFirePoint = ActiveFirePoint;
 
         Ray ray = cam.ScreenPointToRay(screenPosition);
-        Plane gamePlane = new Plane(Vector3.forward, firePoint.position.z);
+        Plane gamePlane = new Plane(Vector3.forward, spawnFirePoint.position.z);
 
         if (!gamePlane.Raycast(ray, out float enter)) return;
 
         Vector3 worldTouchPosition = ray.GetPoint(enter);
-        Vector2 fireDirection = (worldTouchPosition - firePoint.position).normalized;
+        Vector2 fireDirection = (worldTouchPosition - spawnFirePoint.position).normalized;
 
         bool isLeftSide = screenPosition.x < Screen.width / 2f;
         bool shouldBeFire = (isLeftSide && !sidesSwapped) || (!isLeftSide && sidesSwapped);
@@ -599,12 +584,19 @@ public class AdvancedPlayerController : MonoBehaviour
             return;
         }
 
-        Vector3 spawnPosition = firePoint.position;
+        Vector3 spawnPosition = spawnFirePoint.position;
         Vector2 spawnOffset = Vector2.zero;
         PlayerProjectiles prefabScript = prefabToUse.GetComponent<PlayerProjectiles>();
+        FireBall prefabFireBall = prefabToUse.GetComponent<FireBall>();
         if (prefabScript != null)
         {
             spawnOffset = prefabScript.GetSpawnOffset(fireDirection);
+            spawnPosition += (Vector3)spawnOffset;
+            Debug.Log($"<color=cyan>Manual Fire: Applied spawn offset {spawnOffset} before instantiation</color>");
+        }
+        else if (prefabFireBall != null)
+        {
+            spawnOffset = prefabFireBall.GetSpawnOffset(fireDirection);
             spawnPosition += (Vector3)spawnOffset;
             Debug.Log($"<color=cyan>Manual Fire: Applied spawn offset {spawnOffset} before instantiation</color>");
         }
@@ -621,64 +613,43 @@ public class AdvancedPlayerController : MonoBehaviour
             }
         }
 
-        TornadoController tornado = projectileObj.GetComponent<TornadoController>();
-        if (tornado != null)
-        {
-            if (!TornadoController.CanCast(playerMana))
-            {
-                Destroy(projectileObj);
-                return;
-            }
+        PlayerProjectiles projectile = projectileObj.GetComponent<PlayerProjectiles>();
+        FireBall fireBall = projectileObj.GetComponent<FireBall>();
+        ProjectileFireTalon fireTalon = projectileObj.GetComponent<ProjectileFireTalon>();
+        ProjectileIceTalon iceTalon = projectileObj.GetComponent<ProjectileIceTalon>();
 
-            tornado.isFireTornado = shouldBeFire;
-            tornado.SetTargetPosition(worldTouchPosition);
-            TornadoController.RecordCast();
+        if (projectile != null)
+        {
+            projectile.Launch(fireDirection, playerCollider, playerMana);
+        }
+        else if (fireBall != null)
+        {
+            fireBall.Launch(fireDirection, playerCollider, playerMana);
+        }
+        else if (fireTalon != null)
+        {
+            Vector2 talonOffset = fireTalon.GetSpawnOffset(fireDirection);
+            projectileObj.transform.position += (Vector3)talonOffset;
+            fireTalon.Launch(fireDirection, playerCollider, playerMana);
+        }
+        else if (iceTalon != null)
+        {
+            Vector2 talonOffset = iceTalon.GetSpawnOffset(fireDirection);
+            projectileObj.transform.position += (Vector3)talonOffset;
+            iceTalon.Launch(fireDirection, playerCollider, playerMana);
         }
         else
         {
-            PlayerProjectiles projectile = projectileObj.GetComponent<PlayerProjectiles>();
-            ProjectileFireTalon fireTalon = projectileObj.GetComponent<ProjectileFireTalon>();
-            ProjectileIceTalon iceTalon = projectileObj.GetComponent<ProjectileIceTalon>();
-
-            if (projectile != null)
-            {
-                projectile.Launch(fireDirection, playerCollider, playerMana);
-            }
-            else if (fireTalon != null)
-            {
-                Vector2 talonOffset = fireTalon.GetSpawnOffset(fireDirection);
-                projectileObj.transform.position += (Vector3)talonOffset;
-                fireTalon.Launch(fireDirection, playerCollider, playerMana);
-            }
-            else if (iceTalon != null)
-            {
-                Vector2 talonOffset = iceTalon.GetSpawnOffset(fireDirection);
-                projectileObj.transform.position += (Vector3)talonOffset;
-                iceTalon.Launch(fireDirection, playerCollider, playerMana);
-            }
-            else
-            {
-                Debug.LogError($"Prefab {prefabToUse.name} has no recognized projectile component!");
-                Destroy(projectileObj);
-            }
+            Debug.LogError($"Prefab {prefabToUse.name} has no recognized projectile component!");
+            Destroy(projectileObj);
         }
 
-        Debug.DrawRay(firePoint.position, fireDirection * 5f, shouldBeFire ? Color.red : Color.cyan, 2f);
+        Debug.DrawRay(spawnFirePoint.position, fireDirection * 5f, shouldBeFire ? Color.red : Color.cyan, 2f);
     }
 
     private GameObject GetProjectilePrefab(bool isFire)
     {
-        switch (currentProjectileSet)
-        {
-            case 0:
-                return isFire ? fireballPrefab : iciclePrefab;
-            case 1:
-                return isFire ? fireTornadoPrefab : iceTornadoPrefab;
-            case 2:
-                return isFire ? fireCustom1Prefab : iceCustom1Prefab;
-            default:
-                return isFire ? fireballPrefab : iciclePrefab;
-        }
+        return isFire ? fireballPrefab : iciclePrefab;
     }
 
     private void TryAutoFire()
@@ -693,13 +664,23 @@ public class AdvancedPlayerController : MonoBehaviour
         if (guaranteedIncomingFireDamage.Count > 0)
         {
             var keys = new List<EnemyHealth>(guaranteedIncomingFireDamage.Keys);
-            float now = Time.time;
+            float now = GameStateManager.PauseSafeTime;
             foreach (var eh in keys)
             {
                 if (eh == null || !eh.IsAlive)
                 {
                     guaranteedIncomingFireDamage.Remove(eh);
                     cumulativeIncomingFireDamage.Remove(eh);
+                    continue;
+                }
+
+                EnemyCardTag tag = eh.GetComponent<EnemyCardTag>() ?? eh.GetComponentInParent<EnemyCardTag>();
+                if (tag != null && tag.rarity == CardRarity.Boss)
+                {
+                    guaranteedIncomingFireDamage.Remove(eh);
+                    guaranteedIncomingIceDamage.Remove(eh);
+                    cumulativeIncomingFireDamage.Remove(eh);
+                    cumulativeIncomingIceDamage.Remove(eh);
                     continue;
                 }
 
@@ -715,15 +696,25 @@ public class AdvancedPlayerController : MonoBehaviour
             }
         }
 
-        if (useSplitFireIceDoomedLogic && guaranteedIncomingIceDamage.Count > 0)
+        if (guaranteedIncomingIceDamage.Count > 0)
         {
             var keys = new List<EnemyHealth>(guaranteedIncomingIceDamage.Keys);
-            float now = Time.time;
+            float now = GameStateManager.PauseSafeTime;
             foreach (var eh in keys)
             {
                 if (eh == null || !eh.IsAlive)
                 {
                     guaranteedIncomingIceDamage.Remove(eh);
+                    cumulativeIncomingIceDamage.Remove(eh);
+                    continue;
+                }
+
+                EnemyCardTag tag = eh.GetComponent<EnemyCardTag>() ?? eh.GetComponentInParent<EnemyCardTag>();
+                if (tag != null && tag.rarity == CardRarity.Boss)
+                {
+                    guaranteedIncomingFireDamage.Remove(eh);
+                    guaranteedIncomingIceDamage.Remove(eh);
+                    cumulativeIncomingFireDamage.Remove(eh);
                     cumulativeIncomingIceDamage.Remove(eh);
                     continue;
                 }
@@ -779,14 +770,23 @@ public class AdvancedPlayerController : MonoBehaviour
             EnemyHealth enemyHealth = enemyCol.GetComponent<EnemyHealth>() ?? enemyCol.GetComponentInParent<EnemyHealth>();
             if (enemyHealth == null || !enemyHealth.IsAlive) continue;
 
+            EnemyCardTag enemyTag = enemyHealth.GetComponent<EnemyCardTag>() ?? enemyHealth.GetComponentInParent<EnemyCardTag>();
+            if (enemyTag != null && enemyTag.rarity == CardRarity.Boss)
+            {
+                guaranteedIncomingFireDamage.Remove(enemyHealth);
+                guaranteedIncomingIceDamage.Remove(enemyHealth);
+                cumulativeIncomingFireDamage.Remove(enemyHealth);
+                cumulativeIncomingIceDamage.Remove(enemyHealth);
+            }
+
             Vector2 enemyCenter = enemyCol.bounds.center;
             float distToPlayer = Vector2.Distance(transform.position, enemyCenter);
 
             if (doomSkipRadius > 0f && distToPlayer <= doomSkipRadius)
             {
                 guaranteedIncomingFireDamage.Remove(enemyHealth);
-                cumulativeIncomingFireDamage.Remove(enemyHealth);
                 guaranteedIncomingIceDamage.Remove(enemyHealth);
+                cumulativeIncomingFireDamage.Remove(enemyHealth);
                 cumulativeIncomingIceDamage.Remove(enemyHealth);
             }
 
@@ -799,13 +799,21 @@ public class AdvancedPlayerController : MonoBehaviour
 
             if (isOnLeft)
             {
-                float now = Time.time;
-                if (guaranteedIncomingFireDamage.TryGetValue(enemyHealth, out float expiryTime))
+                Dictionary<EnemyHealth, float> doomedDict = guaranteedIncomingFireDamage;
+                Dictionary<EnemyHealth, float> cumulativeDict = cumulativeIncomingFireDamage;
+                if (useSplitFireIceDoomedLogic)
+                {
+                    doomedDict = guaranteedIncomingFireDamage;
+                    cumulativeDict = cumulativeIncomingFireDamage;
+                }
+
+                float now = GameStateManager.PauseSafeTime;
+                if (doomedDict.TryGetValue(enemyHealth, out float expiryTime))
                 {
                     if (now > expiryTime || distToPlayer <= doomedRetargetDistance)
                     {
-                        guaranteedIncomingFireDamage.Remove(enemyHealth);
-                        cumulativeIncomingFireDamage.Remove(enemyHealth);
+                        doomedDict.Remove(enemyHealth);
+                        cumulativeDict.Remove(enemyHealth);
                     }
                     else
                     {
@@ -817,14 +825,15 @@ public class AdvancedPlayerController : MonoBehaviour
             }
             else
             {
-                Dictionary<EnemyHealth, float> doomedDict = useSplitFireIceDoomedLogic
-                    ? guaranteedIncomingIceDamage
-                    : guaranteedIncomingFireDamage;
-                Dictionary<EnemyHealth, float> cumulativeDict = useSplitFireIceDoomedLogic
-                    ? cumulativeIncomingIceDamage
-                    : cumulativeIncomingFireDamage;
+                Dictionary<EnemyHealth, float> doomedDict = guaranteedIncomingFireDamage;
+                Dictionary<EnemyHealth, float> cumulativeDict = cumulativeIncomingFireDamage;
+                if (useSplitFireIceDoomedLogic)
+                {
+                    doomedDict = guaranteedIncomingIceDamage;
+                    cumulativeDict = cumulativeIncomingIceDamage;
+                }
 
-                float now = Time.time;
+                float now = GameStateManager.PauseSafeTime;
                 if (doomedDict.TryGetValue(enemyHealth, out float expiryTime))
                 {
                     if (now > expiryTime || distToPlayer <= doomedRetargetDistance)
@@ -861,7 +870,7 @@ public class AdvancedPlayerController : MonoBehaviour
                     if (target == null) continue;
 
                     Vector2 predictedPos = PredictEnemyPosition(target);
-                    Vector2 fireDir = (predictedPos - (Vector2)firePoint.position).normalized;
+                    Vector2 fireDir = (predictedPos - (Vector2)ActiveFirePoint.position).normalized;
 
                     if (FireAutoProjectile(currentFireballPrefab, fireDir, true, target.transform))
                     {
@@ -880,7 +889,7 @@ public class AdvancedPlayerController : MonoBehaviour
                     if (target == null) continue;
 
                     Vector2 predictedPos = PredictEnemyPosition(target);
-                    Vector2 fireDir = (predictedPos - (Vector2)firePoint.position).normalized;
+                    Vector2 fireDir = (predictedPos - (Vector2)ActiveFirePoint.position).normalized;
 
                     if (FireAutoProjectile(currentIciclePrefab, fireDir, false, target.transform))
                     {
@@ -893,7 +902,7 @@ public class AdvancedPlayerController : MonoBehaviour
 
             if (firedLeft || firedRight)
             {
-                lastAutoFireTime = Time.time;
+                lastAutoFireTime = GameStateManager.PauseSafeTime;
                 Debug.Log($"<color=cyan>Auto-fired (INDEPENDENT): Left={firedLeft}, Right={firedRight}</color>");
             }
         }
@@ -922,12 +931,12 @@ public class AdvancedPlayerController : MonoBehaviour
             if (sharedTarget != null && IsCardReady(cardToUse, cooldownToUse))
             {
                 Vector2 predictedPos = PredictEnemyPosition(sharedTarget);
-                Vector2 fireDir = (predictedPos - (Vector2)firePoint.position).normalized;
+                Vector2 fireDir = (predictedPos - (Vector2)ActiveFirePoint.position).normalized;
                 if (FireAutoProjectile(prefabToUse, fireDir, sharedIsLeft, sharedTarget.transform))
                 {
                     SetCardCooldown(fireCard);
                     SetCardCooldown(iceCard);
-                    lastAutoFireTime = Time.time;
+                    lastAutoFireTime = GameStateManager.PauseSafeTime;
                 }
             }
         }
@@ -946,12 +955,18 @@ public class AdvancedPlayerController : MonoBehaviour
             }
         }
 
-        Vector3 spawnPosition = firePoint.position;
+        Vector3 spawnPosition = ActiveFirePoint.position;
         Vector2 spawnOffset = Vector2.zero;
         PlayerProjectiles prefabScript = prefab.GetComponent<PlayerProjectiles>();
+        FireBall prefabFireBall = prefab.GetComponent<FireBall>();
         if (prefabScript != null)
         {
             spawnOffset = prefabScript.GetSpawnOffset(direction);
+            spawnPosition += (Vector3)spawnOffset;
+        }
+        else if (prefabFireBall != null)
+        {
+            spawnOffset = prefabFireBall.GetSpawnOffset(direction);
             spawnPosition += (Vector3)spawnOffset;
         }
 
@@ -967,28 +982,19 @@ public class AdvancedPlayerController : MonoBehaviour
             }
         }
 
-        // ensure pre-roll exists and is rolled immediately on this AUTO-FIRE instance
-        PredeterminedStatusRoll pre = projectileObj.GetComponent<PredeterminedStatusRoll>();
-        if (pre == null)
-        {
-            pre = projectileObj.AddComponent<PredeterminedStatusRoll>();
-        }
-        pre.EnsureRolled();
-
-        // Launch projectile - check for different types
         PlayerProjectiles projectile = projectileObj.GetComponent<PlayerProjectiles>();
+        FireBall fireBall = projectileObj.GetComponent<FireBall>();
         ProjectileFireTalon fireTalon = projectileObj.GetComponent<ProjectileFireTalon>();
         ProjectileIceTalon iceTalon = projectileObj.GetComponent<ProjectileIceTalon>();
-        ClawProjectile clawProjectile = projectileObj.GetComponent<ClawProjectile>();
 
-        if (clawProjectile != null)
-        {
-            clawProjectile.Launch(direction, target, playerCollider, playerMana);
-            RegisterGuaranteedDamage(target, projectileObj, isFire);
-        }
-        else if (projectile != null)
+        if (projectile != null)
         {
             projectile.Launch(direction, playerCollider, playerMana);
+            RegisterGuaranteedDamage(target, projectileObj, isFire);
+        }
+        else if (fireBall != null)
+        {
+            fireBall.Launch(direction, playerCollider, playerMana);
             RegisterGuaranteedDamage(target, projectileObj, isFire);
         }
         else if (fireTalon != null)
@@ -1010,8 +1016,6 @@ public class AdvancedPlayerController : MonoBehaviour
             return false;
         }
 
-        RegisterIncomingStatusPrediction(projectileObj, target);
-
         return true;
     }
 
@@ -1021,9 +1025,10 @@ public class AdvancedPlayerController : MonoBehaviour
         if (projectileObj == null || target == null) return fallback;
 
         PlayerProjectiles pp = projectileObj.GetComponent<PlayerProjectiles>();
-        if (pp == null) return fallback;
+        FireBall fb = projectileObj.GetComponent<FireBall>();
+        if (pp == null && fb == null) return fallback;
 
-        float speed = Mathf.Max(0.01f, pp.GetProjectileSpeed());
+        float speed = Mathf.Max(0.01f, pp != null ? pp.GetProjectileSpeed() : fb.GetProjectileSpeed());
 
         Vector2 targetPos;
         Collider2D enemyCollider = target.GetComponent<Collider2D>() ?? target.GetComponentInParent<Collider2D>();
@@ -1036,7 +1041,7 @@ public class AdvancedPlayerController : MonoBehaviour
             targetPos = target.transform.position;
         }
 
-        float dist = Vector2.Distance(firePoint.position, targetPos);
+        float dist = Vector2.Distance(ActiveFirePoint.position, targetPos);
 
         float travel = dist / speed;
         travel += 0.10f; // buffer
@@ -1050,24 +1055,20 @@ public class AdvancedPlayerController : MonoBehaviour
         EnemyHealth eh = target.GetComponent<EnemyHealth>() ?? target.GetComponentInParent<EnemyHealth>();
         if (eh == null || !eh.IsAlive) return;
 
-        PredeterminedStatusRoll pre = projectileObj.GetComponent<PredeterminedStatusRoll>();
-        if (pre == null) return;
-
-        pre.EnsureRolled();
-
         SlowEffect slow = projectileObj.GetComponent<SlowEffect>();
         BurnEffect burn = projectileObj.GetComponent<BurnEffect>();
         PlayerProjectiles pp = projectileObj.GetComponent<PlayerProjectiles>();
+        FireBall fb = projectileObj.GetComponent<FireBall>();
 
-        bool willSlow = slow != null && pre.slowRolled && pre.slowWillApply;
+        bool willSlow = slow != null;
         int slowStacks = willSlow ? Mathf.Clamp(slow.slowStacksPerHit, 1, 4) : 0;
 
-        bool willBurn = burn != null && pre.burnRolled && pre.burnWillApply;
+        bool willBurn = burn != null;
         int burnStacks = willBurn ? Mathf.Clamp(burn.burnStacksPerHit, 1, 4) : 0;
 
         if (!willSlow && !willBurn) return;
 
-        float expiresAt = Time.time + EstimateAutoProjectileHitDelaySeconds(projectileObj, target);
+        float expiresAt = GameStateManager.PauseSafeTime + EstimateAutoProjectileHitDelaySeconds(projectileObj, target);
         float predictedHitDamageLowerBound = ComputePredictedHitDamageLowerBound(projectileObj, eh);
 
         PendingStatusPrediction p = new PendingStatusPrediction
@@ -1082,7 +1083,7 @@ public class AdvancedPlayerController : MonoBehaviour
             burnStacksPerHit = burnStacks,
 
             predictedHitDamageLowerBound = predictedHitDamageLowerBound,
-            projectileType = pp != null ? pp.ProjectileElement : ProjectileType.Fire,
+            projectileType = pp != null ? pp.ProjectileElement : (fb != null ? fb.ProjectileElement : ProjectileType.Fire),
 
             burnDamageMultiplier = burn != null ? burn.burnDamageMultiplier : 0f,
             burnDurationSeconds = burn != null ? burn.burnDuration : 0f
@@ -1117,19 +1118,16 @@ public class AdvancedPlayerController : MonoBehaviour
         bool damageAlreadyIncludesStats = false;
 
         PlayerProjectiles pp = projectileObj.GetComponent<PlayerProjectiles>();
+        FireBall fb = projectileObj.GetComponent<FireBall>();
         if (pp != null)
         {
             rawProjectileDamage = pp.GetCurrentDamage();
             damageAlreadyIncludesStats = false;
         }
-        else
+        else if (fb != null)
         {
-            ClawProjectile cp = projectileObj.GetComponent<ClawProjectile>();
-            if (cp != null)
-            {
-                rawProjectileDamage = cp.GetCurrentDamage();
-                damageAlreadyIncludesStats = false;
-            }
+            rawProjectileDamage = fb.GetCurrentDamage();
+            damageAlreadyIncludesStats = false;
         }
 
         if (rawProjectileDamage <= 0f) return 0f;
@@ -1161,17 +1159,13 @@ public class AdvancedPlayerController : MonoBehaviour
         return Mathf.Max(0f, predictedDamage);
     }
 
-    // ====
-    // Your existing doomed-by-hit logic (unchanged)
-    // ====
-
     private float GetCurrentDoomedSkipDuration()
     {
         if (activeProjectileCard != null && activeProjectileCard.projectileSystem == ProjectileCards.ProjectileSystemType.Active)
         {
-            if (Time.time >= nextSingleEnemyDoomSkipCheckTime)
+            if (GameStateManager.PauseSafeTime >= nextSingleEnemyDoomSkipCheckTime)
             {
-                nextSingleEnemyDoomSkipCheckTime = Time.time + Mathf.Max(0.05f, singleEnemyDoomSkipCheckInterval);
+                nextSingleEnemyDoomSkipCheckTime = GameStateManager.PauseSafeTime + Mathf.Max(0.05f, singleEnemyDoomSkipCheckInterval);
                 cachedSingleNonBossEnemyAlive = IsExactlyOneNonBossEnemyAlive();
             }
 
@@ -1253,6 +1247,16 @@ public class AdvancedPlayerController : MonoBehaviour
             return;
         }
 
+        EnemyCardTag cardTag = enemyHealth.GetComponent<EnemyCardTag>() ?? enemyHealth.GetComponentInParent<EnemyCardTag>();
+        if (cardTag != null && cardTag.rarity == CardRarity.Boss)
+        {
+            guaranteedIncomingFireDamage.Remove(enemyHealth);
+            guaranteedIncomingIceDamage.Remove(enemyHealth);
+            cumulativeIncomingFireDamage.Remove(enemyHealth);
+            cumulativeIncomingIceDamage.Remove(enemyHealth);
+            return;
+        }
+
         if (doomSkipRadius > 0f)
         {
             Collider2D targetCollider = target.GetComponent<Collider2D>() ?? target.GetComponentInParent<Collider2D>();
@@ -1262,8 +1266,8 @@ public class AdvancedPlayerController : MonoBehaviour
             if (distToPlayer <= doomSkipRadius)
             {
                 guaranteedIncomingFireDamage.Remove(enemyHealth);
-                cumulativeIncomingFireDamage.Remove(enemyHealth);
                 guaranteedIncomingIceDamage.Remove(enemyHealth);
+                cumulativeIncomingFireDamage.Remove(enemyHealth);
                 cumulativeIncomingIceDamage.Remove(enemyHealth);
                 return;
             }
@@ -1273,19 +1277,16 @@ public class AdvancedPlayerController : MonoBehaviour
         bool damageAlreadyIncludesStats = false;
 
         PlayerProjectiles pp = projectileObj.GetComponent<PlayerProjectiles>();
+        FireBall fb = projectileObj.GetComponent<FireBall>();
         if (pp != null)
         {
             rawProjectileDamage = pp.GetCurrentDamage();
             damageAlreadyIncludesStats = false;
         }
-        else
+        else if (fb != null)
         {
-            ClawProjectile cp = projectileObj.GetComponent<ClawProjectile>();
-            if (cp != null)
-            {
-                rawProjectileDamage = cp.GetCurrentDamage();
-                damageAlreadyIncludesStats = false;
-            }
+            rawProjectileDamage = fb.GetCurrentDamage();
+            damageAlreadyIncludesStats = false;
         }
 
         if (rawProjectileDamage <= 0f)
@@ -1328,26 +1329,13 @@ public class AdvancedPlayerController : MonoBehaviour
 
         float currentHpAtFire = enemyHealth.CurrentHealth;
 
-        Dictionary<EnemyHealth, float> doomedDict;
-        Dictionary<EnemyHealth, float> cumulativeDict;
+        Dictionary<EnemyHealth, float> doomedDict = guaranteedIncomingFireDamage;
+        Dictionary<EnemyHealth, float> cumulativeDict = cumulativeIncomingFireDamage;
 
-        if (useSplitFireIceDoomedLogic)
+        if (useSplitFireIceDoomedLogic && !isFire)
         {
-            if (isFire)
-            {
-                doomedDict = guaranteedIncomingFireDamage;
-                cumulativeDict = cumulativeIncomingFireDamage;
-            }
-            else
-            {
-                doomedDict = guaranteedIncomingIceDamage;
-                cumulativeDict = cumulativeIncomingIceDamage;
-            }
-        }
-        else
-        {
-            doomedDict = guaranteedIncomingFireDamage;
-            cumulativeDict = cumulativeIncomingFireDamage;
+            doomedDict = guaranteedIncomingIceDamage;
+            cumulativeDict = cumulativeIncomingIceDamage;
         }
 
         float existing;
@@ -1360,12 +1348,8 @@ public class AdvancedPlayerController : MonoBehaviour
             return;
         }
 
-        doomedDict[enemyHealth] = Time.time + GetCurrentDoomedSkipDuration();
+        doomedDict[enemyHealth] = GameStateManager.PauseSafeTime + GetCurrentDoomedSkipDuration();
     }
-
-    // ====
-    // Utilities already in your file (unchanged)
-    // ====
 
     private void InsertAutoFireCandidate(List<GameObject> list, List<float> distances, GameObject enemy, float distance, int maxCount)
     {
@@ -1449,7 +1433,7 @@ public class AdvancedPlayerController : MonoBehaviour
 
     private IEnumerator WaitForRestart()
     {
-        yield return new WaitForSeconds(1f);
+        yield return GameStateManager.WaitForPauseSafeSeconds(1f);
 
         while (true)
         {
@@ -1499,16 +1483,6 @@ public class AdvancedPlayerController : MonoBehaviour
     private void SpawnDiagonalProjectileWithDirection(Vector2 swipeDirection, Vector2 endScreenPos, GameObject projectilePrefab)
     {
         // unchanged (your debug-heavy method)
-    }
-
-    void SwapActiveTornadoes()
-    {
-        TornadoController[] tornadoes = FindObjectsOfType<TornadoController>();
-        foreach (TornadoController tornado in tornadoes)
-        {
-            tornado.SwapType();
-        }
-        Debug.Log($"Swapped {tornadoes.Length} active tornadoes");
     }
 
     private float GetActiveProjectileCooldown()
@@ -1583,7 +1557,7 @@ public class AdvancedPlayerController : MonoBehaviour
 
         if (cardCooldownTimes.ContainsKey(key))
         {
-            float timeSinceLastFire = Time.time - cardCooldownTimes[key];
+            float timeSinceLastFire = GameStateManager.PauseSafeTime - cardCooldownTimes[key];
             float cooldown = GetActiveProjectileCooldown();
             float remaining = Mathf.Max(0f, cooldown - timeSinceLastFire);
             return remaining;
@@ -1602,8 +1576,8 @@ public class AdvancedPlayerController : MonoBehaviour
                 return;
             }
 
-            cardCooldownTimes[key] = Time.time;
-            Debug.Log($"<color=cyan>Set cooldown for {card.cardName} at {Time.time:F2}</color>");
+            cardCooldownTimes[key] = GameStateManager.PauseSafeTime;
+            Debug.Log($"<color=cyan>Set cooldown for {card.cardName} at {GameStateManager.PauseSafeTime:F2}</color>");
         }
     }
 
@@ -1616,7 +1590,7 @@ public class AdvancedPlayerController : MonoBehaviour
 
         if (cardCooldownTimes.ContainsKey(key))
         {
-            float timeSinceLastFire = Time.time - cardCooldownTimes[key];
+            float timeSinceLastFire = GameStateManager.PauseSafeTime - cardCooldownTimes[key];
             bool ready = timeSinceLastFire >= cooldown;
             if (!ready)
             {
@@ -1627,6 +1601,12 @@ public class AdvancedPlayerController : MonoBehaviour
         }
 
         return true;
+    }
+
+    public void RefreshAllActiveProjectileCooldowns()
+    {
+        cardCooldownTimes.Clear();
+        lastAutoFireTime = -999f;
     }
 
     public void RegisterActiveProjectileCard(ProjectileCards card)
@@ -1666,16 +1646,14 @@ public class AdvancedPlayerController : MonoBehaviour
 
     public void SwitchToProjectileSet(int setIndex)
     {
-        currentProjectileSet = setIndex;
-        string setName = setIndex == 0 ? "Fireball/Icicle" : setIndex == 1 ? "Tornado" : "Custom";
-        Debug.Log($"<color=cyan>Switched to {setName} (Set {setIndex})</color>");
+        currentProjectileSet = 0;
+        Debug.Log("<color=cyan>Switched to Fireball/Icicle (Set 0)</color>");
     }
 
     public void SwapProjectileSides()
     {
         sidesSwapped = !sidesSwapped;
         Debug.Log(sidesSwapped ? "<color=cyan>Sides Swapped: Left=Ice, Right=Fire</color>" : "<color=cyan>Sides Normal: Left=Fire, Right=Ice</color>");
-        SwapActiveTornadoes();
     }
 
     private bool IsPointerOverUI()

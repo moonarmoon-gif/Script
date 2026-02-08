@@ -20,9 +20,13 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
     [Header("Enhanced Beam Damage")]
     [Tooltip("Damage multiplier during startup delay for enhanced beams (0.5 = 50% damage)")]
-    public float enhancedStartupDamageMultiplier = 0.5f;
+    public float variant1StartupDamageMultiplier = 0.5f;
     [Tooltip("Damage multiplier during end delay for enhanced beams (0.5 = 50% damage)")]
-    public float enhancedEndDamageMultiplier = 0.5f;
+    public float variant1EndDamageMultiplier = 0.5f;
+    [Tooltip("Damage multiplier during startup delay for Enhanced Variant 2 (0.5 = 50% damage)")]
+    public float variant2StartupDamageMultiplier = 0.5f;
+    [Tooltip("Damage multiplier during end delay for Enhanced Variant 2 (0.5 = 50% damage)")]
+    public float variant2EndDamageMultiplier = 0.5f;
     [Tooltip("Damage multiplier during startup delay for Enhanced Variant 3 (0.5 = 50% damage)")]
     public float variant3StartupDamageMultiplier = 0.5f;
     [Tooltip("Damage multiplier during end delay for Enhanced Variant 3 (0.5 = 50% damage)")]
@@ -98,6 +102,9 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     [SerializeField] private bool useSmartTargeting = false;
 
     public float NoEnemyTargetDelay = 0.5f;
+
+    public int MinOrderInlayer = 101;
+    public int MaxOrderInLayer = 200;
 
     public enum SmartTargetingMode
     {
@@ -326,15 +333,10 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
     private static Dictionary<int, SmartTargetingBatch> smartTargetingBatches = new Dictionary<int, SmartTargetingBatch>();
 
-    private static Dictionary<string, int> nextSortingOrderByCard = new Dictionary<string, int>();
+    private static int activeSortingBeamCount = 0;
 
-    private void ApplySortingOrderForBeam(ProjectileCards card)
+    private void ApplySortingOrderForBeam()
     {
-        if (card == null)
-        {
-            return;
-        }
-
         SpriteRenderer[] sprites = GetComponentsInChildren<SpriteRenderer>(true);
         if (sprites == null || sprites.Length == 0)
         {
@@ -350,15 +352,12 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             }
         }
 
-        string key = card.cardName;
+        int minOrder = Mathf.Min(MinOrderInlayer, MaxOrderInLayer);
+        int maxOrder = Mathf.Max(MinOrderInlayer, MaxOrderInLayer);
 
-        if (!nextSortingOrderByCard.TryGetValue(key, out int nextOrder))
-        {
-            nextSortingOrderByCard[key] = instanceBaseOrder + 1;
-            return;
-        }
+        int desiredBaseOrder = Mathf.Clamp(minOrder + Mathf.Max(0, activeSortingBeamCount - 1), minOrder, maxOrder);
 
-        int delta = nextOrder - instanceBaseOrder;
+        int delta = desiredBaseOrder - instanceBaseOrder;
         if (delta != 0)
         {
             for (int i = 0; i < sprites.Length; i++)
@@ -369,8 +368,6 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 }
             }
         }
-
-        nextSortingOrderByCard[key] = nextOrder + 1;
     }
 
     private void Awake()
@@ -431,12 +428,14 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
         StopBeamSfx(true);
         enemiesInBeam.Clear();
+        activeSortingBeamCount += 1;
     }
 
     private void OnDisable()
     {
         StopBeamSfx(true);
         enemiesInBeam.Clear();
+        activeSortingBeamCount = Mathf.Max(0, activeSortingBeamCount - 1);
     }
 
     private void LateUpdate()
@@ -489,7 +488,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
         else if (isVariant12Stacked)
         {
-            if (!variant12RotationEnabled && Time.time >= variant12RotationStartTime)
+            if (!variant12RotationEnabled && GameStateManager.PauseSafeTime >= variant12RotationStartTime)
             {
                 variant12RotationEnabled = true;
             }
@@ -503,7 +502,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         if (doRotate)
         {
-            currentRotation += rotationSpeed * rotationDirection * Time.deltaTime;
+            currentRotation += rotationSpeed * rotationDirection * GameStateManager.GetPauseSafeDeltaTime();
             transform.rotation = Quaternion.Euler(0f, 0f, currentRotation);
         }
     }
@@ -537,9 +536,9 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         {
             modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
             Debug.Log($"<color=cyan>ElementalBeam using modifiers from {card.cardName}</color>");
-
-            ApplySortingOrderForBeam(card);
         }
+
+        ApplySortingOrderForBeam();
 
         // Check for enhanced variant using CARD-based system
         if (ProjectileCardLevelSystem.Instance != null && card != null)
@@ -578,6 +577,13 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             isStackedVariant23 = hasVariant2 && hasVariant3;
             isStackedVariant12 = hasVariant1 && hasVariant2 && !hasVariant3;
             isVariant12Stacked = false;
+
+            hasVariant1History = hasVariant1;
+            hasVariant2History = hasVariant2;
+            hasVariant3History = hasVariant3;
+
+            isStackedVariant13Context = isStackedVariant13;
+            isStackedVariant23Context = isStackedVariant23;
 
             if (isStackedVariant23)
             {
@@ -793,11 +799,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         {
             baseDamageValue = variant1Damage;
         }
-        float finalDamage = baseDamageValue * modifiers.damageMultiplier;
+        float finalDamage = (baseDamageValue + modifiers.damageFlat) * modifiers.damageMultiplier;
 
         if (enhancedVariant == 2)
         {
-            Debug.Log($"<color=gold>Variant 2: Using unique damage {variant2Damage} (base) * {modifiers.damageMultiplier:F2} (modifier) = {finalDamage:F2}</color>");
+            Debug.Log($"<color=gold>Variant 2: Using unique damage {variant2Damage} (base) + {modifiers.damageFlat:F2} (flat) * {modifiers.damageMultiplier:F2} (modifier) = {finalDamage:F2}</color>");
         }
 
         // Cache post-card base damage (no PlayerStats yet) so we can roll crit
@@ -806,6 +812,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         Debug.Log($"<color=cyan>ElementalBeam Modifiers: Lifetime {baseLifetime:F2}s + {modifiers.lifetimeIncrease:F2}s = {finalLifetime:F2}s, Cooldown {baseCooldown:F2}s * {(1f - modifiers.cooldownReductionPercent / 100f):F2} = {finalCooldown:F2}s</color>");
 
+        if (card != null && enhancedVariant == 2 && !isVariant12Stacked)
+        {
+            card.runtimeSpawnInterval = finalCooldown + finalLifetime + finalBeamEndDuration;
+        }
+
         // STACKED Variant 1+2: compute when rotation should begin. We treat the
         // "core" lifetime as excluding the startup delay and end duration.
         if (isVariant12Stacked)
@@ -813,7 +824,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             float coreLifetime = Mathf.Max(0f, finalLifetime - finalBeamStartDelay - finalBeamEndDuration);
             float fraction = Mathf.Clamp01(variant12RotationStartFraction);
             float rotationDelayWithinCore = coreLifetime * fraction;
-            float coreStartTime = Time.time + finalBeamStartDelay;
+            float coreStartTime = GameStateManager.PauseSafeTime + finalBeamStartDelay;
             variant12RotationStartTime = coreStartTime + rotationDelayWithinCore;
             variant12RotationEnabled = false;
             Debug.Log($"<color=magenta>ElementalBeam STACKED 1+2: coreLifetime={coreLifetime:F2}s, fraction={fraction:F2}, rotation starts at t={variant12RotationStartTime:F2}</color>");
@@ -877,6 +888,21 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         // the damage field for internal use by Variant 1 and DamageRoutine.
         damage = finalDamage;
 
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null && cachedPlayerStats.projectileCooldownReduction > 0f)
+        {
+            float totalCdr = Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction);
+            effectiveCooldown = finalCooldown / (1f + totalCdr);
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
+
         // Allow the global "enhanced first spawn" reduction system to bypass this
         // internal cooldown gate exactly once for PASSIVE projectile cards.
         bool bypassEnhancedFirstSpawnCooldown = false;
@@ -898,9 +924,9 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             // Check cooldown for this specific projectile type
             if (!bypassEnhancedFirstSpawnCooldown && lastFireTimes.ContainsKey(prefabKey))
             {
-                if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
+                if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                 {
-                    Debug.Log($"<color=yellow>ElementalBeam ({prefabKey}) on cooldown - {Time.time - lastFireTimes[prefabKey]:F2}s / {finalCooldown}s</color>");
+                    Debug.Log($"<color=yellow>ElementalBeam ({prefabKey}) on cooldown - {GameStateManager.PauseSafeTime - lastFireTimes[prefabKey]:F2}s / {effectiveCooldown}s</color>");
                     Destroy(gameObject);
                     return;
                 }
@@ -915,7 +941,14 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             }
 
             // Record fire time for this projectile type
-            lastFireTimes[prefabKey] = Time.time;
+            if (enhancedVariant == 2 && !isVariant12Stacked)
+            {
+                lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime + finalLifetime + finalBeamEndDuration;
+            }
+            else
+            {
+                lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
+            }
         }
         else
         {
@@ -1310,8 +1343,14 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         StartCoroutine(DamageRoutine());
         Debug.Log($"<color=cyan>ElementalBeam: DamageRoutine started (continuous damage)</color>");
 
-        Destroy(gameObject, finalLifetime + finalBeamEndDuration);
+        StartCoroutine(DestroyAfterPauseSafeSeconds(finalLifetime + finalBeamEndDuration));
         StartBeamSfx();
+    }
+
+    private IEnumerator DestroyAfterPauseSafeSeconds(float seconds)
+    {
+        yield return GameStateManager.WaitForPauseSafeSeconds(seconds);
+        Destroy(gameObject);
     }
 
     private IEnumerator EnableRenderersNextFrame()
@@ -1347,13 +1386,29 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             }
         }
 
-        // For enhanced beams, allow damage during startup at reduced rate
-        float startupMult = enhancedStartupDamageMultiplier;
-        float endMult = enhancedEndDamageMultiplier;
-        if (enhancedVariant == 3)
+        // For enhanced beams, allow damage during startup/end at reduced rate.
+        // Priority: Variant1 > Variant3 > Variant2.
+        float startupMult = 1f;
+        float endMult = 1f;
+
+        bool allowV1 = hasVariant1History;
+        bool allowV3 = hasVariant3History;
+        bool allowV2 = enhancedVariant == 2;
+
+        if (allowV1)
+        {
+            startupMult = variant1StartupDamageMultiplier;
+            endMult = variant1EndDamageMultiplier;
+        }
+        else if (allowV3)
         {
             startupMult = variant3StartupDamageMultiplier;
             endMult = variant3EndDamageMultiplier;
+        }
+        else if (allowV2)
+        {
+            startupMult = variant2StartupDamageMultiplier;
+            endMult = variant2EndDamageMultiplier;
         }
 
         if (enhancedVariant > 0)
@@ -1378,7 +1433,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
 
         // Wait for start animation
-        yield return new WaitForSeconds(startDelay);
+        yield return GameStateManager.WaitForPauseSafeSeconds(startDelay);
 
         // Enable full damage after beam start delay
         canDealDamage = true;
@@ -1416,7 +1471,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         Debug.Log($"<color=cyan>ElementalBeam: BeamStart set to TRUE for {allAnimators.Length} animators</color>");
 
         // Wait for beam lifetime minus start delay
-        yield return new WaitForSeconds(beamLifetime - startDelay);
+        yield return GameStateManager.WaitForPauseSafeSeconds(beamLifetime - startDelay);
 
         // For enhanced beams, continue damage during end phase at reduced rate
         if (enhancedVariant > 0)
@@ -1486,7 +1541,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     }
 
                     // Check if this enemy is ready for damage (respects damagePerSecond)
-                    if (enemyNextDamageTime.ContainsKey(enemy) && Time.time < enemyNextDamageTime[enemy])
+                    if (enemyNextDamageTime.ContainsKey(enemy) && GameStateManager.PauseSafeTime < enemyNextDamageTime[enemy])
                     {
                         continue; // Not ready yet, skip this enemy
                     }
@@ -1505,13 +1560,17 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                         float damageMultiplier = 1f;
                         if (enhancedVariant > 0 && isInStartupOrEndPhase)
                         {
-                            if (enhancedVariant == 3)
+                            if (hasVariant1History)
+                            {
+                                damageMultiplier = isInStartupPhase ? variant1StartupDamageMultiplier : variant1EndDamageMultiplier;
+                            }
+                            else if (hasVariant3History)
                             {
                                 damageMultiplier = isInStartupPhase ? variant3StartupDamageMultiplier : variant3EndDamageMultiplier;
                             }
-                            else
+                            else if (enhancedVariant == 2)
                             {
-                                damageMultiplier = isInStartupPhase ? enhancedStartupDamageMultiplier : enhancedEndDamageMultiplier;
+                                damageMultiplier = isInStartupPhase ? variant2StartupDamageMultiplier : variant2EndDamageMultiplier;
                             }
                         }
 
@@ -1541,15 +1600,18 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                         EnemyHealth enemyHealth = enemy.GetComponent<EnemyHealth>() ?? enemy.GetComponentInParent<EnemyHealth>();
                         if (enemyHealth != null)
                         {
-                            DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire ?
-                                DamageNumberManager.DamageType.Fire : DamageNumberManager.DamageType.Ice;
+                            DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire
+                                ? DamageNumberManager.DamageType.Fire
+                                : (projectileType == ProjectileType.Thunder || projectileType == ProjectileType.ThunderDisc
+                                    ? DamageNumberManager.DamageType.Thunder
+                                    : DamageNumberManager.DamageType.Ice);
                             enemyHealth.SetLastIncomingDamageType(damageType);
                         }
 
                         damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
 
                         // Set next damage time for this enemy (shared damageInterval)
-                        enemyNextDamageTime[enemy] = Time.time + damageInterval;
+                        enemyNextDamageTime[enemy] = GameStateManager.PauseSafeTime + damageInterval;
 
                         SlowEffect slowEffect = GetComponent<SlowEffect>();
 
@@ -1569,7 +1631,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                         if (hitEffectPrefab != null)
                         {
                             GameObject effect = Instantiate(hitEffectPrefab, hitPoint, Quaternion.identity);
-                            Destroy(effect, hitEffectDuration);
+                            PauseSafeSelfDestruct.Schedule(effect, hitEffectDuration);
                         }
 
                         // Play impact sound
@@ -1588,7 +1650,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             }
 
             // Check frequently but damage is controlled per-enemy
-            yield return new WaitForSeconds(0.05f); // Check 20 times per second
+            yield return GameStateManager.WaitForPauseSafeSeconds(0.05f); // Check 20 times per second
         }
     }
 
@@ -1644,7 +1706,18 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     float damageMultiplier = 1f;
                     if (isInStartupOrEndPhase)
                     {
-                        damageMultiplier = isInStartupPhase ? enhancedStartupDamageMultiplier : enhancedEndDamageMultiplier;
+                        if (hasVariant1History)
+                        {
+                            damageMultiplier = isInStartupPhase ? variant1StartupDamageMultiplier : variant1EndDamageMultiplier;
+                        }
+                        else if (hasVariant3History)
+                        {
+                            damageMultiplier = isInStartupPhase ? variant3StartupDamageMultiplier : variant3EndDamageMultiplier;
+                        }
+                        else if (enhancedVariant == 2)
+                        {
+                            damageMultiplier = isInStartupPhase ? variant2StartupDamageMultiplier : variant2EndDamageMultiplier;
+                        }
                         string phase = isInStartupPhase ? "startup" : "end";
                         Debug.Log($"<color=orange>Enhanced beam in {phase} phase, damage multiplier: {damageMultiplier:F2}</color>");
                     }
@@ -1664,8 +1737,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     EnemyHealth enemyHealth1 = collision.gameObject.GetComponent<EnemyHealth>() ?? collision.gameObject.GetComponentInParent<EnemyHealth>();
                     if (enemyHealth1 != null)
                     {
-                        DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire ?
-                            DamageNumberManager.DamageType.Fire : DamageNumberManager.DamageType.Ice;
+                        DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire
+                            ? DamageNumberManager.DamageType.Fire
+                            : (projectileType == ProjectileType.Thunder || projectileType == ProjectileType.ThunderDisc
+                                ? DamageNumberManager.DamageType.Thunder
+                                : DamageNumberManager.DamageType.Ice);
                         enemyHealth1.SetLastIncomingDamageType(damageType);
                     }
 
@@ -1676,7 +1752,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     // Schedule the next tick for this enemy so that
                     // DamageRoutine continues applying damage every
                     // damageInterval seconds after this initial hit.
-                    enemyNextDamageTime[collision.gameObject] = Time.time + damageInterval;
+                    enemyNextDamageTime[collision.gameObject] = GameStateManager.PauseSafeTime + damageInterval;
 
                     if (projectileType == ProjectileType.Fire)
                     {
@@ -1694,7 +1770,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     if (hitEffectPrefab != null)
                     {
                         GameObject effect = Instantiate(hitEffectPrefab, hitPoint1, Quaternion.identity);
-                        Destroy(effect, hitEffectDuration);
+                        PauseSafeSelfDestruct.Schedule(effect, hitEffectDuration);
                     }
 
                     // Play impact sound
@@ -1708,7 +1784,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
                 // BASE BEAM & VARIANT 2: Set next damage time to NOW so damage happens immediately on first contact
                 // Variant 2 uses DamageRoutine for continuous damage, NOT one-time damage
-                enemyNextDamageTime[collision.gameObject] = Time.time;
+                enemyNextDamageTime[collision.gameObject] = GameStateManager.PauseSafeTime;
 
                 // CRITICAL: Variant 2 should NOT deal instant damage here
                 // It only uses DamageRoutine for continuous damage
@@ -1741,13 +1817,17 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 float phaseMultiplier = 1f;
                 if (enhancedVariant > 0 && isInStartupOrEndPhase)
                 {
-                    if (enhancedVariant == 3)
+                    if (hasVariant1History)
+                    {
+                        phaseMultiplier = isInStartupPhase ? variant1StartupDamageMultiplier : variant1EndDamageMultiplier;
+                    }
+                    else if (hasVariant3History)
                     {
                         phaseMultiplier = isInStartupPhase ? variant3StartupDamageMultiplier : variant3EndDamageMultiplier;
                     }
-                    else
+                    else if (enhancedVariant == 2)
                     {
-                        phaseMultiplier = isInStartupPhase ? enhancedStartupDamageMultiplier : enhancedEndDamageMultiplier;
+                        phaseMultiplier = isInStartupPhase ? variant2StartupDamageMultiplier : variant2EndDamageMultiplier;
                     }
                 }
 
@@ -1769,8 +1849,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 EnemyHealth enemyHealth2 = collision.gameObject.GetComponent<EnemyHealth>() ?? collision.gameObject.GetComponentInParent<EnemyHealth>();
                 if (enemyHealth2 != null)
                 {
-                    DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire ?
-                        DamageNumberManager.DamageType.Fire : DamageNumberManager.DamageType.Ice;
+                    DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire
+                        ? DamageNumberManager.DamageType.Fire
+                        : (projectileType == ProjectileType.Thunder || projectileType == ProjectileType.ThunderDisc
+                            ? DamageNumberManager.DamageType.Thunder
+                            : DamageNumberManager.DamageType.Ice);
                     enemyHealth2.SetLastIncomingDamageType(damageType);
                 }
 
@@ -1793,7 +1876,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 if (hitEffectPrefab != null)
                 {
                     GameObject effect = Instantiate(hitEffectPrefab, hitPoint, Quaternion.identity);
-                    Destroy(effect, hitEffectDuration);
+                    PauseSafeSelfDestruct.Schedule(effect, hitEffectDuration);
                 }
 
                 // Play impact sound
@@ -1885,7 +1968,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         while (t < duration && source != null)
         {
-            t += Time.deltaTime;
+            t += GameStateManager.GetPauseSafeDeltaTime();
             float k = Mathf.Clamp01(1f - (t / duration));
             source.volume = startVolume * k;
             yield return null;
@@ -1916,19 +1999,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     /// </summary>
     private Vector2 FindBestTargetingDirection(ProjectileCards card)
     {
-        switch (targetingMode)
-        {
-            case SmartTargetingMode.RaycastSampling:
-                return FindBestDirection_RaycastSampling(card);
-            case SmartTargetingMode.ClusterAnalysis:
-                return FindBestDirection_ClusterAnalysis(card);
-            case SmartTargetingMode.WeightedDistance:
-                return FindBestDirection_WeightedDistance(card);
-            case SmartTargetingMode.GridSweep:
-                return FindBestDirection_GridSweep(card);
-            default:
-                return FindBestDirection_RaycastSampling(card);
-        }
+        return FindBestDirection_RaycastSampling(card);
     }
 
     // Build a raycast-sampling batch for the given card using the same rules
@@ -2040,6 +2111,8 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             samplesToUse = 1;
         }
 
+        int lerpDenom = Mathf.Max(1, samplesToUse - 1);
+
         batch.candidateAngles.Clear();
         batch.candidateDirections.Clear();
         batch.candidateHits.Clear();
@@ -2056,7 +2129,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         {
             for (int angleIndex = 0; angleIndex < samplesToUse; angleIndex++)
             {
-                float angleDeg = Mathf.Lerp(minAngle, maxAngle, (float)angleIndex / (samplesToUse - 1));
+                float angleDeg = Mathf.Lerp(minAngle, maxAngle, (float)angleIndex / lerpDenom);
                 float angleRad = angleDeg * Mathf.Deg2Rad;
                 Vector2 dir = new Vector2(Mathf.Cos(angleRad), Mathf.Sin(angleRad));
 
@@ -2075,7 +2148,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         for (int angleIndex = 0; angleIndex < samplesToUse; angleIndex++)
         {
-            float angleDeg = Mathf.Lerp(minAngle, maxAngle, (float)angleIndex / (samplesToUse - 1));
+            float angleDeg = Mathf.Lerp(minAngle, maxAngle, (float)angleIndex / lerpDenom);
             float angleRad = angleDeg * Mathf.Deg2Rad;
             Vector2 testDirection = new Vector2(Mathf.Cos(angleRad), Mathf.Sin(angleRad));
 
@@ -2603,11 +2676,18 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             samplesToUse = smartTargetingSamples;
         }
 
+        if (samplesToUse < 1)
+        {
+            samplesToUse = 1;
+        }
+
+        int lerpDenom = Mathf.Max(1, samplesToUse - 1);
+
         // Test each angle and count how many enemies it hits
         for (int angleIndex = 0; angleIndex < samplesToUse; angleIndex++)
         {
             // Calculate this angle
-            float angleDeg = Mathf.Lerp(minAngle, maxAngle, (float)angleIndex / (samplesToUse - 1));
+            float angleDeg = Mathf.Lerp(minAngle, maxAngle, (float)angleIndex / lerpDenom);
             float angleRad = angleDeg * Mathf.Deg2Rad;
             Vector2 testDirection = new Vector2(Mathf.Cos(angleRad), Mathf.Sin(angleRad));
 
@@ -3304,11 +3384,22 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
         
         // Recalculate damage
-        float newDamage = baseDamage * modifiers.damageMultiplier;
+        float baseDamageValue = baseDamage;
+        if (enhancedVariant == 2)
+        {
+            baseDamageValue = variant2Damage;
+        }
+        else if (enhancedVariant == 1 && variant1Damage > 0f)
+        {
+            baseDamageValue = variant1Damage;
+        }
+
+        float newDamage = (baseDamageValue + modifiers.damageFlat) * modifiers.damageMultiplier;
         if (newDamage != damage)
         {
             damage = newDamage;
-            Debug.Log($"<color=lime>  Damage: {baseDamage:F2} * {modifiers.damageMultiplier:F2}x = {damage:F2}</color>");
+            baseDamageAfterCards = newDamage;
+            Debug.Log($"<color=lime>  Damage: ({baseDamageValue:F2} + {modifiers.damageFlat:F2}) * {modifiers.damageMultiplier:F2}x = {damage:F2}</color>");
         }
         
         // Recalculate size

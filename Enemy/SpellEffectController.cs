@@ -19,6 +19,8 @@ public class SpellEffectController : MonoBehaviour
     private DeathBringerEnemy casterEnemy;
     private int casterSpellToken;
 
+    private StaticStatus casterStaticStatus;
+
     public void Initialize(float spellDamage, float spellDamageDelay, float spellEffectDuration, IDamageable playerDamageable, GameObject attacker, Vector3 deathBringerPosition, EnemyHealth casterHealth, DeathBringerEnemy casterEnemy, int casterSpellToken)
     {
         damage = spellDamage;
@@ -32,12 +34,20 @@ public class SpellEffectController : MonoBehaviour
         this.casterEnemy = casterEnemy;
         this.casterSpellToken = casterSpellToken;
 
+        if (casterHealth != null)
+        {
+            casterStaticStatus = casterHealth.GetComponent<StaticStatus>();
+        }
+
         StartCoroutine(SpellEffectRoutine());
     }
 
     IEnumerator SpellEffectRoutine()
     {
-        yield return new WaitForSeconds(damageDelay);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            damageDelay,
+            () => casterHealth == null || !casterHealth.IsAlive || casterEnemy == null || !casterEnemy.IsSpellActionTokenValid(casterSpellToken),
+            () => casterStaticStatus != null && casterStaticStatus.IsInStaticPeriod);
 
         if (casterHealth == null || !casterHealth.IsAlive || casterEnemy == null || !casterEnemy.IsSpellActionTokenValid(casterSpellToken))
         {
@@ -47,6 +57,10 @@ public class SpellEffectController : MonoBehaviour
 
         if (!hasDealtDamage && targetDamageable != null && targetDamageable.IsAlive && AdvancedPlayerController.Instance != null)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => casterHealth == null || !casterHealth.IsAlive || casterEnemy == null || !casterEnemy.IsSpellActionTokenValid(casterSpellToken),
+                () => casterStaticStatus != null && casterStaticStatus.IsInStaticPeriod);
+
             Vector3 playerPos = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (playerPos - casterPosition).normalized;
 
@@ -65,7 +79,10 @@ public class SpellEffectController : MonoBehaviour
         float remainingDuration = effectDuration - damageDelay;
         if (remainingDuration > 0)
         {
-            yield return new WaitForSeconds(remainingDuration);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingDuration,
+                () => casterHealth == null || !casterHealth.IsAlive || casterEnemy == null || !casterEnemy.IsSpellActionTokenValid(casterSpellToken),
+                () => casterStaticStatus != null && casterStaticStatus.IsInStaticPeriod);
         }
 
         Destroy(gameObject);

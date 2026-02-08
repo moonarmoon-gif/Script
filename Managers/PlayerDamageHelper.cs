@@ -249,6 +249,13 @@ public static class PlayerDamageHelper
             return true;
         }
 
+        FireBall fireBall = projectile.GetComponent<FireBall>();
+        if (fireBall != null)
+        {
+            element = fireBall.ProjectileElement;
+            return true;
+        }
+
         ClawProjectile claw = projectile.GetComponent<ClawProjectile>();
         if (claw != null)
         {
@@ -301,6 +308,13 @@ public static class PlayerDamageHelper
         if (iceTalon != null)
         {
             element = ProjectileType.Ice;
+            return true;
+        }
+
+        ElectroBall electroBall = projectile.GetComponent<ElectroBall>();
+        if (electroBall != null)
+        {
+            element = electroBall.ProjectileElement;
             return true;
         }
 

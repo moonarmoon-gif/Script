@@ -110,6 +110,8 @@ public class AmbakuEnemy : MonoBehaviour
     // NEW: Track active projectiles spawned by this Ambaku so we can destroy them on death.
     private readonly System.Collections.Generic.List<GameObject> activeProjectiles = new System.Collections.Generic.List<GameObject>();
 
+    private StaticStatus cachedStaticStatus;
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -188,6 +190,11 @@ public class AmbakuEnemy : MonoBehaviour
         rangedActionToken++;
     }
 
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
+    }
+
     void OnEnable()
     {
         if (health != null)
@@ -215,16 +222,17 @@ public class AmbakuEnemy : MonoBehaviour
 
     void Update()
     {
+        if (isDead) return;
+        if (IsStaticFrozen()) return;
+
         if (projectileCooldownTimer > 0f)
         {
-            projectileCooldownTimer -= Time.deltaTime;
+            projectileCooldownTimer -= GameStateManager.GetPauseSafeDeltaTime();
             if (projectileCooldownTimer < 0f)
             {
                 projectileCooldownTimer = 0f;
             }
         }
-
-        if (isDead) return;
 
         bool playerDead = isPlayerDead || player == null ||
                           (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled);
@@ -285,6 +293,17 @@ public class AmbakuEnemy : MonoBehaviour
         if (isPlayerDead || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled))
         {
             rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f && Time.time < knockbackEndTime)
+            {
+                knockbackEndTime += dt;
+            }
             return;
         }
 
@@ -388,8 +407,27 @@ public class AmbakuEnemy : MonoBehaviour
         float firstDelay = Mathf.Max(0f, firstAttackDamageDelayV2);
         if (firstDelay > 0f)
         {
-            yield return new WaitForSeconds(firstDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstDelay,
+                () => isDead || isPlayerDead || myToken != meleeActionToken,
+                () => IsStaticFrozen()
+            );
         }
+
+        if (isDead || isPlayerDead || myToken != meleeActionToken)
+        {
+            animator.SetBool("attack", false);
+            animator.SetBool("attackflip", false);
+            animator.speed = originalSpeed;
+            isAttacking = false;
+            attackRoutine = null;
+            yield break;
+        }
+
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || isPlayerDead || myToken != meleeActionToken,
+            () => IsStaticFrozen()
+        );
 
         if (isDead || isPlayerDead || myToken != meleeActionToken)
         {
@@ -414,7 +452,11 @@ public class AmbakuEnemy : MonoBehaviour
         float remainingTime = attackDuration - firstDelay;
         if (remainingTime > 0f)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || isPlayerDead || myToken != meleeActionToken,
+                () => IsStaticFrozen()
+            );
         }
 
         animator.SetBool("attack", false);
@@ -438,7 +480,11 @@ public class AmbakuEnemy : MonoBehaviour
             }
             if (cooldown > 0f)
             {
-                yield return new WaitForSeconds(cooldown);
+                yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                    cooldown,
+                    () => isDead || isPlayerDead || myToken != meleeActionToken,
+                    () => IsStaticFrozen()
+                );
             }
 
             attackOnCooldown = false;
@@ -490,7 +536,11 @@ public class AmbakuEnemy : MonoBehaviour
             isInPreRangedDelay = true;
             if (delay > 0f)
             {
-                yield return new WaitForSeconds(delay);
+                yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                    delay,
+                    () => isDead || isPlayerDead || myToken != rangedActionToken,
+                    () => IsStaticFrozen()
+                );
             }
             isInPreRangedDelay = false;
         }
@@ -508,8 +558,25 @@ public class AmbakuEnemy : MonoBehaviour
         float spawnTime = rangedAttackAnimationTime + projectileSpawnTimingV2;
         if (spawnTime > 0f)
         {
-            yield return new WaitForSeconds(spawnTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                spawnTime,
+                () => isDead || isPlayerDead || myToken != rangedActionToken || projectilePrefab == null || player == null,
+                () => IsStaticFrozen()
+            );
         }
+
+        if (isDead || isPlayerDead || myToken != rangedActionToken || projectilePrefab == null || player == null)
+        {
+            animator.SetBool("attackfar", false);
+            isShootingProjectile = false;
+            rangedRoutine = null;
+            yield break;
+        }
+
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || isPlayerDead || myToken != rangedActionToken || projectilePrefab == null || player == null,
+            () => IsStaticFrozen()
+        );
 
         if (isDead || isPlayerDead || myToken != rangedActionToken || projectilePrefab == null || player == null)
         {
@@ -524,7 +591,19 @@ public class AmbakuEnemy : MonoBehaviour
             UpdateFirePointPosition();
 
             Vector3 spawnPos = firePoint != null ? firePoint.position : transform.position;
-            Vector2 dir = ((Vector2)player.position - (Vector2)spawnPos).normalized;
+
+            Vector3 targetPos = player.position;
+            Collider2D playerCol = player.GetComponent<Collider2D>();
+            if (playerCol == null)
+            {
+                playerCol = player.GetComponentInChildren<Collider2D>();
+            }
+            if (playerCol != null)
+            {
+                targetPos = playerCol.bounds.center;
+            }
+
+            Vector2 dir = ((Vector2)targetPos - (Vector2)spawnPos).normalized;
 
             GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
 
@@ -547,7 +626,11 @@ public class AmbakuEnemy : MonoBehaviour
         float remainingAnimTime = rangedAttackAnimationTime - spawnTime;
         if (remainingAnimTime > 0f)
         {
-            yield return new WaitForSeconds(remainingAnimTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingAnimTime,
+                () => isDead || isPlayerDead || myToken != rangedActionToken,
+                () => IsStaticFrozen()
+            );
         }
 
         animator.SetBool("attackfar", false);
@@ -579,7 +662,11 @@ public class AmbakuEnemy : MonoBehaviour
             isInPostRangedCooldown = true;
             if (idle > 0f)
             {
-                yield return new WaitForSeconds(idle);
+                yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                    idle,
+                    () => isDead || isPlayerDead || myToken != rangedActionToken,
+                    () => IsStaticFrozen()
+                );
             }
             isInPostRangedCooldown = false;
         }
@@ -773,7 +860,11 @@ public class AmbakuEnemy : MonoBehaviour
         float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
         if (animationDelay > 0f)
         {
-            yield return new WaitForSeconds(animationDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                animationDelay,
+                () => false,
+                () => IsStaticFrozen()
+            );
         }
 
         if (spriteRenderer != null)
@@ -783,7 +874,7 @@ public class AmbakuEnemy : MonoBehaviour
 
             while (elapsed < deathFadeOutDuration)
             {
-                elapsed += Time.deltaTime;
+                elapsed += GameStateManager.GetPauseSafeDeltaTime();
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / deathFadeOutDuration);
                 spriteRenderer.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;

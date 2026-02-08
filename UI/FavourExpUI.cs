@@ -228,14 +228,30 @@ public class FavourExpUI : MonoBehaviour
             yield break;
         }
 
+        if (!manager.AutomaticLevelingFavourSystem)
+        {
+            isAutoFavourRoutineRunning = false;
+            yield break;
+        }
+
         int iterations = Mathf.Max(1, levelsGained);
 
         for (int i = 0; i < iterations; i++)
         {
+            if (manager == null || !manager.AutomaticLevelingFavourSystem)
+            {
+                break;
+            }
+
             float delay = manager.favourSelectionDelay;
             if (delay > 0f)
             {
                 yield return new WaitForSecondsRealtime(delay);
+            }
+
+            if (manager == null || !manager.AutomaticLevelingFavourSystem)
+            {
+                break;
             }
 
             int soulLevelAtTrigger = currentSoulLevel;

@@ -96,14 +96,14 @@ public class ArmorOnLowHealthFavour : FavourEffect
 
         if (!buffActive)
         {
-            if (healthFraction <= threshold && Time.time >= lastTriggerTime + Cooldown)
+            if (healthFraction <= threshold && GameStateManager.PauseSafeTime >= lastTriggerTime + Cooldown)
             {
                 ActivateArmorBuff();
             }
         }
         else
         {
-            if (Time.time >= buffEndTime)
+            if (GameStateManager.PauseSafeTime >= buffEndTime)
             {
                 RemoveArmorBuff();
             }
@@ -176,8 +176,8 @@ public class ArmorOnLowHealthFavour : FavourEffect
         }
 
         buffActive = true;
-        buffEndTime = Time.time + Mathf.Max(0f, Duration);
-        lastTriggerTime = Time.time;
+        buffEndTime = GameStateManager.PauseSafeTime + Mathf.Max(0f, Duration);
+        lastTriggerTime = GameStateManager.PauseSafeTime;
     }
 
     private int GetCurrentThornStacks()

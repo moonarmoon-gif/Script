@@ -107,7 +107,7 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
         float finalLifetime = baseLifetime + modifiers.lifetimeIncrease;
         float finalCooldown = Mathf.Max(0.1f, cooldown * (1f - modifiers.cooldownReductionPercent / 100f));
         int finalManaCost = Mathf.Max(1, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
-        float finalDamage = baseDamage + modifiers.damageFlat;
+        float finalDamage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
 
         // Cache PlayerStats so we can run the shared projectile damage pipeline per hit.
         cachedPlayerStats = null;
@@ -133,14 +133,14 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
         {
             if (lastFireTimes.ContainsKey(prefabKey))
             {
-                if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
+                if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < finalCooldown)
                 {
                     Destroy(gameObject);
                     return;
                 }
             }
 
-            lastFireTimes[prefabKey] = Time.time;
+            lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
         }
 
         // Mana check always applies.
@@ -202,6 +202,7 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
             // Preserve random x-sign, but scale magnitude by sizeMultiplier.
             Vector3 ls = transform.localScale;
             float xSign = Mathf.Sign(ls.x);
+
             float xMag = Mathf.Abs(baseScale.x) * modifiers.sizeMultiplier;
             float y = baseScale.y * modifiers.sizeMultiplier;
             float z = baseScale.z * modifiers.sizeMultiplier;
@@ -210,7 +211,7 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
             ColliderScaler.ScaleCollider(_collider2D, modifiers.sizeMultiplier, colliderSizeOffset);
         }
 
-        Destroy(gameObject, finalLifetime);
+        PauseSafeSelfDestruct.Schedule(gameObject, finalLifetime);
 
         StartCoroutine(DelayedStrike(enemyHealth, enemyCollider));
     }
@@ -220,7 +221,7 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
         float delay = Mathf.Max(0f, DamageDelay);
         if (delay > 0f)
         {
-            yield return new WaitForSeconds(delay);
+            yield return GameStateManager.WaitForPauseSafeSeconds(delay);
         }
 
         if (enemyHealth == null || !enemyHealth.IsAlive)
@@ -229,7 +230,7 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
         }
 
         // Damage cooldown safety (mainly for future multi-hit variants).
-        if (Time.time - lastDamageTime < damageCooldown)
+        if (GameStateManager.PauseSafeTime - lastDamageTime < damageCooldown)
         {
             yield break;
         }
@@ -271,7 +272,7 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
 
         Vector3 hitNormal = Vector3.zero;
         damageable.TakeDamage(finalDamage, hitPoint, hitNormal);
-        lastDamageTime = Time.time;
+        lastDamageTime = GameStateManager.PauseSafeTime;
 
         // IMPORTANT FIX FOR "Burn text appears at player":
         // Many status UI popups anchor to the hitPoint / enemy collider center.
@@ -301,7 +302,7 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
             lifetimeSeconds = newLifetime;
         }
 
-        float newDamage = baseDamage * mods.damageMultiplier;
+        float newDamage = (baseDamage + mods.damageFlat) * mods.damageMultiplier;
         if (!Mathf.Approximately(newDamage, damage))
         {
             damage = newDamage;

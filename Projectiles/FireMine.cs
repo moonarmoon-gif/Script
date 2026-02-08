@@ -72,6 +72,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     public float ExplosionEffectScaling = 1f;
     [SerializeField] private GameObject armingEffectPrefab;
     [SerializeField] private float fadeInDuration = 0.5f;
+    public float FadeAwayDuration = 1f;
     [SerializeField] private SpriteRenderer spriteRenderer;
 
     [Header("Audio")]
@@ -197,7 +198,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
             if (scheduledDespawnTime > 0f)
             {
-                pausedRemainingLifetime = Mathf.Max(0f, scheduledDespawnTime - Time.time);
+                pausedRemainingLifetime = Mathf.Max(0f, scheduledDespawnTime - GameStateManager.PauseSafeTime);
                 hasPausedLifetime = true;
             }
         }
@@ -205,7 +206,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         {
             if (hasPausedLifetime && scheduledDespawnTime > 0f)
             {
-                scheduledDespawnTime = Time.time + pausedRemainingLifetime;
+                scheduledDespawnTime = GameStateManager.PauseSafeTime + pausedRemainingLifetime;
             }
 
             hasPausedLifetime = false;
@@ -284,7 +285,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             return Mathf.Max(0f, pausedRemainingLifetime);
         }
 
-        return Mathf.Max(0f, scheduledDespawnTime - Time.time);
+        return Mathf.Max(0f, scheduledDespawnTime - GameStateManager.PauseSafeTime);
     }
 
     private void RegisterAndEnforceSpawnLimit()
@@ -625,7 +626,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         Debug.Log($"<color=orange>FireMine Cooldown: Base={baseCooldown:F2}s, Card Reduction={modifiers.cooldownReductionPercent:F1}%, Enhanced Reduction={enhancedCooldownRed * 100f:F1}%, Total Reduction={totalCooldownReduction * 100f:F1}%, Final={finalCooldown:F2}s</color>");
 
         finalManaCost = Mathf.Max(1, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
-        damage += modifiers.damageFlat;
+        damage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
 
         // Reset explosion radius to base before applying size and modifiers
         explosionRadius = baseExplosionRadius;
@@ -712,7 +713,22 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
         // Still get PlayerStats for base damage calculation
         cachedPlayerStats = FindObjectOfType<PlayerStats>();
-        baseDamageAfterCards = damage;
+        baseDamageAfterCards = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
+
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null && cachedPlayerStats.projectileCooldownReduction > 0f)
+        {
+            float totalCdr = Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction);
+            effectiveCooldown = finalCooldown / (1f + totalCdr);
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
 
         // Allow the global "enhanced first spawn" reduction system to bypass this
         // internal cooldown gate exactly once for PASSIVE projectile cards.
@@ -735,9 +751,9 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             // Check cooldown
             if (!bypassEnhancedFirstSpawnCooldown && lastFireTimes.ContainsKey(prefabKey))
             {
-                if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
+                if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                 {
-                    Debug.Log($"<color=yellow>FireMine on cooldown - {Time.time - lastFireTimes[prefabKey]:F2}s / {finalCooldown}s</color>");
+                    Debug.Log($"<color=yellow>FireMine on cooldown - {GameStateManager.PauseSafeTime - lastFireTimes[prefabKey]:F2}s / {effectiveCooldown}s</color>");
                     Destroy(gameObject);
                     return;
                 }
@@ -753,7 +769,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             }
 
             // Record fire time
-            lastFireTimes[prefabKey] = Time.time;
+            lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
         }
         else
         {
@@ -766,7 +782,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             Physics2D.IgnoreCollision(_collider2D, playerCollider, true);
         }
 
-        scheduledDespawnTime = Time.time + finalLifetime;
+        scheduledDespawnTime = GameStateManager.PauseSafeTime + finalLifetime;
         RegisterAndEnforceSpawnLimit();
 
         // Start arming sequence
@@ -776,6 +792,11 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         if (fadeInDuration > 0f)
         {
             StartCoroutine(FadeInRoutine());
+        }
+
+        if (FadeAwayDuration > 0f)
+        {
+            StartCoroutine(FadeAwayRoutine());
         }
     }
 
@@ -792,7 +813,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
         while (elapsed < fadeInDuration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float t = Mathf.Clamp01(elapsed / fadeInDuration);
             color.a = Mathf.Lerp(startAlpha, 1f, t);
             spriteRenderer.color = color;
@@ -801,6 +822,65 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
         color.a = 1f;
         spriteRenderer.color = color;
+    }
+
+    private IEnumerator FadeAwayRoutine()
+    {
+        if (spriteRenderer == null || FadeAwayDuration <= 0f)
+        {
+            yield break;
+        }
+
+        while (!hasExploded)
+        {
+            if (bossPauseActive)
+            {
+                yield return null;
+                continue;
+            }
+
+            float remaining = GetRemainingLifetimeSeconds();
+            if (remaining <= FadeAwayDuration)
+            {
+                break;
+            }
+
+            yield return null;
+        }
+
+        if (hasExploded)
+        {
+            yield break;
+        }
+
+        Color color = spriteRenderer.color;
+        float startAlpha = color.a;
+
+        while (!hasExploded)
+        {
+            if (bossPauseActive)
+            {
+                yield return null;
+                continue;
+            }
+
+            float remaining = GetRemainingLifetimeSeconds();
+            float t = 1f;
+            if (FadeAwayDuration > 0f)
+            {
+                t = 1f - Mathf.Clamp01(remaining / FadeAwayDuration);
+            }
+
+            color.a = Mathf.Lerp(startAlpha, 0f, t);
+            spriteRenderer.color = color;
+
+            if (remaining <= 0f)
+            {
+                yield break;
+            }
+
+            yield return null;
+        }
     }
 
     private IEnumerator WaitPausableSeconds(float seconds)
@@ -819,7 +899,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                 continue;
             }
 
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             yield return null;
         }
     }
@@ -837,7 +917,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         if (armingEffectPrefab != null)
         {
             GameObject armEffect = Instantiate(armingEffectPrefab, transform.position, Quaternion.identity, transform);
-            Destroy(armEffect, lifetime);
+            PauseSafeSelfDestruct.Schedule(armEffect, lifetime);
         }
 
         // Play arming sound
@@ -853,7 +933,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         // Wait for lifetime, then destroy without exploding
         yield return StartCoroutine(WaitPausableSeconds(lifetime - armDelay));
 
-        if (!hasExploded && !isExploding)
+        if (!hasExploded)
         {
             Debug.Log("<color=yellow>FireMine lifetime expired - destroying without explosion</color>");
             Destroy(gameObject);
@@ -864,6 +944,16 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     {
         if (bossPauseActive) return;
         if (!isArmed || hasExploded || isExploding) return;
+
+        Transform t = other != null ? other.transform : null;
+        while (t != null)
+        {
+            if (t.name == "ClickHitbox")
+            {
+                return;
+            }
+            t = t.parent;
+        }
 
         // Explode when enemy enters trigger
         if (IsEnemyCollider(other))
@@ -876,6 +966,16 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     {
         if (bossPauseActive) return;
         if (!isArmed || hasExploded || isExploding) return;
+
+        Transform t = other != null ? other.transform : null;
+        while (t != null)
+        {
+            if (t.name == "ClickHitbox")
+            {
+                return;
+            }
+            t = t.parent;
+        }
 
         if (IsEnemyCollider(other))
         {
@@ -995,12 +1095,73 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             yield return StartCoroutine(WaitPausableSeconds(explosionDelay));
         }
 
+        float effectDelay = 0f;
+        if (explosionEffectTimingAdjustment < 0f)
+        {
+            effectDelay = Mathf.Abs(explosionEffectTimingAdjustment);
+        }
+
+        if (effectDelay > 0f)
+        {
+            yield return StartCoroutine(WaitPausableSeconds(effectDelay));
+        }
+
+        if (!hasExploded)
+        {
+            if (!HasAnyValidDamageTargetInExplosionRadius())
+            {
+                isExploding = false;
+                explodeDelayCoroutine = null;
+
+                if (GetRemainingLifetimeSeconds() <= 0f)
+                {
+                    Destroy(gameObject);
+                }
+
+                yield break;
+            }
+        }
+
         if (!hasExploded)
         {
             yield return StartCoroutine(ExplodeRoutine());
         }
 
         explodeDelayCoroutine = null;
+    }
+
+    private bool HasAnyValidDamageTargetInExplosionRadius()
+    {
+        Vector2 explosionCenter = (Vector2)transform.position + explosionRadiusOffset;
+        Collider2D[] hitColliders = Physics2D.OverlapCircleAll(explosionCenter, explosionRadius, enemyLayer);
+        if (hitColliders == null || hitColliders.Length == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < hitColliders.Length; i++)
+        {
+            Collider2D hitCollider = hitColliders[i];
+            if (hitCollider == null)
+            {
+                continue;
+            }
+
+            IDamageable damageable = hitCollider.GetComponent<IDamageable>() ?? hitCollider.GetComponentInParent<IDamageable>();
+            if (damageable == null || !damageable.IsAlive)
+            {
+                continue;
+            }
+
+            if (!OffscreenDamageChecker.CanTakeDamage(hitCollider.transform.position))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     private IEnumerator ExplodeRoutine()
@@ -1065,12 +1226,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             Vector3 explosionPosition = transform.position + (Vector3)effectOffset;
 
             // Handle timing adjustment
-            if (explosionEffectTimingAdjustment < 0f)
-            {
-                // Delay effect
-                StartCoroutine(SpawnDelayedExplosionEffect(explosionPosition, Mathf.Abs(explosionEffectTimingAdjustment)));
-            }
-            else if (explosionEffectTimingAdjustment > 0f)
+            if (explosionEffectTimingAdjustment > 0f)
             {
                 // Play effect early (not applicable for FireMine since it explodes instantly)
                 // But we'll support it anyway
@@ -1090,10 +1246,6 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         }
 
         float delayBeforeDamage = Mathf.Max(0f, ExplosionDamageDelay);
-        if (explosionEffectTimingAdjustment < 0f)
-        {
-            delayBeforeDamage += Mathf.Abs(explosionEffectTimingAdjustment);
-        }
         if (delayBeforeDamage > 0f)
         {
             yield return StartCoroutine(WaitPausableSeconds(delayBeforeDamage));
@@ -1137,7 +1289,9 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                     {
                         DamageNumberManager.DamageType damageType = projectileType == ProjectileType.Fire
                             ? DamageNumberManager.DamageType.Fire
-                            : DamageNumberManager.DamageType.Ice;
+                            : (projectileType == ProjectileType.Thunder || projectileType == ProjectileType.ThunderDisc
+                                ? DamageNumberManager.DamageType.Thunder
+                                : DamageNumberManager.DamageType.Ice);
                         enemyHealth.SetLastIncomingDamageType(damageType);
                     }
                 }
@@ -1193,7 +1347,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         float finalMultiplier = baseVisualMultiplier * radiusScaleFactor;
         explosion.transform.localScale *= finalMultiplier;
 
-        Destroy(explosion, explosionEffectDuration);
+        PauseSafeSelfDestruct.Schedule(explosion, explosionEffectDuration);
     }
 
     private IEnumerator SpawnDelayedExplosionEffect(Vector3 position, float delay)
@@ -1408,17 +1562,18 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=lime>  Explosion Radius: ({baseExplosionRadius:F2} + {modifiers.explosionRadiusBonus:F2}) * {modifiers.explosionRadiusMultiplier:F2}x = {explosionRadius:F2}</color>");
         }
 
-        float newDamage = baseDamage * modifiers.damageMultiplier;
+        float newDamage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
         if (newDamage != damage)
         {
             damage = newDamage;
             baseDamageAfterCards = newDamage;
-            Debug.Log($"<color=lime>  Damage: {baseDamage:F2} * {modifiers.damageMultiplier:F2}x = {damage:F2}</color>");
+            Debug.Log($"<color=lime>  Damage: ({baseDamage:F2} + {modifiers.damageFlat:F2}) * {modifiers.damageMultiplier:F2}x = {damage:F2}</color>");
         }
 
         if (modifiers.sizeMultiplier != 1f)
         {
             transform.localScale = baseScale * modifiers.sizeMultiplier;
+
             Debug.Log($"<color=lime>  Size: {baseScale} * {modifiers.sizeMultiplier:F2}x = {transform.localScale}</color>");
         }
 

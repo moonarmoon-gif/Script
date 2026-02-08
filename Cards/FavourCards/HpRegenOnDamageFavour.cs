@@ -76,7 +76,7 @@ public class HpRegenOnDamageFavour : FavourEffect
 
         // If a buff is currently active, immediately update the applied bonus
         // so the new stack is reflected without waiting for the next hit.
-        if (currentAppliedBonus > 0f && Time.time < buffEndTime)
+        if (currentAppliedBonus > 0f && GameStateManager.PauseSafeTime < buffEndTime)
         {
             ApplyRegenBonus();
         }
@@ -89,7 +89,7 @@ public class HpRegenOnDamageFavour : FavourEffect
             return;
         }
 
-        if (currentAppliedBonus > 0f && Time.time >= buffEndTime)
+        if (currentAppliedBonus > 0f && GameStateManager.PauseSafeTime >= buffEndTime)
         {
             RemoveRegenBonus();
         }
@@ -137,7 +137,7 @@ public class HpRegenOnDamageFavour : FavourEffect
         }
 
         ApplyRegenBonus();
-        buffEndTime = Time.time + Mathf.Max(0f, Duration);
+        buffEndTime = GameStateManager.PauseSafeTime + Mathf.Max(0f, Duration);
     }
 
     private void ApplyRegenBonus()

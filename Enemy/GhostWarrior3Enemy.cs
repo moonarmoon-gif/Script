@@ -82,6 +82,8 @@ public class GhostWarrior3Enemy : MonoBehaviour
 
     private int attackActionToken = 0;
 
+    private StaticStatus cachedStaticStatus;
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -164,6 +166,11 @@ public class GhostWarrior3Enemy : MonoBehaviour
     void Update()
     {
         if (spriteFlipOffset == null || isDead) return;
+
+        if (IsStaticFrozen())
+        {
+            return;
+        }
 
         bool offsetDrivenByAnim =
             animator.GetBool("moving") || animator.GetBool("movingflip") ||
@@ -289,7 +296,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
         float delay = Mathf.Max(0f, PreAttackDelay);
         if (delay > 0f)
         {
-            yield return new WaitForSeconds(delay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                delay,
+                () => isDead,
+                () => IsStaticFrozen());
         }
 
         preAttackDelayRoutine = null;
@@ -386,6 +396,17 @@ public class GhostWarrior3Enemy : MonoBehaviour
             return;
         }
 
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                knockbackEndTime += dt;
+            }
+            return;
+        }
+
         if (Time.time < knockbackEndTime)
         {
             rb.velocity = knockbackVelocity;
@@ -477,6 +498,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
         isAttacking = true;
         hasDealtDamageThisAttack = false;
 
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || myToken != attackActionToken,
+            () => IsStaticFrozen());
+
         float originalSpeed = animator.speed;
         animator.speed = attackAnimSpeed;
 
@@ -485,7 +510,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
 
         if (firstAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(firstAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstAttackDamageDelayV2,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || myToken != attackActionToken)
@@ -500,6 +528,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
         if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive &&
             AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
+
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -532,7 +564,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
 
             if (afterDelay > 0f)
             {
-                yield return new WaitForSeconds(afterDelay);
+                yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                    afterDelay,
+                    () => isDead || myToken != attackActionToken,
+                    () => IsStaticFrozen());
             }
 
             elapsedAttackTime += afterDelay;
@@ -549,6 +584,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
             if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive &&
                 AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
             {
+                yield return StaticPauseHelper.WaitWhileStatic(
+                    () => isDead || myToken != attackActionToken,
+                    () => IsStaticFrozen());
+
                 Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
                 Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
                 PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -559,7 +598,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
         float remainingTime = firstAttackDuration - elapsedAttackTime;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || myToken != attackActionToken)
@@ -578,7 +620,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
 
         if (secondAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(secondAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                secondAttackDamageDelayV2,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || myToken != attackActionToken)
@@ -593,6 +638,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
         if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive &&
             AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
+
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -610,7 +659,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
         remainingTime = secondAttackDuration - secondAttackDamageDelayV2;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || myToken != attackActionToken)
@@ -629,7 +681,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
 
         if (thirdAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(thirdAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                thirdAttackDamageDelayV2,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || myToken != attackActionToken)
@@ -644,6 +699,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
         if (myToken == attackActionToken && playerDamageable != null && playerDamageable.IsAlive &&
             AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
+
             Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
             PlayerHealth.RegisterPendingAttacker(gameObject);
@@ -665,7 +724,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
         remainingTime = thirdAttackDuration - thirdAttackDamageDelayV2;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         ClearAllAttackAnims();
@@ -693,7 +755,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
             attackOnCooldown = true;
             animator.SetBool("idle", true);
 
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
 
             attackOnCooldown = false;
             animator.SetBool("idle", false);
@@ -733,7 +798,10 @@ public class GhostWarrior3Enemy : MonoBehaviour
         float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
         if (animationDelay > 0)
         {
-            yield return new WaitForSeconds(animationDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                animationDelay,
+                () => false,
+                () => false);
         }
 
         if (spriteRenderer != null)
@@ -743,7 +811,11 @@ public class GhostWarrior3Enemy : MonoBehaviour
 
             while (elapsed < deathFadeOutDuration)
             {
-                elapsed += Time.deltaTime;
+                float dt = GameStateManager.GetPauseSafeDeltaTime();
+                if (dt > 0f)
+                {
+                    elapsed += dt;
+                }
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / deathFadeOutDuration);
                 spriteRenderer.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;
@@ -751,6 +823,11 @@ public class GhostWarrior3Enemy : MonoBehaviour
         }
 
         Destroy(gameObject);
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void OnCollisionEnter2D(Collision2D collision)

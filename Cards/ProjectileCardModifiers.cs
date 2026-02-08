@@ -128,6 +128,18 @@ public class ProjectileCardModifiers : MonoBehaviour
                     // base damage before routing through PlayerStats.
                     stats.damageFlat += value;
                     break;
+                case ProjectileModifierData.ModifierType.BurnChance:
+                    stats.burnChanceBonusPercent += value;
+                    break;
+                case ProjectileModifierData.ModifierType.SlowChance:
+                    stats.slowChanceBonusPercent += value;
+                    break;
+                case ProjectileModifierData.ModifierType.StaticChance:
+                    stats.staticChanceBonusPercent += value;
+                    break;
+                case ProjectileModifierData.ModifierType.SpecialChance:
+                    stats.specialChanceBonusPercent += value;
+                    break;
                 case ProjectileModifierData.ModifierType.ProjectileCount:
                     // CRITICAL: Support fractional values (0.1, 0.2, etc.)
                     // Add to accumulator, when it reaches 1.0, add to projectileCount
@@ -179,7 +191,7 @@ public class ProjectileCardModifiers : MonoBehaviour
             }
         }
         
-        Debug.Log($"<color=green>✓ Registered modifiers for {card.cardName}: Speed=+{stats.speedIncrease:F2}, Size={stats.sizeMultiplier:F2}x, Pierce={stats.pierceCount}, Damage={stats.damageMultiplier:F2}x, Lifetime=+{stats.lifetimeIncrease:F2}s, Cooldown=-{stats.cooldownReductionPercent:F1}%, ManaCost=-{stats.manaCostReduction:F2}, Count={stats.projectileCount}, DamageRadius=+{stats.damageRadiusIncrease:F2}, ExplosionRadius=+{stats.explosionRadiusBonus:F2}, StrikeZoneRadius=+{stats.strikeZoneRadiusBonus:F2}, AttackSpeed=+{stats.attackSpeedPercent:F2}%</color>");
+        Debug.Log($"<color=green>✓ Registered modifiers for {card.cardName}: Speed=+{stats.speedIncrease:F2}, Size={stats.sizeMultiplier:F2}x, Pierce={stats.pierceCount}, Damage={stats.damageMultiplier:F2}x, Lifetime=+{stats.lifetimeIncrease:F2}s, Cooldown=-{stats.cooldownReductionPercent:F1}%, ManaCost=-{stats.manaCostReduction:F2}, BurnChance=+{stats.burnChanceBonusPercent:F2}%, SlowChance=+{stats.slowChanceBonusPercent:F2}%, StaticChance=+{stats.staticChanceBonusPercent:F2}%, SpecialChance=+{stats.specialChanceBonusPercent:F2}%, Count={stats.projectileCount}, DamageRadius=+{stats.damageRadiusIncrease:F2}, ExplosionRadius=+{stats.explosionRadiusBonus:F2}, StrikeZoneRadius=+{stats.strikeZoneRadiusBonus:F2}, AttackSpeed=+{stats.attackSpeedPercent:F2}%</color>");
         
         // CRITICAL: Update active stars immediately if this is an OrbitalStar card
         if (card.projectileType == ProjectileCards.ProjectileType.NovaStar || 
@@ -310,7 +322,96 @@ public class ProjectileCardModifiers : MonoBehaviour
             updated = true;
             Debug.Log($"<color=lime>  Updated {projectile.name} via IInstantModifiable</color>");
         }
+
+        if (ApplyStatusChanceModifiersToProjectile(projectile, modifiers))
+        {
+            updated = true;
+        }
         
+        return updated;
+    }
+
+    public static bool ApplyStatusChanceModifiersToProjectile(GameObject projectile, CardModifierStats modifiers)
+    {
+        if (projectile == null || modifiers == null)
+        {
+            return false;
+        }
+
+        float burnBonus = Mathf.Max(0f, modifiers.burnChanceBonusPercent);
+        float slowBonus = Mathf.Max(0f, modifiers.slowChanceBonusPercent);
+        float staticBonus = Mathf.Max(0f, modifiers.staticChanceBonusPercent);
+
+        if (burnBonus <= 0f && slowBonus <= 0f && staticBonus <= 0f)
+        {
+            return false;
+        }
+
+        BurnEffect burn = projectile.GetComponent<BurnEffect>();
+        SlowEffect slow = projectile.GetComponent<SlowEffect>();
+        StaticEffect stat = projectile.GetComponent<StaticEffect>();
+
+        ProjectileStatusChanceBaseline baseline = projectile.GetComponent<ProjectileStatusChanceBaseline>();
+        if (baseline == null)
+        {
+            baseline = projectile.AddComponent<ProjectileStatusChanceBaseline>();
+        }
+
+        if (!baseline.initialized)
+        {
+            baseline.baseBurnChance = burn != null ? burn.burnChance : 0f;
+            baseline.baseSlowChance = slow != null ? slow.slowChance : 0f;
+            baseline.baseStaticChance = stat != null ? stat.staticChance : 0f;
+            baseline.initialized = true;
+        }
+
+        bool updated = false;
+
+        if (burn == null && burnBonus > 0f)
+        {
+            burn = projectile.AddComponent<BurnEffect>();
+        }
+
+        if (burn != null)
+        {
+            float newChance = Mathf.Clamp(baseline.baseBurnChance + burnBonus, 0f, 100f);
+            if (!Mathf.Approximately(burn.burnChance, newChance))
+            {
+                burn.burnChance = newChance;
+                updated = true;
+            }
+        }
+
+        if (slow == null && slowBonus > 0f)
+        {
+            slow = projectile.AddComponent<SlowEffect>();
+        }
+
+        if (slow != null)
+        {
+            float newChance = Mathf.Clamp(baseline.baseSlowChance + slowBonus, 0f, 100f);
+            if (!Mathf.Approximately(slow.slowChance, newChance))
+            {
+                slow.slowChance = newChance;
+                updated = true;
+            }
+        }
+
+        if (stat == null && staticBonus > 0f)
+        {
+            stat = projectile.AddComponent<StaticEffect>();
+        }
+
+        if (stat != null)
+        {
+            float newChance = Mathf.Clamp(baseline.baseStaticChance + staticBonus, 0f, 100f);
+            if (!Mathf.Approximately(stat.staticChance, newChance))
+            {
+                stat.staticChance = newChance;
+                updated = true;
+            }
+        }
+
         return updated;
     }
 
@@ -364,4 +465,17 @@ public class CardModifierStats
 
     // Pull strength bonus (used by Collapse and other pull-based projectiles)
     public float pullStrengthMultiplier = 0f;
+
+    public float burnChanceBonusPercent = 0f;
+    public float slowChanceBonusPercent = 0f;
+    public float staticChanceBonusPercent = 0f;
+    public float specialChanceBonusPercent = 0f;
+}
+
+public class ProjectileStatusChanceBaseline : MonoBehaviour
+{
+    public bool initialized;
+    public float baseBurnChance;
+    public float baseSlowChance;
+    public float baseStaticChance;
 }

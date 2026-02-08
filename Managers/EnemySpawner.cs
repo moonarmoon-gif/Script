@@ -86,6 +86,10 @@ public class EnemySpawner : MonoBehaviour
     [Tooltip("Duration over which health and mana should smoothly refill to max (seconds)")]
     public float postBossRefillDuration = 5f;
 
+    [Header("Post-Boss Spawning")]
+    [Tooltip("Delay after boss event ends before regular enemies can spawn again (seconds)")]
+    public float SpawnDelayAfterBoss = 0f;
+
     [Header("Post-Boss Camera Scaling")]
     [Tooltip("Enable automatic camera zoom-out after each completed boss event.")]
     public bool enableCameraGrowthAfterBoss = true;
@@ -111,6 +115,7 @@ public class EnemySpawner : MonoBehaviour
     private bool bossMenaceActive = false;
     private bool bossDeathTriggered = false;
     private bool bossDeathCleanupInProgress = false;
+    private bool postBossRefillDelayActive = false;
     private GameObject currentBossEnemy = null;
 
     private float queuedBossExpReward = 0f;
@@ -123,6 +128,8 @@ public class EnemySpawner : MonoBehaviour
 
     private float waveElapsedTimer = 0f;
     private bool bossWaveTriggered = false;
+
+    private float spawnDelayAfterBossRemaining = 0f;
 
     private List<CardRarity> enemyRarityHistory = new List<CardRarity>();
 
@@ -138,6 +145,16 @@ public class EnemySpawner : MonoBehaviour
     public bool IsBossDeathCleanupInProgress
     {
         get { return bossDeathCleanupInProgress; }
+    }
+
+    public bool IsPostBossRefillDelayActive
+    {
+        get { return postBossRefillDelayActive; }
+    }
+
+    public bool IsPostBossSpawnDelayActive
+    {
+        get { return spawnDelayAfterBossRemaining > 0f; }
     }
 
     public GameObject CurrentBossEnemy
@@ -184,7 +201,7 @@ public class EnemySpawner : MonoBehaviour
         {
             yield return manager.ShowInitialActiveProjectileSelection(3);
 
-            if (manager.pauseGameOnSelection)
+            if (manager.pauseGameOnSelection && !GameStateManager.ManualPauseActive)
             {
                 Time.timeScale = 1f;
             }
@@ -198,6 +215,8 @@ public class EnemySpawner : MonoBehaviour
         {
             return;
         }
+
+        float dt = GameStateManager.GetPauseSafeDeltaTime();
 
         // Stop spawning if player is dead
         if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
@@ -215,6 +234,12 @@ public class EnemySpawner : MonoBehaviour
 
         if (isBossEventActive)
         {
+            return;
+        }
+
+        if (spawnDelayAfterBossRemaining > 0f)
+        {
+            spawnDelayAfterBossRemaining = Mathf.Max(0f, spawnDelayAfterBossRemaining - dt);
             return;
         }
 
@@ -253,7 +278,7 @@ public class EnemySpawner : MonoBehaviour
         }
 
         float duration = Mathf.Max(0f, current.NextWaveTimer);
-        waveElapsedTimer += Time.deltaTime;
+        waveElapsedTimer += dt;
 
         if (duration > 0f && waveElapsedTimer >= duration)
         {
@@ -297,7 +322,7 @@ public class EnemySpawner : MonoBehaviour
             timer = 0f;
         }
 
-        timer += Time.deltaTime;
+        timer += GameStateManager.GetPauseSafeDeltaTime();
         float interval = GetEffectiveSpawnInterval(waveIndex, wave, activeEnemyTypeCount);
         interval = Mathf.Max(0.01f, interval);
 
@@ -360,12 +385,22 @@ public class EnemySpawner : MonoBehaviour
         Vector2 spawnPosition = GetSpawnPosition();
         GameObject spawnedEnemy = Instantiate(wave.enemyPrefab, spawnPosition, Quaternion.identity);
 
-        EnemyCardTag tag = spawnedEnemy.GetComponent<EnemyCardTag>();
-        if (tag == null)
+        CardRarity rarity = wave.BossEnemy ? CardRarity.Boss : CardRarity.Common;
+
+        EnemyCardTag[] tags = spawnedEnemy.GetComponentsInChildren<EnemyCardTag>(true);
+        if (tags == null || tags.Length == 0)
         {
-            tag = spawnedEnemy.AddComponent<EnemyCardTag>();
+            EnemyCardTag created = spawnedEnemy.AddComponent<EnemyCardTag>();
+            tags = new EnemyCardTag[] { created };
         }
-        tag.rarity = wave.BossEnemy ? CardRarity.Boss : CardRarity.Common;
+
+        for (int i = 0; i < tags.Length; i++)
+        {
+            if (tags[i] != null)
+            {
+                tags[i].rarity = rarity;
+            }
+        }
 
         if (!wave.BossEnemy && waveIndex == phaseStartWaveIndex && firstEnemyOffCameraSpeedMultiplier > 1f && firstEnemyOffCameraBoostDuration > 0f)
         {
@@ -374,10 +409,10 @@ public class EnemySpawner : MonoBehaviour
             {
                 if (firstEnemyOffCameraBoostWindowEndTime < 0f)
                 {
-                    firstEnemyOffCameraBoostWindowEndTime = Time.time + firstEnemyOffCameraBoostDuration;
+                    firstEnemyOffCameraBoostWindowEndTime = GameStateManager.PauseSafeTime + firstEnemyOffCameraBoostDuration;
                 }
 
-                float remaining = firstEnemyOffCameraBoostWindowEndTime - Time.time;
+                float remaining = firstEnemyOffCameraBoostWindowEndTime - GameStateManager.PauseSafeTime;
                 if (remaining > 0f)
                 {
                     status.ApplyOffCameraSpeedBoost(firstEnemyOffCameraSpeedMultiplier, remaining, MoveSpeedOffCamersOffset);
@@ -428,7 +463,7 @@ public class EnemySpawner : MonoBehaviour
 
         while (AreAnyEnemiesAlive())
         {
-            yield return new WaitForSeconds(0.5f);
+            yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
         }
 
         OrbitalStarManager orbitalManager = FindObjectOfType<OrbitalStarManager>();
@@ -444,7 +479,7 @@ public class EnemySpawner : MonoBehaviour
         float fadeDuration = Mathf.Max(0f, FadeAwayDuration);
         if (fadeDuration > 0f)
         {
-            yield return new WaitForSeconds(fadeDuration);
+            yield return GameStateManager.WaitForPauseSafeSeconds(fadeDuration);
         }
 
         if (CardSelectionManager.Instance != null &&
@@ -457,7 +492,7 @@ public class EnemySpawner : MonoBehaviour
                 yield return null;
             }
 
-            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection)
+            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection && !GameStateManager.ManualPauseActive)
             {
                 Time.timeScale = 1f;
             }
@@ -465,7 +500,7 @@ public class EnemySpawner : MonoBehaviour
 
         if (bossSpawnBreatherTime > 0f)
         {
-            yield return new WaitForSeconds(bossSpawnBreatherTime);
+            yield return GameStateManager.WaitForPauseSafeSeconds(bossSpawnBreatherTime);
         }
 
         SpawnBossEnemy(bossWave);
@@ -477,7 +512,7 @@ public class EnemySpawner : MonoBehaviour
 
         while (menaceElapsed < menaceDuration)
         {
-            menaceElapsed += Time.deltaTime;
+            menaceElapsed += GameStateManager.GetPauseSafeDeltaTime();
             yield return null;
         }
 
@@ -497,7 +532,7 @@ public class EnemySpawner : MonoBehaviour
 
         while (!bossDeathTriggered)
         {
-            yield return new WaitForSeconds(0.1f);
+            yield return GameStateManager.WaitForPauseSafeSeconds(0.1f);
         }
 
         float rewardWindow = Mathf.Max(0f, BossDeathRewardTimer);
@@ -506,9 +541,14 @@ public class EnemySpawner : MonoBehaviour
             float elapsedReward = 0f;
             while (elapsedReward < rewardWindow)
             {
-                elapsedReward += Time.deltaTime;
+                elapsedReward += GameStateManager.GetPauseSafeDeltaTime();
                 yield return null;
             }
+        }
+
+        if (CardSelectionManager.Instance != null)
+        {
+            CardSelectionManager.Instance.IncreaseMaxProjectileLimitAfterBoss();
         }
 
         yield return null;
@@ -517,7 +557,7 @@ public class EnemySpawner : MonoBehaviour
 
         while (AreAnyEnemiesAlive())
         {
-            yield return new WaitForSeconds(0.2f);
+            yield return GameStateManager.WaitForPauseSafeSeconds(0.2f);
         }
 
         if (EnemyScalingSystem.Instance != null)
@@ -549,7 +589,7 @@ public class EnemySpawner : MonoBehaviour
                 yield return null;
             }
 
-            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection)
+            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection && !GameStateManager.ManualPauseActive)
             {
                 Time.timeScale = 1f;
             }
@@ -566,6 +606,8 @@ public class EnemySpawner : MonoBehaviour
         FireMine.SetBossPauseActive(false);
 
         bossEventsCompleted++;
+
+        spawnDelayAfterBossRemaining = Mathf.Max(0f, SpawnDelayAfterBoss);
 
         int nextPhaseIndex = waveNumber + 1;
         if (waves != null && nextPhaseIndex >= 0 && nextPhaseIndex < waves.Count)
@@ -640,14 +682,21 @@ public class EnemySpawner : MonoBehaviour
         }
         currentBossEnemy = Instantiate(bossPrefab, spawnPos, Quaternion.identity);
 
-        EnemyCardTag bossTag = currentBossEnemy.GetComponent<EnemyCardTag>();
-        if (bossTag == null)
+        EnemyCardTag[] bossTags = currentBossEnemy.GetComponentsInChildren<EnemyCardTag>(true);
+        if (bossTags == null || bossTags.Length == 0)
         {
-            bossTag = currentBossEnemy.AddComponent<EnemyCardTag>();
+            EnemyCardTag created = currentBossEnemy.AddComponent<EnemyCardTag>();
+            bossTags = new EnemyCardTag[] { created };
         }
-        bossTag.rarity = CardRarity.Boss;
 
-        bossTag.damageMultiplier = bossWave.BossDamageMultiplier;
+        for (int i = 0; i < bossTags.Length; i++)
+        {
+            if (bossTags[i] != null)
+            {
+                bossTags[i].rarity = CardRarity.Boss;
+                bossTags[i].damageMultiplier = bossWave.BossDamageMultiplier;
+            }
+        }
 
         EnemyHealth bossHealth = currentBossEnemy.GetComponent<EnemyHealth>();
         if (bossHealth != null)
@@ -695,7 +744,7 @@ public class EnemySpawner : MonoBehaviour
         }
 
         float menaceDuration = bossMenaceTimer;
-        yield return new WaitForSeconds(menaceDuration);
+        yield return GameStateManager.WaitForPauseSafeSeconds(menaceDuration);
 
         if (boss != null && bossHealth != null)
         {
@@ -807,7 +856,7 @@ public class EnemySpawner : MonoBehaviour
         float elapsed = 0f;
         while (elapsed < duration && obj != null)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float t = Mathf.Clamp01(elapsed / duration);
             float alpha = 1f - t;
 
@@ -854,27 +903,33 @@ public class EnemySpawner : MonoBehaviour
     {
         AdvancedPlayerController player = FindObjectOfType<AdvancedPlayerController>();
         if (player != null)
-        {
             player.enableAutoFire = enabled;
-        }
     }
 
     private void KillAllEnemies()
     {
-        GameObject[] enemies = GameObject.FindGameObjectsWithTag("Enemy");
-
-        foreach (GameObject enemy in enemies)
+        EnemyDamagePopupScope.BeginSuppressPopups();
+        try
         {
-            if (enemy == currentBossEnemy)
-            {
-                continue;
-            }
+            GameObject[] enemies = GameObject.FindGameObjectsWithTag("Enemy");
 
-            IDamageable damageable = enemy.GetComponent<IDamageable>();
-            if (damageable != null && damageable.IsAlive)
+            foreach (GameObject enemy in enemies)
             {
-                damageable.TakeDamage(999999f, transform.position, Vector3.zero);
+                if (enemy == currentBossEnemy)
+                {
+                    continue;
+                }
+
+                IDamageable damageable = enemy.GetComponent<IDamageable>();
+                if (damageable != null && damageable.IsAlive)
+                {
+                    damageable.TakeDamage(999999f, transform.position, Vector3.zero);
+                }
             }
+        }
+        finally
+        {
+            EnemyDamagePopupScope.EndSuppressPopups();
         }
     }
 
@@ -901,10 +956,12 @@ public class EnemySpawner : MonoBehaviour
 
     private IEnumerator SmoothRefillPlayerHealthAndMana(GameObject playerObject)
     {
+        postBossRefillDelayActive = postBossRefillDelay > 0f;
         if (postBossRefillDelay > 0f)
         {
-            yield return new WaitForSeconds(postBossRefillDelay);
+            yield return GameStateManager.WaitForPauseSafeSeconds(postBossRefillDelay);
         }
+        postBossRefillDelayActive = false;
 
         if (playerObject == null)
         {
@@ -943,11 +1000,7 @@ public class EnemySpawner : MonoBehaviour
             }
         }
 
-        float endTime = Time.time + duration;
-        while (Time.time < endTime)
-        {
-            yield return null;
-        }
+        yield return GameStateManager.WaitForPauseSafeSeconds(duration);
 
         if (hasStats)
         {
@@ -1022,7 +1075,7 @@ public class EnemySpawner : MonoBehaviour
 
         while (elapsed < duration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float t = Mathf.Clamp01(elapsed / duration);
             cam.orthographicSize = Mathf.Lerp(startSize, targetSize, t);
             yield return null;

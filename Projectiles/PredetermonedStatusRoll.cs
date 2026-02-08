@@ -18,6 +18,14 @@ public class PredeterminedStatusRoll : MonoBehaviour
     [Range(1, 4)]
     public int slowStacksPerHit = 1;
 
+    [Header("Static Pre-Roll")]
+    public bool staticRolled;
+    public bool staticWillApply;
+
+    [Header("FireBite Pre-Roll")]
+    public bool fireBiteRolled;
+    public bool fireBiteWillApply;
+
     // Optional: roll as soon as the projectile instance is initialized (after Awake, before first Update).
     // This helps ensure the snapshot reflects the projectile's configured values for this instance.
     private void Start()
@@ -29,6 +37,43 @@ public class PredeterminedStatusRoll : MonoBehaviour
     {
         PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
 
+        ProjectileCards sourceCard = null;
+        if (ProjectileCardModifiers.Instance != null)
+        {
+            sourceCard = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
+        }
+
+        bool isActiveSource =
+            sourceCard != null &&
+            sourceCard.projectileSystem == ProjectileCards.ProjectileSystemType.Active;
+
+        FireBall fireBall = GetComponent<FireBall>();
+        if (fireBall != null && !fireBiteRolled)
+        {
+            fireBiteRolled = true;
+
+            if (!fireBall.EnableFireBite)
+            {
+                fireBiteWillApply = false;
+            }
+            else
+            {
+                float effectiveChance = Mathf.Max(0f, fireBall.FireBiteChance);
+                if (sourceCard != null && ProjectileCardModifiers.Instance != null)
+                {
+                    CardModifierStats modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(sourceCard);
+                    if (modifiers != null)
+                    {
+                        effectiveChance += Mathf.Max(0f, modifiers.specialChanceBonusPercent);
+                    }
+                }
+
+                effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
+                float roll = Random.Range(0f, 100f);
+                fireBiteWillApply = roll <= effectiveChance;
+            }
+        }
+
         // Burn
         BurnEffect burn = GetComponent<BurnEffect>();
         if (burn != null && !burnRolled)
@@ -39,6 +84,11 @@ public class PredeterminedStatusRoll : MonoBehaviour
             if (stats != null && stats.hasProjectileStatusEffect)
             {
                 effectiveChance += Mathf.Max(0f, stats.statusEffectChance);
+
+                if (isActiveSource)
+                {
+                    effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
+                }
             }
             effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
 
@@ -59,11 +109,38 @@ public class PredeterminedStatusRoll : MonoBehaviour
             if (stats != null && stats.hasProjectileStatusEffect)
             {
                 effectiveChance += Mathf.Max(0f, stats.statusEffectChance);
+
+                if (isActiveSource)
+                {
+                    effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
+                }
             }
             effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
 
             float roll = Random.Range(0f, 100f);
             slowWillApply = roll <= effectiveChance;
+        }
+
+        // Static
+        StaticEffect stat = GetComponent<StaticEffect>();
+        if (stat != null && !staticRolled)
+        {
+            staticRolled = true;
+
+            float effectiveChance = stat.staticChance;
+            if (stats != null && stats.hasProjectileStatusEffect)
+            {
+                effectiveChance += Mathf.Max(0f, stats.statusEffectChance);
+
+                if (isActiveSource)
+                {
+                    effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
+                }
+            }
+            effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
+
+            float roll = Random.Range(0f, 100f);
+            staticWillApply = roll <= effectiveChance;
         }
     }
 }

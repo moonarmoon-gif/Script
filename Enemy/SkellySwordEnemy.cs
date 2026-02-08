@@ -75,6 +75,8 @@ public class SkellySwordEnemy : MonoBehaviour
 
     private int attackActionToken = 0;
 
+    private StaticStatus cachedStaticStatus;
+
     void Awake()
     {
         if (spriteRenderer == null) spriteRenderer = GetComponent<SpriteRenderer>();
@@ -179,7 +181,10 @@ public class SkellySwordEnemy : MonoBehaviour
         
         Debug.Log($"<color=green>Skeleton summoning for {summonAnimationDuration}s (invulnerable)</color>");
         
-        yield return new WaitForSeconds(summonAnimationDuration);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            summonAnimationDuration,
+            () => isDead,
+            () => IsStaticFrozen());
         
         animator.SetBool("summon", false);
         animator.SetBool("digout", false);
@@ -203,7 +208,10 @@ public class SkellySwordEnemy : MonoBehaviour
         Debug.Log($"<color=green>Skeleton post-summon idle for {postSummonIdleTime:F2}s</color>");
         
         animator.SetBool("idle", true);
-        yield return new WaitForSeconds(postSummonIdleTime);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            postSummonIdleTime,
+            () => isDead,
+            () => IsStaticFrozen());
         animator.SetBool("idle", false);
         
         isSummoning = false;
@@ -213,6 +221,11 @@ public class SkellySwordEnemy : MonoBehaviour
     void Update()
     {
         if (isDead || isSummoning || isPlayerDead) return;
+
+        if (IsStaticFrozen())
+        {
+            return;
+        }
 
         bool ismoving = false;
         if (!isAttacking && AdvancedPlayerController.Instance != null && AdvancedPlayerController.Instance.enabled)
@@ -309,7 +322,11 @@ public class SkellySwordEnemy : MonoBehaviour
                 yield break;
             }
 
-            elapsed += Time.deltaTime;
+            float dt = GameStateManager.GetPauseSafeDeltaTime();
+            if (dt > 0f)
+            {
+                elapsed += dt;
+            }
             yield return null;
         }
 
@@ -348,6 +365,17 @@ public class SkellySwordEnemy : MonoBehaviour
         if (isDead || isSummoning || isPlayerDead)
         {
             rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                knockbackEndTime += dt;
+            }
             return;
         }
 
@@ -402,7 +430,10 @@ public class SkellySwordEnemy : MonoBehaviour
         // Wait for FIRST damage delay
         if (firstAttackDamageDelayV2 > 0f)
         {
-            yield return new WaitForSeconds(firstAttackDamageDelayV2);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                firstAttackDamageDelayV2,
+                () => isDead || isSummoning || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isSummoning || isPlayerDead || myToken != attackActionToken)
@@ -443,6 +474,10 @@ public class SkellySwordEnemy : MonoBehaviour
                 yield break;
             }
 
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isSummoning || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
+
             Transform attackTarget = tauntHelper != null ? tauntHelper.GetAttackTarget() : null;
             if (attackTarget != null)
             {
@@ -469,7 +504,10 @@ public class SkellySwordEnemy : MonoBehaviour
                 {
                     if (restAttackDamageDelayV2 > 0f)
                     {
-                        yield return new WaitForSeconds(restAttackDamageDelayV2);
+                        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                            restAttackDamageDelayV2,
+                            () => isDead || isSummoning || isPlayerDead || myToken != attackActionToken,
+                            () => IsStaticFrozen());
                     }
                 }
             }
@@ -488,7 +526,10 @@ public class SkellySwordEnemy : MonoBehaviour
         float remainingTime = attackDuration - totalDamageTime;
         if (remainingTime > 0)
         {
-            yield return new WaitForSeconds(remainingTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingTime,
+                () => isDead || isSummoning || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         animator.SetBool("attack", false);
@@ -509,7 +550,10 @@ public class SkellySwordEnemy : MonoBehaviour
         }
         if (cooldown > 0f)
         {
-            yield return new WaitForSeconds(cooldown);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                cooldown,
+                () => isDead || isSummoning || isPlayerDead || myToken != attackActionToken,
+                () => IsStaticFrozen());
         }
 
         attackOnCooldown = false;
@@ -576,7 +620,10 @@ public class SkellySwordEnemy : MonoBehaviour
         float animationDelay = Mathf.Max(0f, deathCleanupDelay - deathFadeOutDuration);
         if (animationDelay > 0f)
         {
-            yield return new WaitForSeconds(animationDelay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                animationDelay,
+                () => false,
+                () => false);
         }
 
         if (spriteRenderer != null && deathFadeOutDuration > 0f)
@@ -586,7 +633,11 @@ public class SkellySwordEnemy : MonoBehaviour
 
             while (elapsed < deathFadeOutDuration)
             {
-                elapsed += Time.deltaTime;
+                float dt = GameStateManager.GetPauseSafeDeltaTime();
+                if (dt > 0f)
+                {
+                    elapsed += dt;
+                }
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / deathFadeOutDuration);
                 spriteRenderer.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;
@@ -594,6 +645,11 @@ public class SkellySwordEnemy : MonoBehaviour
         }
 
         Destroy(gameObject);
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void OnCollisionEnter2D(Collision2D collision)

@@ -11,5 +11,7 @@ public enum ProjectileType
     Tornado,
     Laser,
     NovaStar,    // Fire orbital star (clockwise)
-    DwarfStar    // Ice orbital star (counterclockwise)
+    DwarfStar,    // Ice orbital star (counterclockwise)
+    ThunderDisc,
+    ElectroBall
 }

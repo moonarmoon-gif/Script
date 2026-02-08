@@ -145,20 +145,31 @@ public class PlayerController : MonoBehaviour
     {
         if (isDead || projectilePrefab == null || playerMana == null) return;
 
+        Transform spawnFirePoint = null;
+        AdvancedPlayerController advanced = GetComponent<AdvancedPlayerController>();
+        if (advanced != null)
+        {
+            spawnFirePoint = advanced.ActiveFirePoint;
+        }
+        if (spawnFirePoint == null)
+        {
+            spawnFirePoint = firePoint != null ? firePoint : transform;
+        }
+
         // Use ray-plane intersection for perfect aiming
         Ray ray = cam.ScreenPointToRay(Mouse.current.position.ReadValue());
-        Plane gamePlane = new Plane(Vector3.forward, firePoint.position.z);
+        Plane gamePlane = new Plane(Vector3.forward, spawnFirePoint.position.z);
 
         if (gamePlane.Raycast(ray, out float enter))
         {
             Vector3 worldTouchPosition = ray.GetPoint(enter);
-            Vector2 fireDirection = (worldTouchPosition - firePoint.position).normalized;
+            Vector2 fireDirection = (worldTouchPosition - spawnFirePoint.position).normalized;
 
-            var projectile = Instantiate(projectilePrefab, firePoint.position, Quaternion.identity);
+            var projectile = Instantiate(projectilePrefab, spawnFirePoint.position, Quaternion.identity);
             projectile.Launch(fireDirection, null, playerMana);
 
             // Debug visualization
-            Debug.DrawRay(firePoint.position, fireDirection * 5f, Color.magenta, 2f);
+            Debug.DrawRay(spawnFirePoint.position, fireDirection * 5f, Color.magenta, 2f);
         }
     }
 

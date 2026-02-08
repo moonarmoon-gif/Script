@@ -181,6 +181,7 @@ public class EnemyCardSpawner : MonoBehaviour
     private bool cardSelectionTimerPaused = false;
     private bool showingPostBossCards = false; // Prevent boss timer during post-boss card selection
     private bool isBossCardSelectionActive = false; // True only while showing boss cards in a boss event
+    private bool postBossRefillDelayActive = false;
     private float pausedCardSelectionTimer = 0f;
     
     // EXP from the boss itself (queued so level-up cards appear after cleanup)
@@ -258,6 +259,11 @@ public class EnemyCardSpawner : MonoBehaviour
     {
         get { return bossDeathCleanupInProgress; }
     }
+
+    public bool IsPostBossRefillDelayActive
+    {
+        get { return postBossRefillDelayActive; }
+    }
     
     public bool IsBossEventActive
     {
@@ -271,7 +277,7 @@ public class EnemyCardSpawner : MonoBehaviour
     
     private void Start()
     {
-        gameStartTime = Time.time;
+        gameStartTime = GameStateManager.PauseSafeTime;
         rarityElapsedTime = 0f;
         
         // Initialize default rarity thresholds if none set
@@ -315,17 +321,19 @@ public class EnemyCardSpawner : MonoBehaviour
         {
             return;
         }
+
+        float dt = GameStateManager.GetPauseSafeDeltaTime();
         
         // Advance rarity-scaling timer only while no boss event or post-boss card selection is active
         if (useTimeBasedRarity && !isBossEventActive && !showingPostBossCards)
         {
-            rarityElapsedTime += Time.deltaTime;
+            rarityElapsedTime += dt;
         }
         
         // Boss event timer (always runs, but pauses during the entire boss event and post-boss card selection)
         if (enableBossCards && !isBossEventActive && !showingPostBossCards && currentBossIndex < bossSpawnTimings.Count)
         {
-            bossEventTimer += Time.deltaTime;
+            bossEventTimer += dt;
 
             BossSpawnTiming timing = bossSpawnTimings[currentBossIndex];
 
@@ -392,7 +400,7 @@ public class EnemyCardSpawner : MonoBehaviour
         else
         {
             // All enemies share one spawn timer
-            spawnTimer += Time.deltaTime;
+            spawnTimer += dt;
             if (spawnTimer >= baseSpawnInterval)
             {
                 Debug.Log($"<color=lime>Shared timer spawn! Timer: {spawnTimer:F2}s >= Interval: {baseSpawnInterval:F2}s</color>");
@@ -482,7 +490,7 @@ public class EnemyCardSpawner : MonoBehaviour
         Debug.Log($"<color=lime>All {initialSelectionCount} initial selections complete! Starting periodic spawning...</color>");
         
         // CRITICAL FIX: Force unpause game after initial selections
-        if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection)
+        if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection && !GameStateManager.ManualPauseActive)
         {
             Time.timeScale = 1f;
             Debug.Log($"<color=lime>Forced game unpause after initial enemy card selections</color>");
@@ -508,7 +516,7 @@ public class EnemyCardSpawner : MonoBehaviour
             // Don't advance timer while card selection timer is explicitly paused
             if (!cardSelectionTimerPaused)
             {
-                timer += Time.deltaTime;
+                timer += GameStateManager.GetPauseSafeDeltaTime();
             }
 
             // Time to consider showing a normal enemy card selection (with a
@@ -558,7 +566,7 @@ public class EnemyCardSpawner : MonoBehaviour
                             }
 
                             // Force unpause after favour selection if CardSelectionManager paused the game
-                            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection)
+                            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection && !GameStateManager.ManualPauseActive)
                             {
                                 Time.timeScale = 1f;
                             }
@@ -583,7 +591,7 @@ public class EnemyCardSpawner : MonoBehaviour
                             }
 
                             // Force unpause after selection if CardSelectionManager paused the game
-                            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection)
+                            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection && !GameStateManager.ManualPauseActive)
                             {
                                 Time.timeScale = 1f;
                                 Debug.Log("<color=lime>Forced game unpause after periodic enemy card selection</color>");
@@ -973,7 +981,7 @@ public class EnemyCardSpawner : MonoBehaviour
             if (card.rarity != CardRarity.Boss && firstRegisteredCard == null && initialSelectionPhaseActive && !firstCardBoostAssigned)
             {
                 firstRegisteredCard = card;
-                firstCardBoostEndTime = Time.time + firstCardBoostDuration;
+                firstCardBoostEndTime = GameStateManager.PauseSafeTime + firstCardBoostDuration;
                 firstCardBoostAssigned = true;
                 firstEnemyOffCameraBoostWindowEndTime = -1f;
                 Debug.Log($"<color=magenta>First INITIAL enemy card '{card.cardName}' registered - applying {firstCardSpawnIntervalReduction * 100f:F0}% spawn interval reduction for {firstCardBoostDuration:F1}s</color>");
@@ -1032,7 +1040,7 @@ public class EnemyCardSpawner : MonoBehaviour
                 Debug.Log($"<color=cyan>Initialized spawn timer for {card.cardName}</color>");
             }
             
-            cardSpawnTimers[card] += Time.deltaTime;
+            cardSpawnTimers[card] += GameStateManager.GetPauseSafeDeltaTime();
 
             // Compute effective spawn interval with all active mechanics
             float effectiveInterval = GetEffectiveSpawnInterval(card);
@@ -1082,12 +1090,20 @@ public class EnemyCardSpawner : MonoBehaviour
         // Tag this enemy with the rarity of the card that spawned it so
         // other systems (Favours, etc.) can know if it was a Boss or
         // non-boss enemy and what rarity it corresponds to.
-        EnemyCardTag tag = spawnedEnemy.GetComponent<EnemyCardTag>();
-        if (tag == null)
+        EnemyCardTag[] tags = spawnedEnemy.GetComponentsInChildren<EnemyCardTag>(true);
+        if (tags == null || tags.Length == 0)
         {
-            tag = spawnedEnemy.AddComponent<EnemyCardTag>();
+            EnemyCardTag created = spawnedEnemy.AddComponent<EnemyCardTag>();
+            tags = new EnemyCardTag[] { created };
         }
-        tag.rarity = card.rarity;
+
+        for (int i = 0; i < tags.Length; i++)
+        {
+            if (tags[i] != null)
+            {
+                tags[i].rarity = card.rarity;
+            }
+        }
 
         // Optional: give the very first non-boss enemy-card enemies an off-camera
         // move-speed boost so they reach the battlefield faster. The boost is
@@ -1104,10 +1120,10 @@ public class EnemyCardSpawner : MonoBehaviour
             {
                 if (firstEnemyOffCameraBoostWindowEndTime < 0f)
                 {
-                    firstEnemyOffCameraBoostWindowEndTime = Time.time + firstEnemyOffCameraBoostDuration;
+                    firstEnemyOffCameraBoostWindowEndTime = GameStateManager.PauseSafeTime + firstEnemyOffCameraBoostDuration;
                 }
 
-                float remaining = firstEnemyOffCameraBoostWindowEndTime - Time.time;
+                float remaining = firstEnemyOffCameraBoostWindowEndTime - GameStateManager.PauseSafeTime;
                 if (remaining > 0f)
                 {
                     status.ApplyOffCameraSpeedBoost(firstEnemyOffCameraSpeedMultiplier, remaining, MoveSpeedOffCamersOffset);
@@ -1271,7 +1287,7 @@ public class EnemyCardSpawner : MonoBehaviour
                 break;
             }
             
-            yield return new WaitForSeconds(0.5f);
+            yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
         }
         
         waitingForEnemyClear = false;
@@ -1295,7 +1311,7 @@ public class EnemyCardSpawner : MonoBehaviour
         
         // STEP 4: Buffer time
         Debug.Log($"<color=cyan>Buffer time: {bossCardBufferTime}s...</color>");
-        yield return new WaitForSeconds(bossCardBufferTime);
+        yield return GameStateManager.WaitForPauseSafeSeconds(bossCardBufferTime);
         
         // STEP 5A: Show pre-boss FAVOUR card selection based on enemy rarity
         // history, if any enemy cards have been picked this phase. This is
@@ -1314,7 +1330,7 @@ public class EnemyCardSpawner : MonoBehaviour
                 yield return null;
             }
 
-            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection)
+            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection && !GameStateManager.ManualPauseActive)
             {
                 Time.timeScale = 1f;
             }
@@ -1338,7 +1354,7 @@ public class EnemyCardSpawner : MonoBehaviour
         if (bossSpawnBreatherTime > 0f)
         {
             Debug.Log($"<color=cyan>Boss spawn breather: {bossSpawnBreatherTime:F2}s</color>");
-            yield return new WaitForSeconds(bossSpawnBreatherTime);
+            yield return GameStateManager.WaitForPauseSafeSeconds(bossSpawnBreatherTime);
         }
         
         // STEP 6: Spawn boss enemy
@@ -1359,7 +1375,7 @@ public class EnemyCardSpawner : MonoBehaviour
         
         while (menaceElapsed < menaceDuration)
         {
-            menaceElapsed += Time.deltaTime;
+            menaceElapsed += GameStateManager.GetPauseSafeDeltaTime();
             yield return null;
         }
         
@@ -1411,7 +1427,7 @@ public class EnemyCardSpawner : MonoBehaviour
         // First wait until the boss EnemyHealth death event fires.
         while (!bossDeathTriggered)
         {
-            yield return new WaitForSeconds(0.1f);
+            yield return GameStateManager.WaitForPauseSafeSeconds(0.1f);
         }
 
         float rewardWindow = currentBossDeathRewardTimer;
@@ -1420,9 +1436,14 @@ public class EnemyCardSpawner : MonoBehaviour
             float elapsedReward = 0f;
             while (elapsedReward < rewardWindow)
             {
-                elapsedReward += Time.deltaTime;
+                elapsedReward += GameStateManager.GetPauseSafeDeltaTime();
                 yield return null;
             }
+        }
+
+        if (CardSelectionManager.Instance != null)
+        {
+            CardSelectionManager.Instance.IncreaseMaxProjectileLimitAfterBoss();
         }
         
         Debug.Log("<color=lime>╔═══════════════════════════════════════════════════════════╗</color>");
@@ -1514,7 +1535,7 @@ public class EnemyCardSpawner : MonoBehaviour
                 yield return null;
             }
 
-            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection)
+            if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.pauseGameOnSelection && !GameStateManager.ManualPauseActive)
             {
                 Time.timeScale = 1f;
             }
@@ -1530,7 +1551,7 @@ public class EnemyCardSpawner : MonoBehaviour
         showingPostBossCards = true; // PREVENT boss timer from running during card selection
         isBossEventActive = true; // ALSO prevent boss timer check from passing
         Debug.Log($"<color=red>SET isBossEventActive = TRUE (Showing post-boss cards)</color>");
-        yield return new WaitForSeconds(0.5f);
+        yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
         ShowEnemyCardSelection();
         
         // Wait for player to select enemy card
@@ -1540,11 +1561,12 @@ public class EnemyCardSpawner : MonoBehaviour
         }
         
         Debug.Log("<color=lime>Post-boss enemy card selected!</color>");
-        RefillPlayerHealthAndMana();
         showingPostBossCards = false; // Resume boss timer
         isBossEventActive = false; // Allow boss timer to run again
         Debug.Log($"<color=red>SET isBossEventActive = FALSE (Post-boss cards done)</color>");
         FireMine.SetBossPauseActive(false);
+
+        RefillPlayerHealthAndMana();
         
         // Boss index was already advanced in Update when the event triggered.
         // Just log what the next boss timing will be.
@@ -1627,7 +1649,7 @@ public class EnemyCardSpawner : MonoBehaviour
                 yield break;
             }
 
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             float t = Mathf.Clamp01(elapsed / duration);
             cam.orthographicSize = Mathf.Lerp(startSize, targetSize, t);
             yield return null;
@@ -1700,10 +1722,12 @@ public class EnemyCardSpawner : MonoBehaviour
 
     private IEnumerator SmoothRefillPlayerHealthAndMana(GameObject playerObject)
     {
+        postBossRefillDelayActive = postBossRefillDelay > 0f;
         if (postBossRefillDelay > 0f)
         {
-            yield return new WaitForSeconds(postBossRefillDelay);
+            yield return GameStateManager.WaitForPauseSafeSeconds(postBossRefillDelay);
         }
+        postBossRefillDelayActive = false;
 
         if (playerObject == null)
         {
@@ -1742,11 +1766,7 @@ public class EnemyCardSpawner : MonoBehaviour
             }
         }
 
-        float endTime = Time.time + duration;
-        while (Time.time < endTime)
-        {
-            yield return null;
-        }
+        yield return GameStateManager.WaitForPauseSafeSeconds(duration);
 
         if (hasStats)
         {
@@ -1864,12 +1884,20 @@ public class EnemyCardSpawner : MonoBehaviour
         currentBossEnemy = Instantiate(bossPrefab, spawnPos, Quaternion.identity);
 
         // Ensure boss enemy is tagged as Boss rarity for favour effects.
-        EnemyCardTag bossTag = currentBossEnemy.GetComponent<EnemyCardTag>();
-        if (bossTag == null)
+        EnemyCardTag[] bossTags = currentBossEnemy.GetComponentsInChildren<EnemyCardTag>(true);
+        if (bossTags == null || bossTags.Length == 0)
         {
-            bossTag = currentBossEnemy.AddComponent<EnemyCardTag>();
+            EnemyCardTag created = currentBossEnemy.AddComponent<EnemyCardTag>();
+            bossTags = new EnemyCardTag[] { created };
         }
-        bossTag.rarity = CardRarity.Boss;
+
+        for (int i = 0; i < bossTags.Length; i++)
+        {
+            if (bossTags[i] != null)
+            {
+                bossTags[i].rarity = CardRarity.Boss;
+            }
+        }
 
         // If this boss is a DarkNecromancer, apply its topSpawnYOffset using this spawner's maxPos
         DarkNecromancerEnemy necro = currentBossEnemy.GetComponent<DarkNecromancerEnemy>();
@@ -1970,7 +1998,7 @@ public class EnemyCardSpawner : MonoBehaviour
 
         // Wait for menace timer (per-boss if configured)
         float menaceDuration = currentBossMenaceTimer > 0f ? currentBossMenaceTimer : bossMenaceTimer;
-        yield return new WaitForSeconds(menaceDuration);
+        yield return GameStateManager.WaitForPauseSafeSeconds(menaceDuration);
 
         // Remove immunity
         if (boss != null && bossHealth != null)
@@ -2073,7 +2101,7 @@ public class EnemyCardSpawner : MonoBehaviour
         SpriteRenderer[] sprites = obj.GetComponentsInChildren<SpriteRenderer>(true);
         if (sprites.Length == 0)
         {
-            yield return new WaitForSeconds(duration);
+            yield return GameStateManager.WaitForPauseSafeSeconds(duration);
             if (obj != null)
             {
                 Destroy(obj);
@@ -2090,18 +2118,21 @@ public class EnemyCardSpawner : MonoBehaviour
         float elapsed = 0f;
         while (elapsed < duration && obj != null)
         {
-            float t = Mathf.Clamp01(elapsed / duration);
-            float alpha = 1f - t;
+            if (obj == null)
+            {
+                yield break;
+            }
 
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
+            float t = Mathf.Clamp01(elapsed / duration);
             for (int i = 0; i < sprites.Length; i++)
             {
                 if (sprites[i] == null) continue;
                 Color c = originalColors[i];
-                c.a *= alpha;
+                c.a *= 1f - t;
                 sprites[i].color = c;
             }
 
-            elapsed += Time.deltaTime;
             yield return null;
         }
 
@@ -2204,7 +2235,7 @@ public class EnemyCardSpawner : MonoBehaviour
 
         // FIRST CARD BOOST: For the very first non-boss card, override base interval using
         // the inspector spawnInterval and apply the temporary reduction.
-        if (card.rarity != CardRarity.Boss && firstRegisteredCard == card && Time.time < firstCardBoostEndTime && firstCardSpawnIntervalReduction > 0f)
+        if (card.rarity != CardRarity.Boss && firstRegisteredCard == card && GameStateManager.PauseSafeTime < firstCardBoostEndTime && firstCardSpawnIntervalReduction > 0f)
         {
             float inspectorInterval = card.spawnInterval > 0f ? card.spawnInterval : baseInterval;
             float reductionFactor = Mathf.Clamp01(1f - firstCardSpawnIntervalReduction);

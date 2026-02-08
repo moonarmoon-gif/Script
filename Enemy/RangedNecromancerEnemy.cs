@@ -93,6 +93,8 @@ public class RangedNecromancerEnemy : MonoBehaviour
     private Vector2 knockbackVelocity = Vector2.zero;
     private float knockbackEndTime = 0f;
 
+    private StaticStatus cachedStaticStatus;
+
     // FirePoint management
     private Vector3 firePointBaseLocalPosition;
     private bool firePointCached = false;
@@ -207,6 +209,11 @@ public class RangedNecromancerEnemy : MonoBehaviour
     {
         if (isDead) return;
 
+        if (IsStaticFrozen())
+        {
+            return;
+        }
+
         bool playerDead = isPlayerDead || player == null || 
                          (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled);
 
@@ -242,6 +249,17 @@ public class RangedNecromancerEnemy : MonoBehaviour
         if (isDead)
         {
             rb.velocity = Vector2.zero;
+            return;
+        }
+
+        if (IsStaticFrozen())
+        {
+            rb.velocity = Vector2.zero;
+            float dt = Time.fixedDeltaTime;
+            if (dt > 0f)
+            {
+                knockbackEndTime += dt;
+            }
             return;
         }
 
@@ -310,6 +328,11 @@ public class RangedNecromancerEnemy : MonoBehaviour
         int myToken = BeginShootAction();
         isShootingProjectile = true;
         canShoot = false;
+        isInPreAttackDelay = preAttackDelay > 0f;
+
+        yield return StaticPauseHelper.WaitWhileStatic(
+            () => isDead || isPlayerDead || myToken != shootActionToken,
+            () => IsStaticFrozen());
 
         // Pre-attack delay (idle before attack animation starts). LETHARGY
         // extends this windup like other enemy attack timings.
@@ -326,13 +349,17 @@ public class RangedNecromancerEnemy : MonoBehaviour
             }
 
             isInPreAttackDelay = true;
-            yield return new WaitForSeconds(delay);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                delay,
+                () => isDead || isPlayerDead || myToken != shootActionToken,
+                () => IsStaticFrozen());
             isInPreAttackDelay = false;
         }
 
         if (isDead || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled))
         {
             isShootingProjectile = false;
+            isInPreAttackDelay = false;
             canShoot = true;
             shootRoutine = null;
             yield break;
@@ -346,12 +373,16 @@ public class RangedNecromancerEnemy : MonoBehaviour
         // Wait until spawn time (if positive)
         if (spawnTime > 0)
         {
-            yield return new WaitForSeconds(spawnTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                spawnTime,
+                () => isDead || isPlayerDead || myToken != shootActionToken,
+                () => IsStaticFrozen());
         }
 
         if (isDead || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled))
         {
             isShootingProjectile = false;
+            isInPreAttackDelay = false;
             canShoot = true;
             shootRoutine = null;
             yield break;
@@ -360,8 +391,24 @@ public class RangedNecromancerEnemy : MonoBehaviour
         // Spawn projectile
         if (projectilePrefab != null && player != null)
         {
+            yield return StaticPauseHelper.WaitWhileStatic(
+                () => isDead || isPlayerDead || myToken != shootActionToken,
+                () => IsStaticFrozen());
+
             Vector3 spawnPos = firePoint != null ? firePoint.position : transform.position;
-            Vector2 direction = (player.position - spawnPos).normalized;
+
+            Vector3 targetPos = player.position;
+            Collider2D playerCol = player.GetComponent<Collider2D>();
+            if (playerCol == null)
+            {
+                playerCol = player.GetComponentInChildren<Collider2D>();
+            }
+            if (playerCol != null)
+            {
+                targetPos = playerCol.bounds.center;
+            }
+
+            Vector2 direction = ((Vector2)targetPos - (Vector2)spawnPos).normalized;
             
             GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
 
@@ -378,13 +425,17 @@ public class RangedNecromancerEnemy : MonoBehaviour
         float remainingAnimTime = attackAnimationTime - spawnTime;
         if (remainingAnimTime > 0)
         {
-            yield return new WaitForSeconds(remainingAnimTime);
+            yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                remainingAnimTime,
+                () => isDead || isPlayerDead || myToken != shootActionToken,
+                () => IsStaticFrozen());
             Debug.Log($"<color=purple>RangedNecromancer waited {remainingAnimTime:F2}s for animation to complete</color>");
         }
 
         if (isDead || isPlayerDead || myToken != shootActionToken)
         {
             isShootingProjectile = false;
+            isInPreAttackDelay = false;
             canShoot = true;
             shootRoutine = null;
             yield break;
@@ -409,7 +460,10 @@ public class RangedNecromancerEnemy : MonoBehaviour
 
             if (cooldown > 0f)
             {
-                yield return new WaitForSeconds(cooldown);
+                yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+                    cooldown,
+                    () => isDead || isPlayerDead || myToken != shootActionToken,
+                    () => IsStaticFrozen());
             }
         }
 
@@ -444,6 +498,7 @@ public class RangedNecromancerEnemy : MonoBehaviour
             shootRoutine = null;
         }
         isShootingProjectile = false;
+        isInPreAttackDelay = false;
         canShoot = true;
     }
 
@@ -492,7 +547,10 @@ public class RangedNecromancerEnemy : MonoBehaviour
 
     IEnumerator DeathCleanupRoutine()
     {
-        yield return new WaitForSeconds(deathCleanupDelay);
+        yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
+            deathCleanupDelay,
+            () => false,
+            () => false);
 
         // Fade out
         if (sr != null)
@@ -503,7 +561,11 @@ public class RangedNecromancerEnemy : MonoBehaviour
 
             while (elapsed < fadeTime)
             {
-                elapsed += Time.deltaTime;
+                float dt = GameStateManager.GetPauseSafeDeltaTime();
+                if (dt > 0f)
+                {
+                    elapsed += dt;
+                }
                 float alpha = Mathf.Lerp(1f, 0f, elapsed / fadeTime);
                 sr.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
                 yield return null;
@@ -511,6 +573,11 @@ public class RangedNecromancerEnemy : MonoBehaviour
         }
 
         Destroy(gameObject);
+    }
+
+    private bool IsStaticFrozen()
+    {
+        return StaticPauseHelper.IsStaticFrozen(this, ref cachedStaticStatus);
     }
 
     void OnCollisionEnter2D(Collision2D collision)

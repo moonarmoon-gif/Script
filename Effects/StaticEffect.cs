@@ -47,44 +47,84 @@ public class StaticEffect : MonoBehaviour
         if (enemy == null) return false;
 
         // Don't apply to dead enemies
-        EnemyHealth health = enemy.GetComponent<EnemyHealth>();
+        EnemyHealth health = enemy.GetComponent<EnemyHealth>() ?? enemy.GetComponentInParent<EnemyHealth>();
         if (health != null && !health.IsAlive)
         {
             return false;
         }
 
+        GameObject ownerGO = health != null ? health.gameObject : enemy;
+
+        bool ignorePreForThisProjectile =
+            GetComponent<ElementalBeam>() != null ||
+            GetComponent<ProjectileFireTalon>() != null ||
+            GetComponent<ProjectileIceTalon>() != null ||
+            GetComponent<DwarfStar>() != null ||
+            GetComponent<NovaStar>() != null;
+
+        PredeterminedStatusRoll pre = ignorePreForThisProjectile
+            ? null
+            : GetComponent<PredeterminedStatusRoll>();
+
+        if (pre != null)
+        {
+            pre.EnsureRolled();
+            if (pre.staticRolled && !pre.staticWillApply)
+            {
+                return false;
+            }
+        }
+
         // Resolve player stats for shared elemental chance bonuses.
         PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
 
-        // Compute the effective static chance, including any global
-        // statusEffectChance from projectile modifiers and favours.
+        // Determine whether THIS projectile came from an ACTIVE projectile card.
+        ProjectileCards sourceCard = null;
+        if (ProjectileCardModifiers.Instance != null)
+        {
+            sourceCard = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
+        }
+
+        bool isActiveSource =
+            sourceCard != null &&
+            sourceCard.projectileSystem == ProjectileCards.ProjectileSystemType.Active;
+
+        // Compute the effective static chance.
         float effectiveChance = staticChance;
         if (stats != null && stats.hasProjectileStatusEffect)
         {
             effectiveChance += Mathf.Max(0f, stats.statusEffectChance);
+            if (isActiveSource)
+            {
+                effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
+            }
         }
         effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
 
-        StaticStatus staticStatus = enemy.GetComponent<StaticStatus>();
+        StaticStatus staticStatus = ownerGO.GetComponent<StaticStatus>();
         if (staticStatus == null)
         {
-            // First-time application uses effectiveChance
-            float roll = Random.Range(0f, 100f);
-            if (roll > effectiveChance)
+            // First-time application uses effectiveChance, unless we already have a
+            // predetermined roll on this projectile instance.
+            if (pre == null || !pre.staticRolled)
             {
-                return false;
+                float roll = Random.Range(0f, 100f);
+                if (roll > effectiveChance)
+                {
+                    return false;
+                }
             }
 
-            staticStatus = enemy.AddComponent<StaticStatus>();
+            staticStatus = ownerGO.AddComponent<StaticStatus>();
 
             // Compute initial VFX position with optional left/right offsets
             // relative to the camera so the static prefab appears on the
             // desired side of the enemy while still following their sprite.
-            Vector3 vfxPosition = enemy.transform.position;
+            Vector3 vfxPosition = ownerGO.transform.position;
             Camera mainCam = Camera.main;
             if (mainCam != null)
             {
-                bool enemyOnLeftSide = enemy.transform.position.x < mainCam.transform.position.x;
+                bool enemyOnLeftSide = ownerGO.transform.position.x < mainCam.transform.position.x;
                 Vector2 offset = enemyOnLeftSide ? staticVFXOffsetLeft : staticVFXOffsetRight;
                 vfxPosition += (Vector3)offset;
             }
@@ -101,7 +141,7 @@ public class StaticEffect : MonoBehaviour
             FavourEffectManager favourManager = Object.FindObjectOfType<FavourEffectManager>();
             if (favourManager != null)
             {
-                favourManager.NotifyStatusApplied(enemy, StatusId.Static);
+                favourManager.NotifyStatusApplied(ownerGO, StatusId.Static);
             }
 
             Debug.Log($"<color=yellow>⚡ STATIC APPLIED! Period={staticPeriod:F2}s, Duration={staticDuration:F2}s, Reapply={staticReapplyChance:F0}%</color>");
@@ -112,10 +152,14 @@ public class StaticEffect : MonoBehaviour
             // Re-application path: roll effectiveChance again while the effect's
             // duration window is still active. staticReapplyChance is reserved
             // for automatic background pulses inside StaticStatus.
-            float roll = Random.Range(0f, 100f);
-            if (roll > effectiveChance)
+            // If we have a predetermined roll, skip this re-roll.
+            if (pre == null || !pre.staticRolled)
             {
-                return false;
+                float roll = Random.Range(0f, 100f);
+                if (roll > effectiveChance)
+                {
+                    return false;
+                }
             }
 
             bool reapplied = staticStatus.TryReapplyStatic(staticPeriod, hitPoint);
@@ -128,8 +172,7 @@ public class StaticEffect : MonoBehaviour
 /// Component attached to enemies that are under a Static effect.
 /// Handles freezing movement and animations during each static period,
 /// and keeps track of an overall StaticDuration window. This class is
-/// intentionally generic: it uses reflection to find common movement
-/// speed fields (moveSpeed / walkSpeed) and an Animator to freeze
+/// intentionally generic: it uses Rigidbody2D constraints and Animator to freeze
 /// most animations. Enemy-specific cooldown logic can optionally be
 /// integrated via IStaticInterruptHandler.
 /// </summary>
@@ -143,21 +186,27 @@ public class StaticStatus : MonoBehaviour
     private bool isInStaticPeriod = false;
     private Coroutine staticPeriodRoutine;
 
+    public bool IsInStaticPeriod => isInStaticPeriod;
+
     private GameObject staticVFXInstance;
     private GameObject staticVFXPrefab;
 
-    // Movement/animation state
-    private bool hasStoredSpeed = false;
-    private float originalSpeed = 0f;
-    private MonoBehaviour speedOwner = null;
-    private string speedFieldName = null;
-
     private Rigidbody2D enemyRb;
     private Vector2 storedVelocity;
+    private float storedAngularVelocity;
+    private RigidbodyConstraints2D storedConstraints;
 
     private Animator animator;
     private float originalAnimatorSpeed = 1f;
+    private bool animatorFrozen = false;
     private StatusController statusController;
+
+    private EnemyHealth enemyHealth;
+
+    private int[] storedAnimatorStateHashes;
+    private float[] storedAnimatorNormalizedTimes;
+    private int storedAnimatorLayerCount = 0;
+    private bool hasStoredAnimatorState = false;
 
     /// <summary>
     /// Apply initial Static effect.
@@ -190,6 +239,13 @@ public class StaticStatus : MonoBehaviour
 
         enemyRb = GetComponent<Rigidbody2D>();
         animator = GetComponentInChildren<Animator>();
+
+        enemyHealth = GetComponent<EnemyHealth>();
+        if (enemyHealth != null)
+        {
+            enemyHealth.OnDeath -= HandleOwnerDeath;
+            enemyHealth.OnDeath += HandleOwnerDeath;
+        }
 
         // Spawn VFX (lifetime tied to this component) at the provided
         // hitPoint, which may already include left/right offsets, and
@@ -239,8 +295,9 @@ public class StaticStatus : MonoBehaviour
 
         while (remainingDuration > 0f)
         {
-            remainingDuration -= Time.deltaTime;
-            reapplyTimer += Time.deltaTime;
+            float dt = GameStateManager.GetPauseSafeDeltaTime();
+            remainingDuration -= dt;
+            reapplyTimer += dt;
 
             // Auto-reapply logic: while not currently in a static period, roll
             // staticReapplyChance every staticReapplyInterval to potentially
@@ -280,19 +337,21 @@ public class StaticStatus : MonoBehaviour
 
     private IEnumerator StaticPeriodCoroutine()
     {
+        bool wasInStaticPeriod = isInStaticPeriod;
         isInStaticPeriod = true;
 
-        // Freeze movement and animations
-        StoreAndFreezeMovement();
-        StoreAndFreezeAnimator();
-        NotifyInterruptHandlersStart();
+        if (!wasInStaticPeriod)
+        {
+            // Freeze movement and animations
+            StoreAndFreezeMovement();
+            StoreAndFreezeAnimator();
+        }
 
-        yield return new WaitForSeconds(staticPeriod);
+        yield return GameStateManager.WaitForPauseSafeSeconds(staticPeriod);
 
         // Unfreeze
         RestoreMovement();
         RestoreAnimator();
-        NotifyInterruptHandlersEnd();
 
         isInStaticPeriod = false;
 
@@ -303,68 +362,27 @@ public class StaticStatus : MonoBehaviour
 
     private void StoreAndFreezeMovement()
     {
-        if (!hasStoredSpeed)
-        {
-            // Find a movement speed field on any attached MonoBehaviour
-            MonoBehaviour[] behaviours = GetComponents<MonoBehaviour>();
-            foreach (var b in behaviours)
-            {
-                if (b == null) continue;
-                var type = b.GetType();
-                var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
-
-                var moveField = type.GetField("moveSpeed", flags) ?? type.GetField("walkSpeed", flags);
-                if (moveField != null && moveField.FieldType == typeof(float))
-                {
-                    originalSpeed = (float)moveField.GetValue(b);
-                    speedOwner = b;
-                    speedFieldName = moveField.Name;
-                    hasStoredSpeed = true;
-                    Debug.Log($"<color=yellow>⚡ StaticStatus: Stored {type.Name}.{speedFieldName} = {originalSpeed:F2}</color>");
-                    break;
-                }
-            }
-        }
-
-        // Set movement speed to zero
-        if (hasStoredSpeed && speedOwner != null && !string.IsNullOrEmpty(speedFieldName))
-        {
-            var type = speedOwner.GetType();
-            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
-            var moveField = type.GetField(speedFieldName, flags);
-            if (moveField != null && moveField.FieldType == typeof(float))
-            {
-                moveField.SetValue(speedOwner, 0f);
-                Debug.Log($"<color=yellow>⚡ StaticStatus: Set {type.Name}.{speedFieldName} to 0</color>");
-            }
-        }
-
-        // Also zero out current velocity so momentum stops immediately
         if (enemyRb != null)
         {
             storedVelocity = enemyRb.velocity;
+            storedAngularVelocity = enemyRb.angularVelocity;
             enemyRb.velocity = Vector2.zero;
+            enemyRb.angularVelocity = 0f;
+
+            storedConstraints = enemyRb.constraints;
+
+            enemyRb.constraints = RigidbodyConstraints2D.FreezeAll;
         }
     }
 
     private void RestoreMovement()
     {
-        if (hasStoredSpeed && speedOwner != null && !string.IsNullOrEmpty(speedFieldName))
-        {
-            var type = speedOwner.GetType();
-            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
-            var moveField = type.GetField(speedFieldName, flags);
-            if (moveField != null && moveField.FieldType == typeof(float))
-            {
-                moveField.SetValue(speedOwner, originalSpeed);
-                Debug.Log($"<color=yellow>⚡ StaticStatus: Restored {type.Name}.{speedFieldName} to {originalSpeed:F2}</color>");
-            }
-        }
-
         if (enemyRb != null)
         {
-            // Do not restore storedVelocity directly; enemy AI will set its own
-            // velocity from moveSpeed again on next FixedUpdate.
+            enemyRb.constraints = storedConstraints;
+
+            enemyRb.velocity = storedVelocity;
+            enemyRb.angularVelocity = storedAngularVelocity;
         }
     }
 
@@ -375,8 +393,62 @@ public class StaticStatus : MonoBehaviour
             return;
         }
 
-        // Avoid freezing death animations: if common death booleans are set,
-        // we simply skip animator freezing.
+        if (IsAnimatorInDeathState())
+        {
+            return;
+        }
+
+        originalAnimatorSpeed = animator.speed;
+
+        int layerCount = animator.layerCount;
+        if (storedAnimatorStateHashes == null || storedAnimatorStateHashes.Length < layerCount)
+        {
+            storedAnimatorStateHashes = new int[layerCount];
+            storedAnimatorNormalizedTimes = new float[layerCount];
+        }
+        storedAnimatorLayerCount = layerCount;
+
+        for (int i = 0; i < layerCount; i++)
+        {
+            AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(i);
+            storedAnimatorStateHashes[i] = info.fullPathHash;
+            storedAnimatorNormalizedTimes[i] = info.normalizedTime;
+        }
+        hasStoredAnimatorState = true;
+
+        animator.speed = 0f;
+        animatorFrozen = true;
+    }
+
+    private void RestoreAnimator()
+    {
+        if (animator != null && animatorFrozen)
+        {
+            animator.speed = originalAnimatorSpeed;
+
+            bool isDying = IsAnimatorInDeathState();
+            if (hasStoredAnimatorState && !isDying)
+            {
+                int count = Mathf.Min(storedAnimatorLayerCount, animator.layerCount);
+                for (int i = 0; i < count; i++)
+                {
+                    animator.Play(storedAnimatorStateHashes[i], i, storedAnimatorNormalizedTimes[i]);
+                }
+                animator.Update(0f);
+            }
+        }
+
+        hasStoredAnimatorState = false;
+        animatorFrozen = false;
+    }
+
+    private bool IsAnimatorInDeathState()
+    {
+        if (animator == null)
+        {
+            return false;
+        }
+
         bool isDying = false;
         try
         {
@@ -396,45 +468,13 @@ public class StaticStatus : MonoBehaviour
         }
         catch { }
 
-        if (isDying)
-        {
-            return;
-        }
-
-        originalAnimatorSpeed = animator.speed;
-        animator.speed = 0f;
+        return isDying;
     }
 
-    private void RestoreAnimator()
+    private void HandleOwnerDeath()
     {
-        if (animator != null)
-        {
-            animator.speed = originalAnimatorSpeed;
-        }
-    }
-
-    private void NotifyInterruptHandlersStart()
-    {
-        var handlers = GetComponents<IStaticInterruptHandler>();
-        foreach (var h in handlers)
-        {
-            if (h != null)
-            {
-                h.OnStaticStart(staticPeriod);
-            }
-        }
-    }
-
-    private void NotifyInterruptHandlersEnd()
-    {
-        var handlers = GetComponents<IStaticInterruptHandler>();
-        foreach (var h in handlers)
-        {
-            if (h != null)
-            {
-                h.OnStaticEnd();
-            }
-        }
+        hasStoredAnimatorState = false;
+        EndStaticCompletely();
     }
 
     private void EndStaticCompletely()
@@ -450,7 +490,6 @@ public class StaticStatus : MonoBehaviour
 
             RestoreMovement();
             RestoreAnimator();
-            NotifyInterruptHandlersEnd();
             isInStaticPeriod = false;
         }
 
@@ -472,6 +511,11 @@ public class StaticStatus : MonoBehaviour
         if (staticVFXInstance != null)
         {
             Destroy(staticVFXInstance);
+        }
+
+        if (enemyHealth != null)
+        {
+            enemyHealth.OnDeath -= HandleOwnerDeath;
         }
     }
 }

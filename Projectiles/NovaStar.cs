@@ -275,7 +275,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
 
         // Calculate damage interval
         damageInterval = 1f / damageInstancesPerSecond;
-        nextDamageTime = Time.time + damageInterval;
+        nextDamageTime = GameStateManager.PauseSafeTime + damageInterval;
 
         // Store base values for instant modifier recalculation
         baseDamageRadius = damageRadius;
@@ -365,7 +365,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
         float elapsed = 0f;
         while (elapsed < fadeInDuration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
             color.a = Mathf.Lerp(0f, 1f, elapsed / fadeInDuration);
             spriteRenderer.color = color;
             yield return null;
@@ -387,7 +387,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
                 float effectiveSpeed = currentSpeed;
 
                 // Move along the orbit
-                float angleStep = (effectiveSpeed / GetCurrentLevelRadius()) * Mathf.Rad2Deg * Time.deltaTime;
+                float angleStep = (effectiveSpeed / GetCurrentLevelRadius()) * Mathf.Rad2Deg * GameStateManager.GetPauseSafeDeltaTime();
 
                 // NovaStar: Move clockwise (decreasing angles)
                 currentAngle -= angleStep;
@@ -463,7 +463,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
                     }
 
                     // Continue moving
-                    float angleChange = currentSpeed * Time.deltaTime;
+                    float angleChange = currentSpeed * GameStateManager.GetPauseSafeDeltaTime();
                     currentAngle -= angleChange;
 
                     float angleRad = currentAngle * Mathf.Deg2Rad;
@@ -480,7 +480,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
         if (additionalOrbitDelay > 0f)
         {
             Debug.Log($"<color=magenta>NovaStar: Waiting additional {additionalOrbitDelay:F2}s before completion</color>");
-            yield return new WaitForSeconds(additionalOrbitDelay);
+            yield return GameStateManager.WaitForPauseSafeSeconds(additionalOrbitDelay);
         }
 
         // For levels 2-6, notify manager
@@ -563,10 +563,10 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
     private void Update()
     {
         // Deal damage to enemies in radius
-        if (Time.time >= nextDamageTime)
+        if (GameStateManager.PauseSafeTime >= nextDamageTime)
         {
             DealDamageToEnemiesInRadius();
-            nextDamageTime = Time.time + damageInterval;
+            nextDamageTime = GameStateManager.PauseSafeTime + damageInterval;
         }
     }
 

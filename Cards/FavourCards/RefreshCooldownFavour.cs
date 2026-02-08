@@ -1,15 +1,15 @@
 using UnityEngine;
-using System.Collections.Generic;
 
 [CreateAssetMenu(fileName = "RefreshCooldownFavour", menuName = "Favour Effects/Refresh Cooldown")]
 public class RefreshCooldownFavour : FavourEffect
 {
     [Header("Refresh Cooldown Settings")]
-    [Tooltip("Base chance (percent) to refresh the cooldown of the passive projectile that killed an enemy.")]
+    [Tooltip("Base chance (percent) to refresh the cooldown of ALL projectiles when an enemy is killed.")]
     public float RefreshChancePercent = 2f;
 
+    public float BonusRefreshChancePercent = 0f;
+
     private float currentChancePercent = 0f;
-    private readonly Dictionary<ProjectileCards, float> nextAllowedRefreshTimes = new Dictionary<ProjectileCards, float>();
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
@@ -19,7 +19,7 @@ public class RefreshCooldownFavour : FavourEffect
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        float step = Mathf.Max(0f, RefreshChancePercent);
+        float step = Mathf.Max(0f, BonusRefreshChancePercent);
         currentChancePercent += step;
     }
 
@@ -35,44 +35,22 @@ public class RefreshCooldownFavour : FavourEffect
             return;
         }
 
-        EnemyLastHitSource marker = enemy.GetComponentInParent<EnemyLastHitSource>();
-        ProjectileCards card = marker != null ? marker.lastProjectileCard : null;
-        if (card == null)
-        {
-            return;
-        }
-
-        if (card.projectileSystem != ProjectileCards.ProjectileSystemType.Passive)
-        {
-            return;
-        }
-
         float roll = Random.Range(0f, 100f);
         if (roll > currentChancePercent)
         {
             return;
         }
 
-        float now = Time.time;
-        if (nextAllowedRefreshTimes.TryGetValue(card, out float nextAllowed) && now < nextAllowed)
-        {
-            return;
-        }
-
         ProjectileSpawner spawner = player.GetComponent<ProjectileSpawner>();
-        if (spawner == null)
+        if (spawner != null)
         {
-            return;
+            spawner.RefreshCooldownForAllPassiveCards();
         }
 
-        spawner.RefreshCooldownForPassiveCard(card);
-
-        float baseInterval = card.runtimeSpawnInterval > 0f ? card.runtimeSpawnInterval : card.spawnInterval;
-        if (baseInterval <= 0f)
+        AdvancedPlayerController controller = player.GetComponent<AdvancedPlayerController>();
+        if (controller != null)
         {
-            baseInterval = 0.1f;
+            controller.RefreshAllActiveProjectileCooldowns();
         }
-
-        nextAllowedRefreshTimes[card] = now + baseInterval;
     }
 }

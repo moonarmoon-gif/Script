@@ -10,6 +10,8 @@ public class SkillTreeUI : MonoBehaviour
 {
     public static SkillTreeUI Instance { get; private set; }
 
+    public bool IsOpen => root != null && root.activeSelf;
+
     private enum PendingAction
     {
         None,
@@ -68,7 +70,7 @@ public class SkillTreeUI : MonoBehaviour
     [SerializeField] private Button confirmNoButton;
 
     [Header("Input")]
-    [SerializeField] private KeyCode toggleKey = KeyCode.Space;
+    [SerializeField] private KeyCode toggleKey = KeyCode.K;
 
     [SerializeField] private bool persistAcrossScenes = true;
 
@@ -138,7 +140,7 @@ public class SkillTreeUI : MonoBehaviour
 
     private void Update()
     {
-        if (toggleKey != KeyCode.None && WasKeyPressedThisFrame(toggleKey) && !IsAnyActive(blockToggleIfAnyActive))
+        if (toggleKey != KeyCode.None && toggleKey != KeyCode.Space && WasKeyPressedThisFrame(toggleKey) && !IsAnyActive(blockToggleIfAnyActive))
         {
             Toggle();
         }
@@ -305,6 +307,12 @@ public class SkillTreeUI : MonoBehaviour
 
         if (IsAnyActive(blockResumeIfAnyActive))
         {
+            return;
+        }
+
+        if (GameStateManager.ManualPauseActive)
+        {
+            pausedByThis = false;
             return;
         }
 
