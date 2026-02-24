@@ -539,7 +539,9 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
 
     private Vector2 GetExplosionCenterWorld(Vector2 radiusOffset)
     {
-        return (Vector2)transform.position + radiusOffset;
+        Vector3 localOffset = new Vector3(radiusOffset.x, radiusOffset.y, 0f);
+        Vector3 worldOffset = transform.TransformVector(localOffset);
+        return (Vector2)transform.position + (Vector2)worldOffset;
     }
 
     public Vector2 GetSpawnOffset(Vector2 direction)

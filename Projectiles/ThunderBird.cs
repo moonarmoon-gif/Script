@@ -77,8 +77,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
     private bool isVariant3Active = false;
     private bool isVariant13Active = false;
 
-    private readonly HashSet<GameObject> globalStrikeChanceRolledEnemies = new HashSet<GameObject>();
-
     private static int lastVariant3StrikeFrame = -1;
     private static int variant3StrikesThisFrame = 0;
 
@@ -96,7 +94,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
     private HashSet<GameObject> damagedEnemies = new HashSet<GameObject>();
     private Dictionary<GameObject, float> pendingDamageEnemies = new Dictionary<GameObject, float>();
-    private readonly HashSet<GameObject> pendingVariant3GlobalStrikeEnemies = new HashSet<GameObject>();
 
     private class CachedEnemyData
     {
@@ -407,8 +404,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
         isVariant13Active = hasVariant1History && hasVariant3History;
         isVariant3Active = (enhancedVariant == 3) || isVariant13Active;
-        globalStrikeChanceRolledEnemies.Clear();
-        pendingVariant3GlobalStrikeEnemies.Clear();
         pendingVariant3StrikeRequests = 0;
         pendingVariant3TriggerEnemyRoot = null;
 
@@ -697,21 +692,19 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
                 if (damagedEnemies.Contains(enemyRoot)) continue;
                 if (pendingDamageEnemies.ContainsKey(enemyRoot)) continue;
-                if (pendingVariant3GlobalStrikeEnemies.Contains(enemyRoot)) continue;
 
                 IDamageable damageable = enemyRoot.GetComponent<IDamageable>() ?? enemyRoot.GetComponentInParent<IDamageable>();
                 if (damageable == null || !damageable.IsAlive) continue;
 
                 if (!OffscreenDamageChecker.CanTakeDamage(hitCollider.transform.position)) continue;
 
-                if (isVariant3Active && !globalStrikeChanceRolledEnemies.Contains(enemyRoot))
+                if (isVariant3Active)
                 {
-                    globalStrikeChanceRolledEnemies.Add(enemyRoot);
-
                     float rollThreshold = Mathf.Clamp01(GlobalStrikeChance / 100f);
                     if (Random.value <= rollThreshold)
                     {
                         RequestVariant3Strike(enemyRoot);
+
                         break;
                     }
                 }
