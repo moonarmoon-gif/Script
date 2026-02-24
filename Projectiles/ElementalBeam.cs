@@ -1284,56 +1284,18 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         Debug.Log($"<color=cyan>ElementalBeam FIRING: Dir=({dir.x:F3}, {dir.y:F3}), Angle={angle:F1}°, Final={finalAngle:F1}°, Enhanced={enhancedVariant}</color>");
 
-        // Enhanced Variant 1: Rotating Beam
-        if (enhancedVariant == 1)
+        // Variant 1 rotation-direction rule (applies to ALL V1-inclusive stacks):
+        //  - Fired RIGHT → rotate LEFT  (CCW, +1)
+        //  - Fired LEFT  → rotate RIGHT (CW, -1)
+        // This must apply even when Variant 3 is active (dual beams) so BOTH
+        // beams follow the same side-based direction rule.
+        if (enhancedVariant == 1 || isVariant12Stacked || isVariant12RotationStacked)
         {
-            // Set initial rotation to MATCH the sprite rotation we just
-            // applied (finalAngle). This prevents a 90° snap when the
-            // per-frame rotation kicks in.
-            currentRotation = finalAngle;
-            
-            // Normalize the FINAL sprite-aligned angle to -180°..180° for
-            // debugging. This matches the actual visual orientation used for
-            // the beam.
-            float normalizedAngle = finalAngle;
-            while (normalizedAngle > 180f) normalizedAngle -= 360f;
-            while (normalizedAngle < -180f) normalizedAngle += 360f;
-
-            Debug.Log($"<color=gold>Enhanced Beam Angle Check: FinalAngle={normalizedAngle:F2}°</color>");
-
-            // Variant 1 movement rule: always sweep toward the OPPOSITE side of
-            // the screen from which it fired, same as stacked Variant 1+2.
-            //  - Fired RIGHT  → rotate LEFT (counter-clockwise, +1)
-            //  - Fired LEFT   → rotate RIGHT (clockwise, -1)
-            if (firingRight)
-            {
-                rotationDirection = 1f; // CCW = left
-                Debug.Log($"<color=gold>Enhanced Beam V1: Fired RIGHT → rotating LEFT (CCW, +1) at {enhancedRotationSpeed} deg/sec</color>");
-            }
-            else
-            {
-                rotationDirection = -1f; // CW = right
-                Debug.Log($"<color=gold>Enhanced Beam V1: Fired LEFT → rotating RIGHT (CW, -1) at {enhancedRotationSpeed} deg/sec</color>");
-            }
-        }
-        else if (isVariant12Stacked || isVariant12RotationStacked)
-        {
-            // STACKED Variant 1+2: start rotation from the SAME sprite
-            // orientation used when the beam first fired (finalAngle), so the
-            // beam continues smoothly from the red-line firing direction with
-            // no mid-beam teleport.
-            // Choose rotation direction based purely on which SIDE we fired:
-            //  - Fired RIGHT  → rotate LEFT (counter-clockwise, +1)
-            //  - Fired LEFT   → rotate RIGHT (clockwise, -1)
+            // Set initial rotation to MATCH the sprite rotation we just applied
+            // (finalAngle) so there is no snap when rotation begins.
             currentRotation = finalAngle;
 
-            float baseDirection = firingRight ? 1f : -1f;
-            if (projectileType == ProjectileType.Ice)
-            {
-                baseDirection *= -1f;
-            }
-
-            rotationDirection = baseDirection;
+            rotationDirection = firingRight ? 1f : -1f;
         }
 
         // Calculate damage interval using variant-specific damage instances

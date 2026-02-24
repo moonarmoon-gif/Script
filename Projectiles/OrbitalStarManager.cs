@@ -23,7 +23,7 @@ public class OrbitalStarManager : MonoBehaviour
 
     [Header("Spawn Settings")]
     [Tooltip("Number of stars to spawn per level")]
-    public int starsPerLevel = 3;
+    public int starsPerLevel = 1;
 
     [Tooltip("Gap between each star (angular spacing in degrees)")]
     public float starAngularSpacing = 30f;
@@ -49,6 +49,9 @@ public class OrbitalStarManager : MonoBehaviour
 
     [Header("Enhanced Variant 3 - Scaling")]
     public float NewScale = 1.25f;
+
+    [Range(0f, 100f)]
+    public float BonusStatusChance = 40f;
     
     [Header("Synchronized Spawning Mode")]
     [Tooltip("When enabled: Spawn one star at each level 1-6 sequentially (not odd/even batches). Works for single enhanced star or both synchronized.")]
@@ -247,6 +250,8 @@ public class OrbitalStarManager : MonoBehaviour
         CheckEnhancedMode();
         previousNovaEnhanced = isNovaStarEnhanced;
         previousDwarfEnhanced = isDwarfStarEnhanced;
+
+        starsPerLevel = 1;
     }
     
     private void Update()
@@ -603,8 +608,6 @@ public class OrbitalStarManager : MonoBehaviour
         if (!synchronizeSpawns) return false;
         if (!isNovaStarEnhanced || !isDwarfStarEnhanced) return false;
 
-        if (novaVariantIndex == 3 || dwarfVariantIndex == 3) return false;
-
         if (!novaHasVariant1Stack || !novaHasVariant2Stack) return false;
         if (!dwarfHasVariant1Stack || !dwarfHasVariant2Stack) return false;
 
@@ -630,7 +633,6 @@ public class OrbitalStarManager : MonoBehaviour
             {
                 int variant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(novaCard);
                 novaVariantIndex = variant;
-                isNovaStarEnhanced = (variant >= 1);
                 // Once a variant has ever been chosen for NovaStar, mark its stack
                 // flag so future logic can treat it as an active stack even if the
                 // current variant index later changes.
@@ -657,7 +659,6 @@ public class OrbitalStarManager : MonoBehaviour
             {
                 int variant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(dwarfCard);
                 dwarfVariantIndex = variant;
-                isDwarfStarEnhanced = (variant >= 1);
                 // DwarfStar variant stacks mirror NovaStar behaviour: once a
                 // variant has been selected, its stack flag stays true.
                 if (variant == 1)
@@ -676,11 +677,17 @@ public class OrbitalStarManager : MonoBehaviour
             }
         }
 
-        // Per-star sequential / reverseSequential modes based on variants
-        novaSequential = (novaVariantIndex == 1);
-        novaReverseSequential = (novaVariantIndex == 2);
-        dwarfSequential = (dwarfVariantIndex == 1);
-        dwarfReverseSequential = (dwarfVariantIndex == 2);
+        // Enhanced behaviour for the manager is driven by Variant 1/2 history.
+        // Variant 3 is a purely additive stack (scale + status chance) and does
+        // not, by itself, change the spawn pattern.
+        isNovaStarEnhanced = novaHasVariant1Stack || novaHasVariant2Stack;
+        isDwarfStarEnhanced = dwarfHasVariant1Stack || dwarfHasVariant2Stack;
+
+        // Per-star sequential / reverseSequential modes based on history stacks.
+        novaSequential = novaHasVariant1Stack;
+        novaReverseSequential = novaHasVariant2Stack;
+        dwarfSequential = dwarfHasVariant1Stack;
+        dwarfReverseSequential = dwarfHasVariant2Stack;
 
         // Derive global sequential / reverseSequential mode flags from the chosen
         // variants. These describe what the OVERALL setup is requesting:
@@ -693,11 +700,11 @@ public class OrbitalStarManager : MonoBehaviour
         bool derivedSequential = false;
         bool derivedReverse = false;
 
-        if (novaVariantIndex == 1 || dwarfVariantIndex == 1)
+        if (novaHasVariant1Stack || dwarfHasVariant1Stack)
         {
             derivedSequential = true;
         }
-        if (novaVariantIndex == 2 || dwarfVariantIndex == 2)
+        if (novaHasVariant2Stack || dwarfHasVariant2Stack)
         {
             derivedReverse = true;
         }
@@ -852,7 +859,7 @@ public class OrbitalStarManager : MonoBehaviour
             // History-based V1 sync: once BOTH stars have EVER taken Variant 1 and
             // synchronizeSpawns is enabled, we treat the V1 sequential track as a
             // shared sync track even if their current UI-selected variants diverge.
-            bool v1HistorySync = false;
+            bool v1HistorySync = synchronizeSpawns && novaHasVariant1Stack && dwarfHasVariant1Stack;
 
             // Partial stacking case A:
             //   - Nova has BOTH Variant 1 and 2 in history
@@ -1177,7 +1184,7 @@ public class OrbitalStarManager : MonoBehaviour
             //   - Nova has both variants in its history, AND
             //   - sync is currently OFF, AND
             //   - DwarfStar is NOT enhanced.
-            bool novaSeqRevStacked = novaHasVariant1Stack && novaHasVariant2Stack && !megaSync && novaVariantIndex != 3;
+            bool novaSeqRevStacked = novaHasVariant1Stack && novaHasVariant2Stack && !megaSync;
 
             if (novaSeqRevStacked)
             {
@@ -1754,7 +1761,7 @@ public class OrbitalStarManager : MonoBehaviour
             // in NovaStarCycleEnhanced.
             bool novaHasBothStacks = novaHasVariant1Stack && novaHasVariant2Stack;
             bool dwarfHasBothStacks = dwarfHasVariant1Stack && dwarfHasVariant2Stack;
-            bool v1HistorySync = false;
+            bool v1HistorySync = synchronizeSpawns && novaHasVariant1Stack && dwarfHasVariant1Stack;
 
             // Partial Nova-extra mode (mirror of partialNovaExtra in
             // NovaStarCycleEnhanced): Nova has BOTH Variant 1 and 2 in history,
@@ -1805,7 +1812,7 @@ public class OrbitalStarManager : MonoBehaviour
             // independent DwarfStars per step: one using the forward sequential
             // levels (1→2→3) and one using the reverse sequential levels
             // (6→5→4), sharing the same modifiers.
-            bool dwarfSeqRevStacked = dwarfHasVariant1Stack && dwarfHasVariant2Stack && !megaSyncActive && dwarfVariantIndex != 3;
+            bool dwarfSeqRevStacked = dwarfHasVariant1Stack && dwarfHasVariant2Stack && !megaSyncActive;
 
             if (dwarfSeqRevStacked)
             {

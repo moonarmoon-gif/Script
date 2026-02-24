@@ -106,9 +106,9 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
         if (wire == null)
         {
             wireObject = new GameObject("RuntimeRadiusWire");
-            wireObject.transform.SetParent(transform, false);
-            wireObject.transform.localPosition = Vector3.zero;
-            wireObject.transform.localRotation = Quaternion.identity;
+            wireObject.transform.SetParent(null, false);
+            wireObject.transform.position = Vector3.zero;
+            wireObject.transform.rotation = Quaternion.identity;
             wireObject.transform.localScale = Vector3.one;
 
             wire = wireObject.AddComponent<LineRenderer>();
@@ -133,9 +133,9 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
         if (fillMeshFilter == null || fillMeshRenderer == null)
         {
             fillObject = new GameObject("RuntimeRadiusFill");
-            fillObject.transform.SetParent(transform, false);
-            fillObject.transform.localPosition = Vector3.zero;
-            fillObject.transform.localRotation = Quaternion.identity;
+            fillObject.transform.SetParent(null, false);
+            fillObject.transform.position = Vector3.zero;
+            fillObject.transform.rotation = Quaternion.identity;
             fillObject.transform.localScale = Vector3.one;
 
             fillMeshFilter = fillObject.AddComponent<MeshFilter>();
@@ -215,8 +215,8 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
             fillMaterial.color = fillColor;
             if (fillObject != null)
             {
-                fillObject.transform.localPosition = center - transform.position;
-                fillObject.transform.localRotation = Quaternion.identity;
+                fillObject.transform.position = center;
+                fillObject.transform.rotation = Quaternion.identity;
                 fillObject.transform.localScale = Vector3.one;
             }
 

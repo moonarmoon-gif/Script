@@ -70,50 +70,21 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
     [Tooltip("Size multiplier for Enhanced Variant 1 (Dual Thunder). Applies on top of normal size modifiers.")]
     public float variant1SizeMultiplier = 1f;
 
-    [Header("Enhanced Variant 2 - Slow Striker")]
-    [Tooltip("Movement speed for Variant 2 (slow horizontal flight)")]
-    public float variant2Speed = 3f;
+    [Header("Enhanced Variant 3 - Global Roll")]
+    [Range(0f, 100f)]
+    public float GlobalStrikeChance = 10f;
 
-    [Tooltip("Strike interval for Variant 2 (periodic strikes in seconds)")]
-    public float variant2StrikeInterval = 3f;
+    private bool isVariant3Active = false;
+    private bool isVariant13Active = false;
 
-    [Tooltip("Base cooldown for Variant 2 (in seconds)")]
-    public float variant2BaseCooldown = 30f;
-    public float variant12BaseCooldown = 0f;
+    private readonly HashSet<GameObject> globalStrikeChanceRolledEnemies = new HashSet<GameObject>();
 
-    public float variant2MinStrikeInterval = 1f;
-    public float variant2MinSpeed = 1f;
+    private static int lastVariant3StrikeFrame = -1;
+    private static int variant3StrikesThisFrame = 0;
 
-    [Tooltip("Size increase for Variant 2 (1.25 = 25% larger)")]
-    public float variant2SizeMultiplier = 1.25f;
-
-    [Tooltip("Animation speed decrease for Variant 2 (0.8 = 20% slower)")]
-    public float variant2AnimationSpeed = 0.8f;
-
-    [Tooltip("Unique strike effect size multiplier for Variant 2 (1.5 = 50% larger)")]
-    public float variant2StrikeEffectSizeMultiplier = 1.5f;
-
-    [Tooltip("Camera offset for 'on camera' detection (positive = bird needs to be further in, negative = bird can be further out)")]
-    public float variant2CameraOffset = 0f;
-
-    [Header("Enhanced Variant 2 - Modifier Exchange Rates")]
-    [Tooltip("Exchange rate: strikeZoneRadius → strikeInterval reduction (e.g., 1.0 = each +1 radius reduces interval by 1 second)")]
-    public float variant2StrikeZoneToIntervalRate = 1f;
-
-    [Tooltip("Exchange rate: speed modifier → speed reduction for Variant 2 (e.g., 0.1 = each +1 speed reduces Variant 2 speed by 0.1)")]
-    public float variant2SpeedReductionRate = 0.1f;
-
-    [SerializeField] private int variant2MaxEffectsPerStrike = 999;
-    [SerializeField] private bool debugVariant2Logging = false;
-
-    // Variant 2 runtime variables
-    private float nextStrikeTime = 0f;
-    private bool isVariant2Active = false;
-    private bool isVariant12Active = false;
-    private bool isVariant12TopBird = false;
-    private bool hasPerformedFirstStrike = false;
-    private int damageNumbersShownThisStrike = 0;
-    private int effectsSpawnedThisStrike = 0;
+    private Coroutine variant3StrikeRoutine;
+    private int pendingVariant3StrikeRequests;
+    private GameObject pendingVariant3TriggerEnemyRoot;
 
     private Rigidbody2D _rigidbody2D;
     private Collider2D _collider2D;
@@ -168,7 +139,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
     [Header("Offscreen Destruction Grace Periods")]
     public float baseGracePeriod = 10f;
     public float variant1GracePeriod = 10f;
-    public float variant2GracePeriod = 10f;
 
     // Enhanced system
     private int enhancedVariant = 0;
@@ -182,13 +152,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
     // Static tracking for cross-direction collision avoidance
     private static List<Vector3> currentFrameSpawnPositions = new List<Vector3>();
     private static int lastSpawnFrame = -1;
-
-    // Static tracking for Variant 2 per-frame strike throttling
-    private static int lastVariant2StrikeFrame = -1;
-    private static int variant2StrikesThisFrame = 0;
-
-    private Coroutine variant2StrikeRoutine;
-    private bool pendingVariant2StrikeRequest;
 
     [Header("Collision Avoidance")]
     public static float crossDirectionMinDistance = 2f;
@@ -432,16 +395,20 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         ProjectileCards card = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
 
         bool hasVariant1History = false;
-        bool hasVariant2History = false;
+        bool hasVariant3History = false;
 
         if (ProjectileCardLevelSystem.Instance != null && card != null)
         {
             enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
             hasVariant1History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
-            hasVariant2History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
+            hasVariant3History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
         }
 
-        isVariant12Active = hasVariant1History && hasVariant2History;
+        isVariant13Active = hasVariant1History && hasVariant3History;
+        isVariant3Active = (enhancedVariant == 3) || isVariant13Active;
+        globalStrikeChanceRolledEnemies.Clear();
+        pendingVariant3StrikeRequests = 0;
+        pendingVariant3TriggerEnemyRoot = null;
 
         if (!string.IsNullOrEmpty(minPosTag))
         {
@@ -464,37 +431,25 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         CardModifierStats modifiers = new CardModifierStats();
         if (card != null) modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
 
-        isVariant2Active = (enhancedVariant == 2) || isVariant12Active;
-
         float enhancedStrikeRadiusMult = 1f;
-        if (enhancedVariant == 1 && !isVariant2Active)
+        if (enhancedVariant == 1 || isVariant13Active)
         {
             enhancedStrikeRadiusMult = 1f + enhancedStrikeRadiusIncrease;
         }
 
         float baseCooldown = cooldown;
-        if (isVariant12Active && variant12BaseCooldown > 0f)
-        {
-            baseCooldown = variant12BaseCooldown;
-            if (card != null) card.runtimeSpawnInterval = variant12BaseCooldown;
-        }
-        else if (isVariant2Active)
-        {
-            baseCooldown = variant2BaseCooldown;
-            if (card != null) card.runtimeSpawnInterval = variant2BaseCooldown;
-        }
-        else if (card != null && card.runtimeSpawnInterval > 0f)
+        if (card != null && card.runtimeSpawnInterval > 0f)
         {
             baseCooldown = card.runtimeSpawnInterval;
         }
 
-        if (enhancedVariant == 1 && variant1BaseCooldown > 0f && !isVariant12Active)
+        if ((enhancedVariant == 1 || isVariant13Active) && variant1BaseCooldown > 0f)
         {
             baseCooldown = variant1BaseCooldown;
             if (card != null) card.runtimeSpawnInterval = Mathf.Max(0.1f, variant1BaseCooldown);
         }
 
-        if (enhancedVariant == 1)
+        if (enhancedVariant == 1 || isVariant13Active)
         {
             baseCooldown *= (1f - variant1CooldownReduction);
         }
@@ -513,10 +468,9 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         damage += modifiers.damageFlat;
 
         float baseVersionSpeed = baseFlySpeed + modifiers.speedIncrease;
-        float currentStrikeZoneRadius = strikeZoneRadius;
         float baseRadiusForStrike = baseStrikeZoneRadius;
 
-        if (enhancedVariant == 1)
+        if (enhancedVariant == 1 || isVariant13Active)
         {
             baseRadiusForStrike = baseStrikeZoneRadius * enhancedStrikeRadiusMult;
             if (variant1SpeedBonus != 0f) baseVersionSpeed += variant1SpeedBonus;
@@ -524,28 +478,11 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
         float baseVersionStrikeZone = (baseRadiusForStrike + modifiers.strikeZoneRadiusBonus) * modifiers.strikeZoneRadiusMultiplier;
 
-        if (isVariant2Active)
-        {
-            float speedIncrease = baseVersionSpeed - baseFlySpeed;
-            float speedReduction = speedIncrease * variant2SpeedReductionRate;
-            float targetSpeed = variant2Speed - speedReduction;
-            flySpeed = Mathf.Max(variant2MinSpeed, targetSpeed);
-
-            float strikeZoneIncrease = baseVersionStrikeZone - currentStrikeZoneRadius;
-            float intervalReduction = strikeZoneIncrease * variant2StrikeZoneToIntervalRate;
-            variant2StrikeInterval = Mathf.Max(variant2MinStrikeInterval, variant2StrikeInterval - intervalReduction);
-
-            nextStrikeTime = Time.time;
-        }
-        else
-        {
-            strikeZoneRadius = baseVersionStrikeZone * Mathf.Sqrt(modifiers.sizeMultiplier);
-            flySpeed = baseVersionSpeed;
-        }
+        strikeZoneRadius = baseVersionStrikeZone * Mathf.Sqrt(modifiers.sizeMultiplier);
+        flySpeed = baseVersionSpeed;
 
         float variantSizeMultiplier = 1f;
-        if (enhancedVariant == 1 && variant1SizeMultiplier != 1f) variantSizeMultiplier = variant1SizeMultiplier;
-        else if (isVariant2Active && variant2SizeMultiplier != 1f) variantSizeMultiplier = variant2SizeMultiplier;
+        if ((enhancedVariant == 1 || isVariant13Active) && variant1SizeMultiplier != 1f) variantSizeMultiplier = variant1SizeMultiplier;
 
         float finalSizeMultiplier = variantSizeMultiplier * modifiers.sizeMultiplier;
 
@@ -572,14 +509,8 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         {
             if (card.projectileSystem == ProjectileCards.ProjectileSystemType.Passive)
             {
-                // Thunderbird exception: if Variant 2 was already chosen and the
-                // player later chooses Variant 1 (stacked V1+V2), do NOT apply
-                // the enhanced first-spawn cooldown bypass.
-                if (!isVariant12Active)
-                {
-                    bypassEnhancedFirstSpawnCooldown = true;
-                    card.pendingEnhancedFirstSpawn = false;
-                }
+                bypassEnhancedFirstSpawnCooldown = true;
+                card.pendingEnhancedFirstSpawn = false;
             }
         }
 
@@ -614,23 +545,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         // Spawn positioning logic unchanged
         if (minPos != null && maxPos != null)
         {
-            if (isVariant2Active && !isVariant12Active)
-            {
-                float minY = minPos.position.y;
-                float maxY = maxPos.position.y;
-                float centerY = (minY + maxY) / 2f;
-
-                bool spawnLeft = Random.value < 0.5f;
-                float spawnX = spawnLeft ? minPos.position.x : maxPos.position.x;
-                isMovingRight = spawnLeft;
-                spawnedFromLeft = spawnLeft;
-
-                transform.position = new Vector3(spawnX, centerY, spawnPosition.z);
-
-                if (_animator != null) _animator.speed = variant2AnimationSpeed;
-                if (spriteRenderer != null) spriteRenderer.flipX = !isMovingRight;
-            }
-            else if (enhancedVariant == 1 || isVariant12Active)
+            if (enhancedVariant == 1 || isVariant13Active)
             {
                 float minY = minPos.position.y;
                 float maxY = maxPos.position.y;
@@ -682,12 +597,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                 Vector3 finalPosition = new Vector3(spawnX, spawnY, spawnPosition.z);
                 transform.position = finalPosition;
 
-                if (isVariant12Active)
-                {
-                    if (_animator != null) _animator.speed = variant2AnimationSpeed;
-                    isVariant12TopBird = spawnInTopZone;
-                }
-
                 currentFrameSpawnPositions.Add(finalPosition);
                 if (spriteRenderer != null) spriteRenderer.flipX = !isMovingRight;
             }
@@ -733,11 +642,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
             _audioSource.Play();
         }
 
-        if (isVariant2Active)
-        {
-            nextStrikeTime = Time.time + variant2StrikeInterval;
-        }
-
         StartCoroutine(FlyRoutine(finalLifetime));
         StartCoroutine(DamageDetectionRoutine());
     }
@@ -747,8 +651,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         float elapsedTime = 0f;
 
         float gracePeriod = baseGracePeriod;
-        if (isVariant2Active) gracePeriod = variant2GracePeriod;
-        else if (enhancedVariant == 1) gracePeriod = variant1GracePeriod;
+        if (enhancedVariant == 1 || isVariant13Active) gracePeriod = variant1GracePeriod;
 
         while (elapsedTime < lifetime)
         {

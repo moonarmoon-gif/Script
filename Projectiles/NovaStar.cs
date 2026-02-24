@@ -184,7 +184,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
     private int enhancedVariantIndex = 0;
     private float variantScaleMultiplier = 1f;
     private float Variant3ScaleMultiplier = 1.25f;
-    private const float Variant3ExtraBurnChancePercent = 40f;
+    private float Variant3ExtraBurnChancePercent = 40f;
     private bool variant3BonusApplied = false;
 
     private float GetVisualDeltaTime()
@@ -331,6 +331,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
                 if (manager2 != null)
                 {
                     Variant3ScaleMultiplier = manager2.NewScale;
+                    Variant3ExtraBurnChancePercent = manager2.BonusStatusChance;
                 }
 
                 bool hasVariant3Stack = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
@@ -826,6 +827,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
                 if (manager2 != null)
                 {
                     Variant3ScaleMultiplier = manager2.NewScale;
+                    Variant3ExtraBurnChancePercent = manager2.BonusStatusChance;
                 }
 
                 bool hasVariant3Stack = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);

@@ -178,7 +178,7 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
     private int enhancedVariantIndex = 0;
     private float variantScaleMultiplier = 1f;
     private float Variant3ScaleMultiplier = 1.25f;
-    private const float Variant3ExtraSlowChancePercent = 40f;
+    private float Variant3ExtraSlowChancePercent = 40f;
     private bool variant3BonusApplied = false;
 
     private float GetVisualDeltaTime()
@@ -311,6 +311,7 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
                 if (manager2 != null)
                 {
                     Variant3ScaleMultiplier = manager2.NewScale;
+                    Variant3ExtraSlowChancePercent = manager2.BonusStatusChance;
                 }
 
                 bool hasVariant3Stack = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
@@ -773,6 +774,7 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
                 if (manager2 != null)
                 {
                     Variant3ScaleMultiplier = manager2.NewScale;
+                    Variant3ExtraSlowChancePercent = manager2.BonusStatusChance;
                 }
 
                 bool hasVariant3Stack = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
