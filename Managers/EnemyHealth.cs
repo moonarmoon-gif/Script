@@ -22,6 +22,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     public float MaxHealth => Mathf.Max(1f, maxHealth);
     public float CurrentHealth => Mathf.Clamp(currentHealth, 0f, MaxHealth);
     public bool IsAlive => CurrentHealth > 0f;
+    public bool IsImmuneToBossMenace => immuneToBossMenace;
 
     /// <summary>
     /// Multiply max health by a value (used by EnemySpawner)

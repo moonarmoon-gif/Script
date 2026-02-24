@@ -7,6 +7,7 @@ public class EnemyExpData : MonoBehaviour
 {
     [Header("Experience Settings")]
     [SerializeField] private int expReward = 50;
+    [SerializeField] private bool grantExpToPlayer = true;
     [Tooltip("Optional: Override the exp reward with a random range")]
     [SerializeField] private bool useRandomRange = false;
     [SerializeField] private int minExpReward = 40;
@@ -31,6 +32,11 @@ public class EnemyExpData : MonoBehaviour
             }
             return expReward;
         }
+    }
+
+    public void SetGrantExpEnabled(bool enabled)
+    {
+        grantExpToPlayer = enabled;
     }
 
     public float ExpRewardExact
@@ -113,6 +119,11 @@ public class EnemyExpData : MonoBehaviour
 
     private void GrantExpToPlayer()
     {
+        if (!grantExpToPlayer)
+        {
+            return;
+        }
+
         // Don't grant EXP if player is dead
         if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
         {

@@ -356,17 +356,22 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         // Get card-specific modifiers first
         ProjectileCards card = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
 
+        bool hasVariant2History = false;
         bool hasVariant3History = false;
 
         // Check for enhanced variant using CARD-based system
         if (ProjectileCardLevelSystem.Instance != null && card != null)
         {
             enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
+            hasVariant2History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
             hasVariant3History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
             Debug.Log($"<color=gold>NuclearStrike ({card.cardName}) Enhanced Variant: {enhancedVariant}</color>");
         }
 
-        isVariant3Active = enhancedVariant == 3 || hasVariant3History;
+        bool hasVariant2Context = enhancedVariant == 2 || hasVariant2History;
+        bool hasVariant3Context = enhancedVariant == 3 || hasVariant3History;
+
+        isVariant3Active = hasVariant3Context;
 
         modifiers = new CardModifierStats(); // Default values
 
@@ -602,9 +607,9 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             }
         }
 
-        if (isVariant3Active)
+        if (hasVariant3Context)
         {
-            chosenLanding.x -= 2f;
+            chosenLanding.x += hasVariant2Context ? 2f : -2f;
         }
 
         Vector3 startPosition = new Vector3(chosenLanding.x, spawnY, spawnPosition.z);

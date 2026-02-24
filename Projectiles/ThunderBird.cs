@@ -94,6 +94,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
     private HashSet<GameObject> damagedEnemies = new HashSet<GameObject>();
     private Dictionary<GameObject, float> pendingDamageEnemies = new Dictionary<GameObject, float>();
+    private readonly HashSet<GameObject> pendingVariant3GlobalStrikeEnemies = new HashSet<GameObject>();
 
     private class CachedEnemyData
     {
@@ -404,6 +405,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
         isVariant13Active = hasVariant1History && hasVariant3History;
         isVariant3Active = (enhancedVariant == 3) || isVariant13Active;
+        pendingVariant3GlobalStrikeEnemies.Clear();
         pendingVariant3StrikeRequests = 0;
         pendingVariant3TriggerEnemyRoot = null;
 

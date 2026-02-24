@@ -225,6 +225,11 @@ public class OrbitalStarManager : MonoBehaviour
     private bool previousNovaEnhanced = false;
     private bool previousDwarfEnhanced = false;
 
+    private bool previousNovaVariant1Stack = false;
+    private bool previousNovaVariant2Stack = false;
+    private bool previousDwarfVariant1Stack = false;
+    private bool previousDwarfVariant2Stack = false;
+
     // Safety timeout (in seconds) to prevent spawn cycles from stalling forever
     // if, for any reason, active/completed counts get out of sync (e.g. projectiles
     // destroyed externally during boss events).
@@ -251,6 +256,11 @@ public class OrbitalStarManager : MonoBehaviour
         previousNovaEnhanced = isNovaStarEnhanced;
         previousDwarfEnhanced = isDwarfStarEnhanced;
 
+        previousNovaVariant1Stack = novaHasVariant1Stack;
+        previousNovaVariant2Stack = novaHasVariant2Stack;
+        previousDwarfVariant1Stack = dwarfHasVariant1Stack;
+        previousDwarfVariant2Stack = dwarfHasVariant2Stack;
+
         starsPerLevel = 1;
     }
     
@@ -265,6 +275,65 @@ public class OrbitalStarManager : MonoBehaviour
         
         // Check for enhancement changes every frame
         CheckEnhancedMode();
+
+        if (!bossEventActive)
+        {
+            bool novaV1JustStacked = !previousNovaVariant1Stack && novaHasVariant1Stack;
+            bool novaV2JustStacked = !previousNovaVariant2Stack && novaHasVariant2Stack;
+            bool dwarfV1JustStacked = !previousDwarfVariant1Stack && dwarfHasVariant1Stack;
+            bool dwarfV2JustStacked = !previousDwarfVariant2Stack && dwarfHasVariant2Stack;
+
+            if (novaStarSpawnCoroutine != null && (novaV1JustStacked || novaV2JustStacked))
+            {
+                GetNovaStarTrackActivity(out bool seqActive, out bool revActive);
+
+                if (novaV1JustStacked)
+                {
+                    novaSequentialLevel = 1;
+                    if (!seqActive)
+                    {
+                        SpawnSingleNovaStarAtLevel(novaSequentialLevel, 0f);
+                    }
+                }
+
+                if (novaV2JustStacked)
+                {
+                    novaReverseSequentialLevel = 6;
+                    if (!revActive)
+                    {
+                        SpawnSingleNovaStarAtLevelReverse(novaReverseSequentialLevel, 0f);
+                    }
+                }
+            }
+
+            if (dwarfStarSpawnCoroutine != null && (dwarfV1JustStacked || dwarfV2JustStacked))
+            {
+                GetDwarfStarTrackActivity(out bool seqActive, out bool revActive);
+
+                if (dwarfV1JustStacked)
+                {
+                    dwarfSequentialLevel = 1;
+                    if (!seqActive)
+                    {
+                        SpawnSingleDwarfStarAtLevel(dwarfSequentialLevel, 0f);
+                    }
+                }
+
+                if (dwarfV2JustStacked)
+                {
+                    dwarfReverseSequentialLevel = 6;
+                    if (!revActive)
+                    {
+                        SpawnSingleDwarfStarAtLevelReverse(dwarfReverseSequentialLevel, 0f);
+                    }
+                }
+            }
+        }
+
+        previousNovaVariant1Stack = novaHasVariant1Stack;
+        previousNovaVariant2Stack = novaHasVariant2Stack;
+        previousDwarfVariant1Stack = dwarfHasVariant1Stack;
+        previousDwarfVariant2Stack = dwarfHasVariant2Stack;
         
         // NovaStar enhancement changed
         if (isNovaStarEnhanced != previousNovaEnhanced)
