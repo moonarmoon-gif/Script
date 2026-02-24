@@ -67,7 +67,7 @@ public class SlowEffect : MonoBehaviour
         }
 
         // Resolve player stats once so we can include any global chance bonuses.
-        PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
+        PlayerStats stats = GetCachedPlayerStats();
 
         // Determine whether this projectile came from an ACTIVE or PASSIVE projectile card.
         // We only apply the new bonus stat to ACTIVE projectile cards.
@@ -91,6 +91,12 @@ public class SlowEffect : MonoBehaviour
                 : Mathf.Max(0f, stats.statusEffectChance);
 
             effectiveChance += bonus;
+        }
+
+        ProjectileStatusChanceAdditiveBonus additiveBonus = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+        if (additiveBonus != null)
+        {
+            effectiveChance += Mathf.Max(0f, additiveBonus.slowBonusPercent);
         }
         effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
 
@@ -154,6 +160,18 @@ public class SlowEffect : MonoBehaviour
         }
 
         return true;
+    }
+
+    private static PlayerStats cachedPlayerStats;
+
+    private static PlayerStats GetCachedPlayerStats()
+    {
+        if (cachedPlayerStats == null)
+        {
+            cachedPlayerStats = Object.FindObjectOfType<PlayerStats>();
+        }
+
+        return cachedPlayerStats;
     }
 }
 

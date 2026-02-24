@@ -1,7 +1,7 @@
 using UnityEngine;
 
 [RequireComponent(typeof(Collider2D))]
-public class HolyShield : MonoBehaviour, IDamageable
+public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
 {
     [Header("Health Settings")]
     [SerializeField] private float maxHealth = 100f;
@@ -48,6 +48,11 @@ public class HolyShield : MonoBehaviour, IDamageable
     public static HolyShield ActiveShield => activeShield;
     public static bool HasEverSpawned => hasEverSpawned;
     public bool IsAlive => !isBroken && currentHealth > 0f;
+
+    public float GetCurrentHealthForUI()
+    {
+        return Mathf.Max(0f, currentHealth);
+    }
 
     private void Awake()
     {
@@ -159,6 +164,47 @@ public class HolyShield : MonoBehaviour, IDamageable
         {
             // No variant visuals remain on HolyShield; ReflectShield/NullifyShield
             // handle their own visuals independently.
+        }
+    }
+
+    public void ApplyInstantModifiers(CardModifierStats modifiers)
+    {
+        if (modifiers == null)
+        {
+            return;
+        }
+
+        float healthMult = modifiers.damageMultiplier;
+        if (healthMult <= 0f)
+        {
+            healthMult = 1f;
+        }
+
+        float newMaxHealth = (baseMaxHealth * healthMult) + modifiers.shieldHealthBonus;
+        if (newMaxHealth < 1f)
+        {
+            newMaxHealth = 1f;
+        }
+
+        float deltaMax = newMaxHealth - maxHealth;
+        maxHealth = newMaxHealth;
+
+        if (!isBroken)
+        {
+            currentHealth = Mathf.Clamp(currentHealth + deltaMax, 0f, maxHealth);
+        }
+        else
+        {
+            currentHealth = Mathf.Clamp(currentHealth, 0f, maxHealth);
+        }
+
+        if (modifiers.sizeMultiplier != 1f)
+        {
+            transform.localScale = baseScale * modifiers.sizeMultiplier;
+        }
+        else
+        {
+            transform.localScale = baseScale;
         }
     }
 

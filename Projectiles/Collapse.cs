@@ -536,12 +536,12 @@ public class Collapse : MonoBehaviour, IInstantModifiable
         {
             finalCooldown = Mathf.Max(0.1f, finalCooldown);
         }
-        int finalManaCost = Mathf.Max(0, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
 
         float effectiveCooldown = finalCooldown;
         if (playerStats != null && playerStats.projectileCooldownReduction > 0f)
         {
             float totalCdr = Mathf.Max(0f, playerStats.projectileCooldownReduction);
+
             effectiveCooldown = finalCooldown / (1f + totalCdr);
             if (MinCooldownManager.Instance != null && card != null)
             {
@@ -553,6 +553,8 @@ public class Collapse : MonoBehaviour, IInstantModifiable
             }
         }
 
+        prefabKey = "Collapse";
+
         bool bypassEnhancedFirstSpawnCooldown = false;
         if (!skipCooldownCheck && card != null && card.applyEnhancedFirstSpawnReduction && card.pendingEnhancedFirstSpawn)
         {
@@ -562,8 +564,6 @@ public class Collapse : MonoBehaviour, IInstantModifiable
                 card.pendingEnhancedFirstSpawn = false;
             }
         }
-
-        prefabKey = "Collapse";
 
         if (!skipCooldownCheck)
         {
@@ -576,19 +576,7 @@ public class Collapse : MonoBehaviour, IInstantModifiable
                 }
             }
 
-            PlayerMana playerMana = FindObjectOfType<PlayerMana>();
-            if (playerMana != null && finalManaCost > 0 && !playerMana.Spend(finalManaCost))
-            {
-                Destroy(gameObject);
-                return;
-            }
-
             lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
-        }
-
-        if (_collider2D != null && playerCollider != null)
-        {
-            Physics2D.IgnoreCollision(_collider2D, playerCollider, true);
         }
 
         StartCoroutine(LifetimeRoutine(lifetimeSeconds));

@@ -151,6 +151,7 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
     private Camera mainCamera;
 
     private float lastDamageTime = -999f;
+    private int lastDamageFrame = -1;
 
     [Header("Damage Cooldown")]
     [Tooltip("Minimum time between damage instances")]
@@ -374,11 +375,13 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
 
             if (enhancedVariant == 3)
             {
-                BurnEffect burnEffect = GetComponent<BurnEffect>();
-                if (burnEffect != null)
+                ProjectileStatusChanceAdditiveBonus additive = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+                if (additive == null)
                 {
-                    burnEffect.burnChance = Mathf.Clamp01(variant3BurnEffectChance) * 100f;
+                    additive = gameObject.AddComponent<ProjectileStatusChanceAdditiveBonus>();
                 }
+
+                additive.burnBonusPercent = Mathf.Clamp01(variant3BurnEffectChance) * 100f;
             }
         }
 
@@ -430,8 +433,12 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
 
         if (modifiers.sizeMultiplier != 1f)
         {
-            transform.localScale *= modifiers.sizeMultiplier;
-            ColliderScaler.ScaleCollider(_collider2D, modifiers.sizeMultiplier, colliderSizeOffset);
+            transform.localScale = baseScale * modifiers.sizeMultiplier;
+        }
+
+        if (colliderSizeOffset != 0f)
+        {
+            ColliderScaler.ScaleCollider(_collider2D, 1f, colliderSizeOffset);
         }
 
         int totalPierceCount = modifiers.pierceCount + enhancedPierceAdd;
@@ -622,6 +629,11 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
                     return;
                 }
 
+                if (Time.frameCount == lastDamageFrame)
+                {
+                    return;
+                }
+
                 if (!OffscreenDamageChecker.CanTakeDamage(enemyTransform.position))
                 {
                     return;
@@ -665,6 +677,7 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
                 }
 
                 lastDamageTime = GameStateManager.PauseSafeTime;
+                lastDamageFrame = Time.frameCount;
 
                 TryPlayHitEffect(effectBasePosition);
 
@@ -706,6 +719,11 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
             HandleImpact(hitPoint, hitNormal, other.transform);
             Destroy(gameObject);
         }
+    }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        OnTriggerEnter2D(other);
     }
 
     private bool IsClickHitboxCollider(Collider2D other)
@@ -1012,9 +1030,10 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
             baseDamageAfterCards = nd;
             Debug.Log($"<color=lime>Damage:({baseDamage:F2}+{mods.damageFlat:F2})*{mods.damageMultiplier:F2}x={damage:F2}</color>");
         }
-        if (mods.sizeMultiplier != 1f)
+        Vector3 newScale = baseScale * mods.sizeMultiplier;
+        if (transform.localScale != newScale)
         {
-            transform.localScale = baseScale * mods.sizeMultiplier;
+            transform.localScale = newScale;
             Debug.Log($"<color=lime>Size:{baseScale}*{mods.sizeMultiplier:F2}x={transform.localScale}</color>");
         }
         Debug.Log($"<color=lime>╚═══════════════════════════════════════╝</color>");

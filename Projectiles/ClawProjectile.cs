@@ -143,13 +143,6 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
             lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
         }
 
-        // Mana check always applies.
-        if (playerMana != null && !playerMana.Spend(finalManaCost))
-        {
-            Destroy(gameObject);
-            return;
-        }
-
         if (_collider2D != null && colliderToIgnore != null)
         {
             Physics2D.IgnoreCollision(_collider2D, colliderToIgnore, true);

@@ -194,6 +194,31 @@ public class FavourEffectManager : MonoBehaviour
         return damage;
     }
 
+    public float GetTotalShieldHealthForUI()
+    {
+        float total = 0f;
+
+        for (int i = 0; i < activeEffects.Count; i++)
+        {
+            var entry = activeEffects[i];
+            if (entry == null || entry.effectInstance == null)
+            {
+                continue;
+            }
+
+            if (entry.effectInstance is ShieldOnLowHealthFavour lowShield)
+            {
+                total += Mathf.Max(0f, lowShield.CurrentShield);
+            }
+            else if (entry.effectInstance is ManaShieldFavour manaShield)
+            {
+                total += Mathf.Max(0f, manaShield.CurrentShield);
+            }
+        }
+
+        return Mathf.Max(0f, total);
+    }
+
     /// <summary>
     /// Remove and clean up all active favour effects. Used when fully
     /// resetting the run so no runtime state is carried over.

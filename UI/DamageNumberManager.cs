@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
+using UnityEngine.Serialization;
 
 /// <summary>
 /// Singleton manager for spawning damage numbers
@@ -51,6 +52,8 @@ public class DamageNumberManager : MonoBehaviour
     [SerializeField] private Vector3 poisonStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 bleedStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 woundStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 reflectStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 nullifyStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 weakStatusOffset = new Vector3(0f, 1.5f, 0f);
     
     [Header("Wound Damage Number Offset (world space)")]
@@ -106,8 +109,9 @@ public class DamageNumberManager : MonoBehaviour
     [Tooltip("Maximum number of damage numbers that can be spawned per frame. 0 or negative = unlimited.")]
     public int DamageNumbersPerFrame = 60;
 
-    [Tooltip("Maximum number of Thunderbird V2 strike hits processed per frame. 0 or negative = unlimited.")]
-    public int ThunderbirdV2MaxStrikesPerFrame = 0;
+    [FormerlySerializedAs("ThunderbirdV2MaxStrikesPerFrame")]
+    [Tooltip("Maximum number of Thunderbird strike hits processed per frame. 0 or negative = unlimited.")]
+    public int MaxStrikesPerFrame = 0;
 
     [Header("Camera Scaling")]
     [Tooltip("If true, damage number font size will be scaled inversely with Camera.main.orthographicSize so they keep a consistent apparent size as the camera zooms.")]
@@ -140,6 +144,10 @@ public class DamageNumberManager : MonoBehaviour
     public float ReflectFontSize => reflectFontSize > 0f ? reflectFontSize : StatusFontSize;
     public float FloatSpeed => floatSpeed;
     public float Duration => duration;
+
+    public Vector3 ImmuneStatusOffset => immuneStatusOffset;
+    public Vector3 ReflectStatusOffset => reflectStatusOffset;
+    public Vector3 NullifyStatusOffset => nullifyStatusOffset;
 
     public Vector3 GetAnchorWorldPosition(GameObject target, Vector3 fallback)
     {
@@ -569,12 +577,12 @@ public class DamageNumberManager : MonoBehaviour
 
     public void ShowNullify(Vector3 worldPosition)
     {
-        ShowStatusInternal("Nullify", worldPosition + immuneStatusOffset, nullifyStatusColor);
+        ShowStatusInternal("Nullify", worldPosition + nullifyStatusOffset, nullifyStatusColor);
     }
 
     public void ShowReflect(Vector3 worldPosition)
     {
-        ShowStatusInternal("Reflect", worldPosition + immuneStatusOffset, reflectStatusColor);
+        ShowStatusInternal("Reflect", worldPosition + reflectStatusOffset, reflectStatusColor);
     }
 
     private void ShowStatusInternal(string text, Vector3 worldPosition, Color color)

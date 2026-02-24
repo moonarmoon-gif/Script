@@ -372,7 +372,7 @@ public class TornadoController : MonoBehaviour, IInstantModifiable
     public static bool CanCast(PlayerMana playerMana)
     {
         if (GameStateManager.PauseSafeTime - lastCastTime < Cooldown) return false;
-        return playerMana != null && playerMana.Spend(ManaCost);
+        return true;
     }
 
     public static void RecordCast() => lastCastTime = GameStateManager.PauseSafeTime;

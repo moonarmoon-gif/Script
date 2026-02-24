@@ -317,7 +317,7 @@ public class SkellyArcherEnemy : MonoBehaviour
             // During pre-attack delay, show idle (not attacking). Do NOT idle while reloading.
             bool shouldIdle = !isDead && !isMoving && !isReloading && (!isShootingProjectile || isInPreAttackDelay) && !forceWalkFromCollapse;
             animator.SetBool("IsIdle", shouldIdle);
-            animator.SetBool("IsAttacking", !isDead && isShootingProjectile && !isInPreAttackDelay);
+            animator.SetBool("IsAttacking", !isDead && isShootingProjectile && !isInPreAttackDelay && !isReloading);
         }
 
         // Face player and update FirePoint position
@@ -511,6 +511,10 @@ public class SkellyArcherEnemy : MonoBehaviour
             }
 
             isInPreAttackDelay = true;
+            if (animator != null)
+            {
+                animator.SetBool("reload", false);
+            }
             yield return StaticPauseHelper.WaitForSecondsPauseSafeAndStatic(
                 delay,
                 () => isDead || isSummoning || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),
@@ -602,6 +606,11 @@ public class SkellyArcherEnemy : MonoBehaviour
         // Post-attack cooldown with reload animation
         float remainingCooldown = Mathf.Max(0f, postAttackCooldown);
 
+        if (animator != null)
+        {
+            animator.SetBool("IsAttacking", false);
+        }
+
         if (reloadAnimationDuration > 0f)
         {
             float reloadTime = Mathf.Min(remainingCooldown, reloadAnimationDuration);
@@ -667,6 +676,13 @@ public class SkellyArcherEnemy : MonoBehaviour
             shootRoutine = null;
         }
         isShootingProjectile = false;
+        isInPreAttackDelay = false;
+        isReloading = false;
+        if (animator != null)
+        {
+            animator.SetBool("reload", false);
+            animator.SetBool("IsAttacking", false);
+        }
         canShoot = true;
     }
 

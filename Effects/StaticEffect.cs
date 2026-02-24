@@ -38,6 +38,9 @@ public class StaticEffect : MonoBehaviour
     [Tooltip("Optional static VFX offset when enemy is on the RIGHT side of the camera")] 
     public Vector2 staticVFXOffsetRight = Vector2.zero;
 
+    private bool cachedIsActiveSourceResolved;
+    private bool cachedIsActiveSource;
+
     /// <summary>
     /// Try to apply or reapply static to an enemy.
     /// Returns true if a static period was started or refreshed.
@@ -59,6 +62,7 @@ public class StaticEffect : MonoBehaviour
             GetComponent<ElementalBeam>() != null ||
             GetComponent<ProjectileFireTalon>() != null ||
             GetComponent<ProjectileIceTalon>() != null ||
+            GetComponent<ElectroBall>() != null ||
             GetComponent<DwarfStar>() != null ||
             GetComponent<NovaStar>() != null;
 
@@ -76,18 +80,24 @@ public class StaticEffect : MonoBehaviour
         }
 
         // Resolve player stats for shared elemental chance bonuses.
-        PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
+        PlayerStats stats = GetCachedPlayerStats();
 
-        // Determine whether THIS projectile came from an ACTIVE projectile card.
-        ProjectileCards sourceCard = null;
-        if (ProjectileCardModifiers.Instance != null)
+        bool isActiveSource;
+        if (!cachedIsActiveSourceResolved)
         {
-            sourceCard = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
+            ProjectileCards sourceCard = null;
+            if (ProjectileCardModifiers.Instance != null)
+            {
+                sourceCard = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
+            }
+
+            cachedIsActiveSource =
+                sourceCard != null &&
+                sourceCard.projectileSystem == ProjectileCards.ProjectileSystemType.Active;
+            cachedIsActiveSourceResolved = true;
         }
 
-        bool isActiveSource =
-            sourceCard != null &&
-            sourceCard.projectileSystem == ProjectileCards.ProjectileSystemType.Active;
+        isActiveSource = cachedIsActiveSource;
 
         // Compute the effective static chance.
         float effectiveChance = staticChance;
@@ -98,6 +108,12 @@ public class StaticEffect : MonoBehaviour
             {
                 effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
             }
+        }
+
+        ProjectileStatusChanceAdditiveBonus additiveBonus = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+        if (additiveBonus != null)
+        {
+            effectiveChance += Mathf.Max(0f, additiveBonus.staticBonusPercent);
         }
         effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
 
@@ -165,6 +181,18 @@ public class StaticEffect : MonoBehaviour
             bool reapplied = staticStatus.TryReapplyStatic(staticPeriod, hitPoint);
             return reapplied;
         }
+    }
+
+    private static PlayerStats cachedPlayerStats;
+
+    private static PlayerStats GetCachedPlayerStats()
+    {
+        if (cachedPlayerStats == null)
+        {
+            cachedPlayerStats = Object.FindObjectOfType<PlayerStats>();
+        }
+
+        return cachedPlayerStats;
     }
 }
 

@@ -39,7 +39,8 @@ public class CoreCards : BaseCard
         ExperienceGain,
         SoulGain,
         HealthRegeneration,
-        AttackSpeed
+        AttackSpeed,
+        FavourInterval
     }
 
     public override void ApplyEffect(GameObject player)
@@ -81,9 +82,13 @@ public class CoreCards : BaseCard
             case CoreStatType.AttackSpeed:
                 ApplyAttackSpeedIncrease(player, finalValue);
                 break;
+            case CoreStatType.FavourInterval:
+                ApplyFavourIntervalReduction(finalValue);
+                break;
         }
 
-        Debug.Log($"Applied {cardName} ({rarity}): +{finalValue} {statType}");
+        string sign = statType == CoreStatType.FavourInterval ? "-" : "+";
+        Debug.Log($"Applied {cardName} ({rarity}): {sign}{finalValue} {statType}");
     }
 
     private float GetValueForRarity()
@@ -275,6 +280,23 @@ public class CoreCards : BaseCard
         }
     }
 
+    private void ApplyFavourIntervalReduction(float seconds)
+    {
+        if (seconds <= 0f)
+        {
+            return;
+        }
+
+        if (CardSelectionManager.Instance != null)
+        {
+            CardSelectionManager.Instance.ReduceFavourCardInterval(seconds);
+        }
+        else
+        {
+            Debug.LogWarning("CardSelectionManager.Instance not found!");
+        }
+    }
+
     public override string GetFormattedDescription()
     {
         if (!string.IsNullOrEmpty(description))
@@ -311,6 +333,8 @@ public class CoreCards : BaseCard
                 return $"+{valueStr2} Health Regen/s";
             case CoreStatType.AttackSpeed:
                 return $"+{valueStr2}% Attack Speed";
+            case CoreStatType.FavourInterval:
+                return $"-{valueStr2}s Favour Interval";
             default:
                 return description;
         }

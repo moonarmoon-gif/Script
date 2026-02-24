@@ -63,6 +63,12 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
 
     private static int activeSortingBeamCount = 0;
 
+    private float spawnXOffset = 0f;
+    private bool useVariant3TargetedSpawn = false;
+
+    private static int lastVariant3TargetFrame = -1;
+    private static HashSet<int> variant3TargetedEnemyIdsThisFrame = new HashSet<int>();
+
     private void Awake()
     {
         _collider2D = GetComponent<Collider2D>();
@@ -231,6 +237,21 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
             ? ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject)
             : null;
 
+        bool hasVariant2History = false;
+        bool hasVariant3History = false;
+        int enhancedVariant = 0;
+        if (ProjectileCardLevelSystem.Instance != null && card != null)
+        {
+            enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
+            hasVariant2History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
+            hasVariant3History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
+        }
+
+        bool isVariant3Context = (enhancedVariant == 3) || hasVariant3History;
+
+        spawnXOffset = isVariant3Context ? -2f : 0f;
+        useVariant3TargetedSpawn = isVariant3Context;
+
         CardModifierStats modifiers = new CardModifierStats();
         if (card != null && ProjectileCardModifiers.Instance != null)
         {
@@ -312,18 +333,27 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
                 }
             }
 
-            PlayerMana playerMana = FindObjectOfType<PlayerMana>();
-            if (playerMana != null && !playerMana.Spend(finalManaCost))
-            {
-                Destroy(gameObject);
-                return;
-            }
-
             lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
         }
 
         FindSpawnAreaPoints();
-        ApplySpawnPosition(spawnPosition);
+
+        if (useVariant3TargetedSpawn)
+        {
+            Vector3 targeted;
+            if (TryPickSpawnPositionVariant3(spawnPosition, out targeted))
+            {
+                transform.position = targeted;
+            }
+            else
+            {
+                ApplySpawnPosition(spawnPosition);
+            }
+        }
+        else
+        {
+            ApplySpawnPosition(spawnPosition);
+        }
 
         ApplySortingOrderForBeam();
         SyncChildSpriteSortPoints();
@@ -656,7 +686,9 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
 
         if (poly.Count < 3)
         {
-            transform.position = fallback;
+            Vector3 f = fallback;
+            f.x += spawnXOffset;
+            transform.position = f;
             return;
         }
 
@@ -691,7 +723,7 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
                 continue;
             }
 
-            finalPosition = new Vector3(x, y, fallback.z);
+            finalPosition = new Vector3(x + spawnXOffset, y, fallback.z);
 
             Vector3 previousPosition = transform.position;
             transform.position = finalPosition;
@@ -739,7 +771,7 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
                     continue;
                 }
 
-                finalPosition = new Vector3(x, y, fallback.z);
+                finalPosition = new Vector3(x + spawnXOffset, y, fallback.z);
                 found = true;
                 break;
             }
@@ -747,10 +779,141 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
 
         if (!found)
         {
-            finalPosition = fallback;
+            finalPosition = new Vector3(fallback.x + spawnXOffset, fallback.y, fallback.z);
         }
 
         transform.position = finalPosition;
+    }
+
+    private bool TryPickSpawnPositionVariant3(Vector3 fallback, out Vector3 picked)
+    {
+        picked = fallback;
+
+        if (Time.frameCount != lastVariant3TargetFrame)
+        {
+            variant3TargetedEnemyIdsThisFrame.Clear();
+            lastVariant3TargetFrame = Time.frameCount;
+        }
+
+        List<Vector2> poly = new List<Vector2>(6);
+        if (pointA != null) poly.Add(pointA.position);
+        if (pointB != null) poly.Add(pointB.position);
+        if (pointC != null) poly.Add(pointC.position);
+        if (pointD != null) poly.Add(pointD.position);
+        if (pointE != null) poly.Add(pointE.position);
+        if (pointF != null) poly.Add(pointF.position);
+
+        if (poly.Count < 3)
+        {
+            return false;
+        }
+
+        EnemyHealth[] enemies = Object.FindObjectsOfType<EnemyHealth>();
+        List<EnemyHealth> alive = new List<EnemyHealth>();
+        for (int i = 0; i < enemies.Length; i++)
+        {
+            EnemyHealth e = enemies[i];
+            if (e == null || !e.IsAlive)
+            {
+                continue;
+            }
+
+            if (!OffscreenDamageChecker.CanTakeDamage(e.transform.position))
+            {
+                continue;
+            }
+
+            Vector2 pos2 = e.transform.position;
+            if (!IsPointInsidePolygon(pos2, poly))
+            {
+                continue;
+            }
+
+            alive.Add(e);
+        }
+
+        if (alive.Count == 0)
+        {
+            return false;
+        }
+
+        HellBeam[] allBeams = FindObjectsOfType<HellBeam>();
+
+        List<EnemyHealth> candidates = new List<EnemyHealth>(alive.Count);
+        for (int i = 0; i < alive.Count; i++)
+        {
+            EnemyHealth e = alive[i];
+            if (e == null)
+            {
+                continue;
+            }
+
+            int id = e.gameObject.GetInstanceID();
+            if (variant3TargetedEnemyIdsThisFrame.Contains(id))
+            {
+                continue;
+            }
+
+            candidates.Add(e);
+        }
+
+        if (candidates.Count == 0)
+        {
+            candidates = alive;
+        }
+
+        int attempts = Mathf.Min(12, candidates.Count);
+        for (int attempt = 0; attempt < attempts; attempt++)
+        {
+            int pickIndex = Random.Range(0, candidates.Count);
+            EnemyHealth chosen = candidates[pickIndex];
+            candidates.RemoveAt(pickIndex);
+
+            if (chosen == null)
+            {
+                continue;
+            }
+
+            int id = chosen.gameObject.GetInstanceID();
+
+            Vector3 candidate = chosen.transform.position;
+            candidate.z = fallback.z;
+            candidate.x += spawnXOffset;
+
+            Vector3 previousPosition = transform.position;
+            transform.position = candidate;
+
+            bool overlapsOtherBeam = false;
+            Bounds myBounds = GetWorldSpriteBounds();
+            for (int i = 0; i < allBeams.Length; i++)
+            {
+                HellBeam other = allBeams[i];
+                if (other == null || other == this)
+                {
+                    continue;
+                }
+
+                Bounds otherBounds = other.GetWorldSpriteBounds();
+                if (myBounds.Intersects(otherBounds))
+                {
+                    overlapsOtherBeam = true;
+                    break;
+                }
+            }
+
+            transform.position = previousPosition;
+
+            if (overlapsOtherBeam)
+            {
+                continue;
+            }
+
+            variant3TargetedEnemyIdsThisFrame.Add(id);
+            picked = candidate;
+            return true;
+        }
+
+        return false;
     }
 
     private Bounds GetWorldSpriteBounds()

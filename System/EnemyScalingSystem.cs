@@ -17,8 +17,11 @@ public class EnemyScalingSystem : MonoBehaviour
     [Tooltip("Extra HEALTH increase percentage added on top of HealthIncreasePercent for each successive tier (0 = flat).")]
     [SerializeField] private float additionalHealthIncreasePercent = 0f;
 
-    [Tooltip("Per-boss overrides for AdditionalHealthIncreasePercent. Element 0 = after 1st boss, 1 = after 2nd boss, etc.")]
-    public float[] postBossAdditionalHealthIncreasePercents;
+    [Tooltip("Additional HEALTH increase percentage that is added each time a new enemy wave is reached (EnemySpawner) or a new enemy card is chosen (EnemyCardSpawner).")]
+    public float PerWaveHealthIncrease = 0f;
+
+    [Tooltip("Optional: Per-wave HEALTH increase values for successive wave steps. Element 0 applies to the first step, element 1 to the next, etc. If steps exceed the array length, the last element repeats. When empty, the single PerWaveHealthIncrease value is used.")]
+    public float[] PerWaveHealthIncreaseByWave = new float[0];
 
     [Tooltip("If true, apply multiplicative (compounding) scaling to HEALTH each tier (x1.05, x1.05, ...). If false, use additive scaling (x1.0, x1.05, x1.10, ...).")]
     [SerializeField] private bool useHealthMultiplicativeScaling = true;
@@ -70,6 +73,8 @@ public class EnemyScalingSystem : MonoBehaviour
     // Number of completed boss events this run (used to stack the global flat
     // spawn-interval reduction when GlobalEnemySpawnerIntervalReduction > 0).
     private int completedBossEvents = 0;
+
+    private int perWaveHealthIncreaseSteps = 0;
     
     private float timeSinceLastScale = 0f;
     private int scalingTier = 0;
@@ -105,7 +110,7 @@ public class EnemyScalingSystem : MonoBehaviour
             // Increase multipliers by the percentage for this tier.
             // Health uses a ramping step: base + additional * tierIndex.
             int tierIndex = Mathf.Max(0, scalingTier - 1);
-            float phaseAdditionalHealthPercent = GetAdditionalHealthIncreasePercentForPhase(completedBossEvents);
+            float phaseAdditionalHealthPercent = GetAdditionalHealthIncreasePercentForCurrentScaling();
             float effectiveHealthPercent = healthIncreasePercent + phaseAdditionalHealthPercent * tierIndex;
             float healthStep = effectiveHealthPercent / 100f;
             float expStep = expIncreasePercent / 100f;
@@ -263,6 +268,11 @@ public class EnemyScalingSystem : MonoBehaviour
         completedBossEvents = Mathf.Max(0, completedBossEvents + 1);
         Debug.Log($"<color=yellow>EnemyScalingSystem: Boss event completed. Global flat spawn interval reduction active: {GetGlobalSpawnIntervalFlatReductionTotal():F2}s</color>");
     }
+
+    public void RegisterPerWaveHealthIncreaseStep()
+    {
+        perWaveHealthIncreaseSteps = Mathf.Max(0, perWaveHealthIncreaseSteps + 1);
+    }
     
     /// <summary>
     /// Reset scaling (for new game or testing)
@@ -277,6 +287,7 @@ public class EnemyScalingSystem : MonoBehaviour
         currentDamageMultiplier = 1f;
         currentSpawnIntervalFlatReduction = 0f;
         completedBossEvents = 0;
+        perWaveHealthIncreaseSteps = 0;
         isPaused = false;
         scalingTier = 0;
         timeSinceLastScale = 0f;
@@ -331,7 +342,7 @@ public class EnemyScalingSystem : MonoBehaviour
         }
 
         int tierIndex = Mathf.Max(0, scalingTier - 1);
-        float phaseAdditionalHealthPercent = GetAdditionalHealthIncreasePercentForPhase(completedBossEvents + 1);
+        float phaseAdditionalHealthPercent = GetAdditionalHealthIncreasePercentForCurrentScaling();
         float effectiveHealthPercent = healthIncreasePercent + phaseAdditionalHealthPercent * tierIndex;
         float healthStep = effectiveHealthPercent / 100f;
 
@@ -353,28 +364,24 @@ public class EnemyScalingSystem : MonoBehaviour
         Debug.Log($"<color=yellow>EnemyScalingSystem: Applied BonusHealthIncreaseAfterBoss={BonusHealthIncreaseAfterBoss} using effectiveHealthPercent={effectiveHealthPercent:F2}% (tierIndex={tierIndex}). New total HealthMult={GetHealthMultiplier():F2}</color>");
     }
 
-    private float GetAdditionalHealthIncreasePercentForPhase(int phaseIndex)
+    private float GetAdditionalHealthIncreasePercentForCurrentScaling()
     {
-        // phaseIndex 0 = before first boss (use base additionalHealthIncreasePercent)
-        // phaseIndex 1 = after first boss (use element 0), 2 = after second boss (element 1), etc.
-        if (phaseIndex <= 0)
+        float basePercent = additionalHealthIncreasePercent;
+        float perWavePercent = 0f;
+        int steps = Mathf.Max(0, perWaveHealthIncreaseSteps);
+        if (PerWaveHealthIncreaseByWave != null && PerWaveHealthIncreaseByWave.Length > 0)
         {
-            return additionalHealthIncreasePercent;
+            int lastIndex = PerWaveHealthIncreaseByWave.Length - 1;
+            for (int i = 0; i < steps; i++)
+            {
+                int index = Mathf.Min(i, lastIndex);
+                perWavePercent += Mathf.Max(0f, PerWaveHealthIncreaseByWave[index]);
+            }
         }
-
-        int idx = phaseIndex - 1;
-
-        if (postBossAdditionalHealthIncreasePercents == null || postBossAdditionalHealthIncreasePercents.Length == 0)
+        else
         {
-            return 0f;
+            perWavePercent = Mathf.Max(0f, PerWaveHealthIncrease) * steps;
         }
-
-        if (idx < postBossAdditionalHealthIncreasePercents.Length)
-        {
-            return postBossAdditionalHealthIncreasePercents[idx];
-        }
-
-        // If there are more boss phases than configured entries, reuse the last value.
-        return postBossAdditionalHealthIncreasePercents[postBossAdditionalHealthIncreasePercents.Length - 1];
+        return basePercent + perWavePercent;
     }
 }

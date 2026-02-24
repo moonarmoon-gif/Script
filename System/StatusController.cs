@@ -1331,7 +1331,7 @@ public class StatusController : MonoBehaviour
                 float resolved = StatusDamageScope.LastResolvedDamage;
                 StatusDamageScope.EndStatusTick();
 
-                if (DamageNumberManager.Instance != null && resolved > 0f)
+                if (DamageNumberManager.Instance != null && resolved > 0f && !EnemyDamagePopupScope.SuppressPopups)
                 {
                     DamageNumberManager.Instance.ShowDamage(resolved, anchor, DamageNumberManager.DamageType.Fire, isCrit, true);
                 }
@@ -1375,7 +1375,7 @@ public class StatusController : MonoBehaviour
                     StatusDamageScope.BeginStatusTick(DamageNumberManager.DamageType.Poison, true);
                     damageable.TakeDamage(poisonDamage, anchor, Vector3.zero);
                     float resolved = StatusDamageScope.LastResolvedDamage;
-                    if (DamageNumberManager.Instance != null && resolved > 0f)
+                    if (DamageNumberManager.Instance != null && resolved > 0f && !EnemyDamagePopupScope.SuppressPopups)
                     {
                         DamageNumberManager.Instance.ShowDamage(resolved, anchor, DamageNumberManager.DamageType.Poison, false, true);
                     }
@@ -1487,6 +1487,12 @@ public class StatusController : MonoBehaviour
                 effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
             }
         }
+
+        ProjectileStatusChanceAdditiveBonus additiveBonus = projectile.GetComponent<ProjectileStatusChanceAdditiveBonus>();
+        if (additiveBonus != null)
+        {
+            effectiveChance += Mathf.Max(0f, additiveBonus.burnBonusPercent);
+        }
         effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
 
         if (!forceApply)
@@ -1547,7 +1553,10 @@ public class StatusController : MonoBehaviour
         if (DamageNumberManager.Instance != null)
         {
             Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(ownerGO, ownerGO.transform.position);
-            DamageNumberManager.Instance.ShowBurn(anchor);
+            if (!EnemyDamagePopupScope.SuppressPopups)
+            {
+                DamageNumberManager.Instance.ShowBurn(anchor);
+            }
         }
 
         return true;
@@ -1616,6 +1625,11 @@ public class StatusController : MonoBehaviour
     private void ShowStatusApplied(StatusId id)
     {
         if (DamageNumberManager.Instance == null)
+        {
+            return;
+        }
+
+        if (EnemyDamagePopupScope.SuppressPopups)
         {
             return;
         }
@@ -2204,7 +2218,7 @@ public class StatusController : MonoBehaviour
             float resolved = StatusDamageScope.LastResolvedDamage;
             StatusDamageScope.EndStatusTick();
 
-            if (DamageNumberManager.Instance != null && resolved > 0f)
+            if (DamageNumberManager.Instance != null && resolved > 0f && !EnemyDamagePopupScope.SuppressPopups)
             {
                 DamageNumberManager.Instance.ShowDamage(resolved, pos, DamageNumberManager.DamageType.Fire, isCrit, true);
             }

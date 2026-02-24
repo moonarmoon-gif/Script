@@ -12,6 +12,7 @@ public class StatusIcon : MonoBehaviour
         public RectTransform iconRoot;
         public TextMeshProUGUI stackText;
         public bool showStackText;
+        public Vector3 baseScale;
     }
 
     [SerializeField] private RectTransform iconsContainer;
@@ -54,6 +55,9 @@ public class StatusIcon : MonoBehaviour
         StatusController statusController = GetPlayerStatusController();
         if (statusController == null) return;
 
+        PlayerStats playerStats = statusController.GetComponent<PlayerStats>();
+        FavourEffectManager favourManager = statusController.GetComponent<FavourEffectManager>();
+
         int hash = 17;
         int activeCount = 0;
 
@@ -62,7 +66,49 @@ public class StatusIcon : MonoBehaviour
             StatusIconBinding binding = statusIcons[i];
             if (binding == null || binding.iconRoot == null) continue;
 
-            int stacks = statusController.GetStacks(binding.statusId);
+            int stacks;
+            if (binding.statusId == StatusId.Armor && playerStats != null)
+            {
+                stacks = Mathf.RoundToInt(Mathf.Max(0f, playerStats.armor));
+            }
+            else if (binding.statusId == StatusId.Shield)
+            {
+                float totalShield = 0f;
+
+                totalShield += Mathf.Max(0f, statusController.GetShieldAmount());
+
+                if (HolyShield.ActiveShield != null && HolyShield.ActiveShield.IsAlive)
+                {
+                    totalShield += Mathf.Max(0f, HolyShield.ActiveShield.GetCurrentHealthForUI());
+                }
+
+                if (favourManager != null)
+                {
+                    totalShield += Mathf.Max(0f, favourManager.GetTotalShieldHealthForUI());
+                }
+
+                stacks = Mathf.RoundToInt(Mathf.Max(0f, totalShield));
+            }
+            else if (binding.statusId == StatusId.Reflect)
+            {
+                stacks = Mathf.Max(0, statusController.GetStacks(StatusId.Reflect));
+                if (ReflectShield.ActiveShield != null && ReflectShield.ActiveShield.IsAlive)
+                {
+                    stacks += Mathf.Max(0, ReflectShield.ActiveShield.ChargesCurrent);
+                }
+            }
+            else if (binding.statusId == StatusId.Nullify)
+            {
+                stacks = Mathf.Max(0, statusController.GetStacks(StatusId.Nullify));
+                if (NullifyShield.ActiveShield != null && NullifyShield.ActiveShield.IsAlive)
+                {
+                    stacks += Mathf.Max(0, NullifyShield.ActiveShield.ChargesCurrent);
+                }
+            }
+            else
+            {
+                stacks = statusController.GetStacks(binding.statusId);
+            }
             bool active = stacks > 0;
 
             if (binding.iconRoot.gameObject.activeSelf != active)
@@ -128,6 +174,11 @@ public class StatusIcon : MonoBehaviour
             {
                 binding.stackText = binding.iconRoot.GetComponentInChildren<TextMeshProUGUI>(true);
             }
+
+            if (binding.baseScale == Vector3.zero)
+            {
+                binding.baseScale = binding.iconRoot.localScale;
+            }
         }
 
         List<RectTransform> scanRoots = new List<RectTransform>(2);
@@ -160,6 +211,7 @@ public class StatusIcon : MonoBehaviour
                     iconRoot = child,
                     stackText = stackText,
                     showStackText = stackText != null,
+                    baseScale = child.localScale,
                 });
                 existingRoots.Add(child);
             }
@@ -280,8 +332,9 @@ public class StatusIcon : MonoBehaviour
         {
             StatusIconBinding binding = statusIcons[i];
             if (binding == null || binding.iconRoot == null || !binding.iconRoot.gameObject.activeSelf) continue;
-            totalWidth += binding.iconRoot.rect.width;
-            maxHeight = Mathf.Max(maxHeight, binding.iconRoot.rect.height);
+            Vector3 baseScale = binding.baseScale == Vector3.zero ? Vector3.one : binding.baseScale;
+            totalWidth += binding.iconRoot.rect.width * Mathf.Abs(baseScale.x);
+            maxHeight = Mathf.Max(maxHeight, binding.iconRoot.rect.height * Mathf.Abs(baseScale.y));
         }
 
         totalWidth += Mathf.Max(0, activeCount - 1) * Mathf.Max(0f, iconSpacing);
@@ -308,6 +361,7 @@ public class StatusIcon : MonoBehaviour
             if (binding == null || binding.iconRoot == null || !binding.iconRoot.gameObject.activeSelf) continue;
 
             RectTransform rt = binding.iconRoot;
+            Vector3 baseScale = binding.baseScale == Vector3.zero ? Vector3.one : binding.baseScale;
 
             if (rt.anchorMin.x != 0f || rt.anchorMax.x != 0f || rt.anchorMin.y != 0.5f || rt.anchorMax.y != 0.5f)
             {
@@ -315,8 +369,8 @@ public class StatusIcon : MonoBehaviour
                 a = rt.anchorMax; a.x = 0f; a.y = 0.5f; rt.anchorMax = a;
             }
 
-            rt.localScale = new Vector3(scale, scale, 1f);
-            float w = rt.rect.width * scale;
+            rt.localScale = new Vector3(baseScale.x * scale, baseScale.y * scale, baseScale.z);
+            float w = rt.rect.width * Mathf.Abs(baseScale.x) * scale;
             float pivotX = rt.pivot.x;
             Vector2 pos = rt.anchoredPosition;
             pos.x = x + w * pivotX;

@@ -116,14 +116,17 @@ public class MinCooldownManager : MonoBehaviour
                 ? ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card)
                 : 0;
 
+            bool hasVariant1 = ProjectileCardLevelSystem.Instance != null && ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
             bool hasVariant2 = ProjectileCardLevelSystem.Instance != null && ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
+            bool hasVariant3 = ProjectileCardLevelSystem.Instance != null && ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
+            bool isVariant13Active = hasVariant1 && hasVariant3;
 
             if (hasVariant2 || enhancedVariant == 2)
             {
                 return ThunderBirdV2;
             }
 
-            if (enhancedVariant == 1)
+            if (enhancedVariant == 1 || isVariant13Active)
             {
                 return ThunderBirdV1;
             }

@@ -46,6 +46,9 @@ public class OrbitalStarManager : MonoBehaviour
 
     [Tooltip("Radius for Level 6 orbit (largest)")]
     public float level6Radius = 18f;
+
+    [Header("Enhanced Variant 3 - Scaling")]
+    public float NewScale = 1.25f;
     
     [Header("Synchronized Spawning Mode")]
     [Tooltip("When enabled: Spawn one star at each level 1-6 sequentially (not odd/even batches). Works for single enhanced star or both synchronized.")]
@@ -154,6 +157,8 @@ public class OrbitalStarManager : MonoBehaviour
     private bool novaHasVariant2Stack = false; // NV2 (reverse sequential)
     private bool dwarfHasVariant1Stack = false; // DV1 (sequential)
     private bool dwarfHasVariant2Stack = false; // DV2 (reverse sequential)
+    private bool novaHasVariant3Stack = false; // NV3 (scale)
+    private bool dwarfHasVariant3Stack = false; // DV3 (scale)
     private bool novaStarSpawnOddLevels = true; // NovaStar: True = spawn odd (1,3,5), False = spawn even (2,4,6)
     private bool dwarfStarSpawnOddLevels = true; // DwarfStar: True = spawn odd (1,3,5), False = spawn even (2,4,6)
     
@@ -598,6 +603,8 @@ public class OrbitalStarManager : MonoBehaviour
         if (!synchronizeSpawns) return false;
         if (!isNovaStarEnhanced || !isDwarfStarEnhanced) return false;
 
+        if (novaVariantIndex == 3 || dwarfVariantIndex == 3) return false;
+
         if (!novaHasVariant1Stack || !novaHasVariant2Stack) return false;
         if (!dwarfHasVariant1Stack || !dwarfHasVariant2Stack) return false;
 
@@ -635,6 +642,10 @@ public class OrbitalStarManager : MonoBehaviour
                 {
                     novaHasVariant2Stack = true;
                 }
+                else if (variant == 3)
+                {
+                    novaHasVariant3Stack = true;
+                }
                 Debug.Log($"<color=orange>NovaStar Enhanced Status: {isNovaStarEnhanced} (Variant {variant})</color>");
             }
         }
@@ -656,6 +667,10 @@ public class OrbitalStarManager : MonoBehaviour
                 else if (variant == 2)
                 {
                     dwarfHasVariant2Stack = true;
+                }
+                else if (variant == 3)
+                {
+                    dwarfHasVariant3Stack = true;
                 }
                 Debug.Log($"<color=cyan>DwarfStar Enhanced Status: {isDwarfStarEnhanced} (Variant {variant})</color>");
             }
@@ -1162,7 +1177,7 @@ public class OrbitalStarManager : MonoBehaviour
             //   - Nova has both variants in its history, AND
             //   - sync is currently OFF, AND
             //   - DwarfStar is NOT enhanced.
-            bool novaSeqRevStacked = novaHasVariant1Stack && novaHasVariant2Stack && !megaSync;
+            bool novaSeqRevStacked = novaHasVariant1Stack && novaHasVariant2Stack && !megaSync && novaVariantIndex != 3;
 
             if (novaSeqRevStacked)
             {
@@ -1299,8 +1314,8 @@ public class OrbitalStarManager : MonoBehaviour
                     dwarfStarsActiveCount = 0;
 
                     // Spawn BOTH stars at current level
-                    SpawnNovaStarAtLevel(currentSequentialLevel, 0);
-                    SpawnDwarfStarAtLevel(currentSequentialLevel, 0);
+                    SpawnSingleNovaStarAtLevel(currentSequentialLevel, 0);
+                    SpawnSingleDwarfStarAtLevel(currentSequentialLevel, 0);
 
                     Debug.Log($"<color=gold>SYNCHRONIZED: Both stars spawned at Level {currentSequentialLevel}</color>");
 
@@ -1473,8 +1488,8 @@ public class OrbitalStarManager : MonoBehaviour
                     dwarfStarsActiveCount = 0;
                     
                     // Spawn BOTH stars at current level with REVERSE speed calculation
-                    SpawnNovaStarAtLevelReverse(currentReverseSequentialLevel, 0);
-                    SpawnDwarfStarAtLevelReverse(currentReverseSequentialLevel, 0);
+                    SpawnSingleNovaStarAtLevelReverse(currentReverseSequentialLevel, 0);
+                    SpawnSingleDwarfStarAtLevelReverse(currentReverseSequentialLevel, 0);
                     
                     Debug.Log($"<color=magenta>SYNCHRONIZED: Both stars spawned at Level {currentReverseSequentialLevel}</color>");
                     
@@ -1790,7 +1805,7 @@ public class OrbitalStarManager : MonoBehaviour
             // independent DwarfStars per step: one using the forward sequential
             // levels (1→2→3) and one using the reverse sequential levels
             // (6→5→4), sharing the same modifiers.
-            bool dwarfSeqRevStacked = dwarfHasVariant1Stack && dwarfHasVariant2Stack && !megaSyncActive;
+            bool dwarfSeqRevStacked = dwarfHasVariant1Stack && dwarfHasVariant2Stack && !megaSyncActive && dwarfVariantIndex != 3;
 
             if (dwarfSeqRevStacked)
             {
@@ -2478,12 +2493,6 @@ public class OrbitalStarManager : MonoBehaviour
                 novaStar.damageRadius = baseDamageRadius;
                 Debug.Log($"<color=orange>NovaStar: Using base damageRadius={baseDamageRadius:F2}; shared modifier +{modifiers.damageRadiusIncrease:F2} will be applied in Initialize</color>");
             }
-            
-            if (modifiers.sizeMultiplier != 1f)
-            {
-                starObj.transform.localScale *= modifiers.sizeMultiplier;
-                Debug.Log($"<color=orange>NovaStar: Applied size modifier {modifiers.sizeMultiplier:F2}x</color>");
-            }
         }
         else if (dwarfStar != null)
         {
@@ -2503,12 +2512,6 @@ public class OrbitalStarManager : MonoBehaviour
                 float baseDamageRadius = dwarfStar.damageRadius;
                 dwarfStar.damageRadius = baseDamageRadius;
                 Debug.Log($"<color=cyan>DwarfStar: Using base damageRadius={baseDamageRadius:F2}; shared modifier +{modifiers.damageRadiusIncrease:F2} will be applied in Initialize</color>");
-            }
-            
-            if (modifiers.sizeMultiplier != 1f)
-            {
-                starObj.transform.localScale *= modifiers.sizeMultiplier;
-                Debug.Log($"<color=cyan>DwarfStar: Applied size modifier {modifiers.sizeMultiplier:F2}x</color>");
             }
         }
         

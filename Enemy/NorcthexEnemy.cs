@@ -287,6 +287,8 @@ public class NorcthexEnemy : MonoBehaviour
         health = GetComponent<EnemyHealth>();
         statusController = GetComponent<StatusController>();
 
+        projectileDamage = attackDamage;
+
         if (capsuleCollider != null)
         {
             capsuleCollider.isTrigger = false;
@@ -1605,6 +1607,7 @@ public class NorcthexEnemy : MonoBehaviour
     {
         if (multiplier <= 0f) return;
         attackDamage *= multiplier;
+        projectileDamage = attackDamage;
     }
 
     private Vector3 EnsureNotSameTeleportPosition(Vector3 newPos, Vector3 fallbackReference)

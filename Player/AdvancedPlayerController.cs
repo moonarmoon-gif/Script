@@ -293,7 +293,10 @@ public class AdvancedPlayerController : MonoBehaviour
         {
             if (!IsPointerOverUI())
             {
-                FireProjectile();
+                if (!RuntimeProjectileRadiusGizmoManager.WasClickHandledThisFrame)
+                {
+                    FireProjectile();
+                }
             }
         }
 
@@ -544,7 +547,7 @@ public class AdvancedPlayerController : MonoBehaviour
             return;
         }
 
-        Vector2 screenPos = Mouse.current.position.ReadValue();
+        Vector2 screenPos = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
         FireProjectileAtScreenPosition(screenPos);
     }
 
@@ -555,13 +558,23 @@ public class AdvancedPlayerController : MonoBehaviour
             return;
         }
 
+        if (!RuntimeProjectileRadiusGizmoManager.WasClickHandledThisFrame)
+        {
+            if (RuntimeProjectileRadiusGizmoManager.TryHandleClick(screenPosition))
+            {
+                return;
+            }
+        }
+        else
+        {
+            return;
+        }
+
         if (GameStateManager.PauseSafeTime - lastFireTime < minFireInterval)
         {
             Debug.Log($"<color=orange>FireProjectile blocked: Too soon! {GameStateManager.PauseSafeTime - lastFireTime:F3}s < {minFireInterval}s</color>");
             return;
         }
-
-        lastFireTime = GameStateManager.PauseSafeTime;
 
         Transform spawnFirePoint = ActiveFirePoint;
 
@@ -584,10 +597,13 @@ public class AdvancedPlayerController : MonoBehaviour
             return;
         }
 
+        lastFireTime = GameStateManager.PauseSafeTime;
+
         Vector3 spawnPosition = spawnFirePoint.position;
         Vector2 spawnOffset = Vector2.zero;
         PlayerProjectiles prefabScript = prefabToUse.GetComponent<PlayerProjectiles>();
         FireBall prefabFireBall = prefabToUse.GetComponent<FireBall>();
+        ThunderDisc prefabThunderDisc = prefabToUse.GetComponent<ThunderDisc>();
         if (prefabScript != null)
         {
             spawnOffset = prefabScript.GetSpawnOffset(fireDirection);
@@ -597,6 +613,12 @@ public class AdvancedPlayerController : MonoBehaviour
         else if (prefabFireBall != null)
         {
             spawnOffset = prefabFireBall.GetSpawnOffset(fireDirection);
+            spawnPosition += (Vector3)spawnOffset;
+            Debug.Log($"<color=cyan>Manual Fire: Applied spawn offset {spawnOffset} before instantiation</color>");
+        }
+        else if (prefabThunderDisc != null)
+        {
+            spawnOffset = prefabThunderDisc.GetSpawnOffset(fireDirection);
             spawnPosition += (Vector3)spawnOffset;
             Debug.Log($"<color=cyan>Manual Fire: Applied spawn offset {spawnOffset} before instantiation</color>");
         }
@@ -617,6 +639,7 @@ public class AdvancedPlayerController : MonoBehaviour
         FireBall fireBall = projectileObj.GetComponent<FireBall>();
         ProjectileFireTalon fireTalon = projectileObj.GetComponent<ProjectileFireTalon>();
         ProjectileIceTalon iceTalon = projectileObj.GetComponent<ProjectileIceTalon>();
+        ThunderDisc thunderDisc = projectileObj.GetComponent<ThunderDisc>();
 
         if (projectile != null)
         {
@@ -637,6 +660,10 @@ public class AdvancedPlayerController : MonoBehaviour
             Vector2 talonOffset = iceTalon.GetSpawnOffset(fireDirection);
             projectileObj.transform.position += (Vector3)talonOffset;
             iceTalon.Launch(fireDirection, playerCollider, playerMana);
+        }
+        else if (thunderDisc != null)
+        {
+            thunderDisc.Launch(fireDirection, playerCollider, playerMana);
         }
         else
         {
@@ -959,6 +986,7 @@ public class AdvancedPlayerController : MonoBehaviour
         Vector2 spawnOffset = Vector2.zero;
         PlayerProjectiles prefabScript = prefab.GetComponent<PlayerProjectiles>();
         FireBall prefabFireBall = prefab.GetComponent<FireBall>();
+        ThunderDisc prefabThunderDisc = prefab.GetComponent<ThunderDisc>();
         if (prefabScript != null)
         {
             spawnOffset = prefabScript.GetSpawnOffset(direction);
@@ -967,6 +995,11 @@ public class AdvancedPlayerController : MonoBehaviour
         else if (prefabFireBall != null)
         {
             spawnOffset = prefabFireBall.GetSpawnOffset(direction);
+            spawnPosition += (Vector3)spawnOffset;
+        }
+        else if (prefabThunderDisc != null)
+        {
+            spawnOffset = prefabThunderDisc.GetSpawnOffset(direction);
             spawnPosition += (Vector3)spawnOffset;
         }
 
@@ -986,6 +1019,7 @@ public class AdvancedPlayerController : MonoBehaviour
         FireBall fireBall = projectileObj.GetComponent<FireBall>();
         ProjectileFireTalon fireTalon = projectileObj.GetComponent<ProjectileFireTalon>();
         ProjectileIceTalon iceTalon = projectileObj.GetComponent<ProjectileIceTalon>();
+        ThunderDisc thunderDisc = projectileObj.GetComponent<ThunderDisc>();
 
         if (projectile != null)
         {
@@ -1008,6 +1042,10 @@ public class AdvancedPlayerController : MonoBehaviour
             Vector2 talonOffset = iceTalon.GetSpawnOffset(direction);
             projectileObj.transform.position += (Vector3)talonOffset;
             iceTalon.Launch(direction, playerCollider, playerMana);
+        }
+        else if (thunderDisc != null)
+        {
+            thunderDisc.Launch(direction, playerCollider, playerMana);
         }
         else
         {

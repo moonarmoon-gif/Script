@@ -294,6 +294,7 @@ public class GameStateManager : MonoBehaviour
         playerIsDead = false;
         activeProjectiles.Clear();
         SetAllEnemiesImmuneToPlayerDeath(false);
+        RuntimeProjectileRadiusGizmoManager.ResetGlobalStarGizmoState();
 
         GameObject player = null;
         if (AdvancedPlayerController.Instance != null)

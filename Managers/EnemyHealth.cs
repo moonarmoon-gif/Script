@@ -125,9 +125,17 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         LastHitWasExecute = false;
         LastHitExecutePopupShown = false;
 
-        if (amount < 0f || !IsAlive) return;
-
         bool isStatusTickLocal = StatusDamageScope.IsStatusTick;
+
+        if (amount < 0f || !IsAlive)
+        {
+            if (isStatusTickLocal)
+            {
+                StatusDamageScope.LastResolvedDamage = 0f;
+            }
+            return;
+        }
+
         bool hadIncomingDamage = amount > 0f || !isStatusTickLocal;
 
         // Check if player is dead - enemies are immune

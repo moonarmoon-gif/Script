@@ -162,6 +162,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     [Tooltip("Base cooldown for Enhanced Variant 1 (seconds)")]
     public float variant1BaseCooldown = 8f;
 
+    [Range(0f, 1f)]
     public float variant1BurnSlowChance = 0.5f;
 
     [Header("Enhanced Variant 1+2 - Rotating Smart Beam")]
@@ -235,6 +236,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     private Vector3 spawnOffsetWorld = Vector3.zero; // Store the world-space offset calculated in Launch()
     private Transform firePointTransform = null; // Store the firepoint TRANSFORM reference (NOT just position!)
     private bool isVariant12Stacked = false;
+    private bool isVariant12RotationStacked = false;
     private bool variant12RotationEnabled = false;
     private float variant12RotationStartTime = 0f;
 
@@ -392,6 +394,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         if (_collider2D != null)
         {
             _collider2D.isTrigger = true;
+            ColliderScaler.ScaleColliderXOnly(_collider2D, 1f, colliderSizeOffset);
         }
 
         // Initialize animator booleans to false
@@ -500,6 +503,20 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             }
         }
 
+        if (!doRotate && isVariant12RotationStacked)
+        {
+            if (!variant12RotationEnabled && GameStateManager.PauseSafeTime >= variant12RotationStartTime)
+            {
+                variant12RotationEnabled = true;
+            }
+
+            if (variant12RotationEnabled)
+            {
+                doRotate = true;
+                rotationSpeed = enhancedV1And2RotationSpeed;
+            }
+        }
+
         if (doRotate)
         {
             currentRotation += rotationSpeed * rotationDirection * GameStateManager.GetPauseSafeDeltaTime();
@@ -529,8 +546,10 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         bool isStackedVariant13 = false;
         bool isStackedVariant23 = false;
         bool isStackedVariant12 = false;
+        bool isStackedVariant123 = false;
         int uiEnhancedVariant = 0;
         isVariant12Stacked = false;
+        isVariant12RotationStacked = false;
 
         if (card != null)
         {
@@ -576,7 +595,9 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             isStackedVariant13 = hasVariant1 && hasVariant3;
             isStackedVariant23 = hasVariant2 && hasVariant3;
             isStackedVariant12 = hasVariant1 && hasVariant2 && !hasVariant3;
+            isStackedVariant123 = hasVariant1 && hasVariant2 && hasVariant3;
             isVariant12Stacked = false;
+            isVariant12RotationStacked = false;
 
             hasVariant1History = hasVariant1;
             hasVariant2History = hasVariant2;
@@ -588,6 +609,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             if (isStackedVariant23)
             {
                 enhancedVariant = 2;
+                isVariant12RotationStacked = isStackedVariant123;
                 Debug.Log($"<color=magenta>ElementalBeam ({card.cardName}) STACKED Variant 2+3 active: using Variant 2 behaviour.</color>");
             }
             else if (isStackedVariant13)
@@ -609,6 +631,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 // unique cooldown and rotation rules further below.
                 enhancedVariant = 2;
                 isVariant12Stacked = true;
+                isVariant12RotationStacked = true;
                 Debug.Log($"<color=magenta>ElementalBeam ({card.cardName}) STACKED Variant 1+2 active: using Variant 2 behaviour with V1 cooldown and rotation. (UI={uiEnhancedVariant})</color>");
             }
 
@@ -748,16 +771,13 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         if (hasVariant1)
         {
             float burnSlowPercent = Mathf.Clamp01(variant1BurnSlowChance) * 100f;
-
-            if (beamBurn != null)
+            ProjectileStatusChanceAdditiveBonus additive = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+            if (additive == null)
             {
-                beamBurn.burnChance = burnSlowPercent;
+                additive = gameObject.AddComponent<ProjectileStatusChanceAdditiveBonus>();
             }
-
-            if (beamSlow != null)
-            {
-                beamSlow.slowChance = burnSlowPercent;
-            }
+            additive.burnBonusPercent = burnSlowPercent;
+            additive.slowBonusPercent = burnSlowPercent;
         }
 
         // Compute final lifetime and cooldown after card modifiers.
@@ -819,7 +839,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         // STACKED Variant 1+2: compute when rotation should begin. We treat the
         // "core" lifetime as excluding the startup delay and end duration.
-        if (isVariant12Stacked)
+        if (isVariant12Stacked || isVariant12RotationStacked)
         {
             float coreLifetime = Mathf.Max(0f, finalLifetime - finalBeamStartDelay - finalBeamEndDuration);
             float fraction = Mathf.Clamp01(variant12RotationStartFraction);
@@ -873,9 +893,6 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         {
             sizeModifierMultiplier = modifiers.sizeMultiplier;
             Debug.Log($"<color=cyan>Size multiplier stored: {sizeModifierMultiplier:F2}</color>");
-
-            // Scale collider X-only using utility with colliderSizeOffset
-            ColliderScaler.ScaleColliderXOnly(_collider2D, modifiers.sizeMultiplier, colliderSizeOffset);
         }
 
         Debug.Log($"<color=lime>Scale multipliers set - Variant2: {variant2ScaleMultiplier:F3}, SizeModifier: {sizeModifierMultiplier:F2}</color>");
@@ -930,14 +947,6 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     Destroy(gameObject);
                     return;
                 }
-            }
-
-            // Check mana with modified cost
-            if (playerMana != null && !playerMana.Spend(finalManaCost))
-            {
-                Debug.Log($"Not enough mana for ElementalBeam (cost: {finalManaCost})");
-                Destroy(gameObject);
-                return;
             }
 
             // Record fire time for this projectile type
@@ -1307,7 +1316,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 Debug.Log($"<color=gold>Enhanced Beam V1: Fired LEFT → rotating RIGHT (CW, -1) at {enhancedRotationSpeed} deg/sec</color>");
             }
         }
-        else if (isVariant12Stacked)
+        else if (isVariant12Stacked || isVariant12RotationStacked)
         {
             // STACKED Variant 1+2: start rotation from the SAME sprite
             // orientation used when the beam first fired (finalAngle), so the
@@ -1318,16 +1327,13 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             //  - Fired LEFT   → rotate RIGHT (clockwise, -1)
             currentRotation = finalAngle;
 
-            if (firingRight)
+            float baseDirection = firingRight ? 1f : -1f;
+            if (projectileType == ProjectileType.Ice)
             {
-                rotationDirection = 1f; // CCW = left
-                Debug.Log($"<color=gold>STACKED 1+2: Fired RIGHT → rotating LEFT (CCW, +1) at {enhancedV1And2RotationSpeed} deg/sec</color>");
+                baseDirection *= -1f;
             }
-            else
-            {
-                rotationDirection = -1f; // CW = right
-                Debug.Log($"<color=gold>STACKED 1+2: Fired LEFT → rotating RIGHT (CW, -1) at {enhancedV1And2RotationSpeed} deg/sec</color>");
-            }
+
+            rotationDirection = baseDirection;
         }
 
         // Calculate damage interval using variant-specific damage instances
@@ -2990,9 +2996,17 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             return;
         }
 
+        EnemyCardSpawner cardSpawner = Object.FindObjectOfType<EnemyCardSpawner>();
+        EnemySpawner enemySpawner = Object.FindObjectOfType<EnemySpawner>();
+        if ((cardSpawner != null && cardSpawner.IsBossEventActive) || (enemySpawner != null && enemySpawner.IsBossEventActive))
+        {
+            return;
+        }
+
         Vector3 spawnPos = playerPosition != default(Vector3) ? playerPosition : transform.position;
 
         GameObject beamObj = Instantiate(card.projectilePrefab, spawnPos, Quaternion.identity);
+        beamObj.tag = "Projectile";
 
         if (ProjectileCardModifiers.Instance != null)
         {
@@ -3016,9 +3030,17 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             return;
         }
 
+        EnemyCardSpawner cardSpawner = Object.FindObjectOfType<EnemyCardSpawner>();
+        EnemySpawner enemySpawner = Object.FindObjectOfType<EnemySpawner>();
+        if ((cardSpawner != null && cardSpawner.IsBossEventActive) || (enemySpawner != null && enemySpawner.IsBossEventActive))
+        {
+            return;
+        }
+
         Vector3 spawnPos = playerPosition != default(Vector3) ? playerPosition : transform.position;
 
         GameObject beamObj = Instantiate(card.projectilePrefab, spawnPos, Quaternion.identity);
+        beamObj.tag = "Projectile";
 
         if (ProjectileCardModifiers.Instance != null)
         {
@@ -3042,9 +3064,17 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             return;
         }
 
+        EnemyCardSpawner cardSpawner = Object.FindObjectOfType<EnemyCardSpawner>();
+        EnemySpawner enemySpawner = Object.FindObjectOfType<EnemySpawner>();
+        if ((cardSpawner != null && cardSpawner.IsBossEventActive) || (enemySpawner != null && enemySpawner.IsBossEventActive))
+        {
+            return;
+        }
+
         Vector3 spawnPos = playerPosition != default(Vector3) ? playerPosition : transform.position;
 
         GameObject beamObj = Instantiate(card.projectilePrefab, spawnPos, Quaternion.identity);
+        beamObj.tag = "Projectile";
 
         if (ProjectileCardModifiers.Instance != null)
         {
@@ -3403,10 +3433,24 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
         
         // Recalculate size
-        if (modifiers.sizeMultiplier != 1f)
+        if (!Mathf.Approximately(modifiers.sizeMultiplier, sizeModifierMultiplier))
         {
-            transform.localScale = baseScale * modifiers.sizeMultiplier;
-            Debug.Log($"<color=lime>  Size: {baseScale} * {modifiers.sizeMultiplier:F2}x = {transform.localScale}</color>");
+            sizeModifierMultiplier = modifiers.sizeMultiplier;
+
+            Vector3 scale = baseScale;
+            if (enhancedVariant == 2 && variant2ReducedXScale > 0f)
+            {
+                float v2Multiplier = Mathf.Max(0f, 1f - variant2ReducedXScale);
+                scale.x *= v2Multiplier;
+            }
+
+            if (!Mathf.Approximately(sizeModifierMultiplier, 1f))
+            {
+                scale.x *= sizeModifierMultiplier;
+            }
+
+            transform.localScale = scale;
+            Debug.Log($"<color=lime>  Size: {baseScale} * {sizeModifierMultiplier:F2}x = {transform.localScale}</color>");
         }
         
         Debug.Log($"<color=lime>╚═══════════════════════════════════════╝</color>");

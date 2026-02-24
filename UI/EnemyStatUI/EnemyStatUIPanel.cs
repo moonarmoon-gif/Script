@@ -68,6 +68,11 @@ public class EnemyStatUIPanel : MonoBehaviour, IBeginDragHandler, IDragHandler, 
     private float nextUpdateTime;
     private bool isBound;
 
+    private bool isTeleportHidden;
+    private float teleportHiddenPrevAlpha = 1f;
+    private bool teleportHiddenPrevInteractable;
+    private bool teleportHiddenPrevBlocksRaycasts;
+
     public void Bind(EnemyHealth target, EnemyStatUIManager owner, int sortingOrder, Camera cam)
     {
         enemyHealth = target;
@@ -78,6 +83,11 @@ public class EnemyStatUIPanel : MonoBehaviour, IBeginDragHandler, IDragHandler, 
         isDragging = false;
         isForcedBehindPlayer = false;
         hasPositionedOnce = false;
+
+        isTeleportHidden = false;
+        teleportHiddenPrevAlpha = 1f;
+        teleportHiddenPrevInteractable = false;
+        teleportHiddenPrevBlocksRaycasts = false;
 
         rectTransform = transform as RectTransform;
         if (rectTransform == null)
@@ -115,6 +125,10 @@ public class EnemyStatUIPanel : MonoBehaviour, IBeginDragHandler, IDragHandler, 
         {
             canvasGroup = gameObject.AddComponent<CanvasGroup>();
         }
+
+        teleportHiddenPrevAlpha = 1f;
+        teleportHiddenPrevInteractable = canvasGroup.interactable;
+        teleportHiddenPrevBlocksRaycasts = canvasGroup.blocksRaycasts;
 
         canvasGroup.alpha = 0f;
 
@@ -203,6 +217,7 @@ public class EnemyStatUIPanel : MonoBehaviour, IBeginDragHandler, IDragHandler, 
         if (canvasGroup != null)
         {
             canvasGroup.alpha = 1f;
+            SetTeleportHidden(ShouldHidePanelForTeleport());
         }
 
         revealRoutine = null;
@@ -251,6 +266,18 @@ public class EnemyStatUIPanel : MonoBehaviour, IBeginDragHandler, IDragHandler, 
         {
             Close();
             return;
+        }
+
+        bool shouldHideForTeleport = ShouldHidePanelForTeleport();
+        if (shouldHideForTeleport)
+        {
+            SetTeleportHidden(true);
+            return;
+        }
+
+        if (isTeleportHidden)
+        {
+            SetTeleportHidden(false);
         }
 
         float interval = manager != null ? manager.PanelUpdateIntervalSeconds : 0.05f;
@@ -374,6 +401,106 @@ public class EnemyStatUIPanel : MonoBehaviour, IBeginDragHandler, IDragHandler, 
         }
 
         return false;
+    }
+
+    private bool ShouldHidePanelForTeleport()
+    {
+        if (isManuallyUnbound || isDragging)
+        {
+            return false;
+        }
+
+        if (enemyHealth == null || !enemyHealth.IsAlive)
+        {
+            return false;
+        }
+
+        if (spriteRenderer != null && !spriteRenderer.enabled)
+        {
+            return true;
+        }
+
+        if (targetCollider != null && !targetCollider.enabled)
+        {
+            return true;
+        }
+
+        if (enemyAnimators == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < enemyAnimators.Length; i++)
+        {
+            Animator anim = enemyAnimators[i];
+            if (anim == null || !anim.isActiveAndEnabled)
+            {
+                continue;
+            }
+
+            AnimatorControllerParameter[] parameters = anim.parameters;
+            for (int p = 0; p < parameters.Length; p++)
+            {
+                AnimatorControllerParameter param = parameters[p];
+                if (param == null || param.type != AnimatorControllerParameterType.Bool)
+                {
+                    continue;
+                }
+
+                string n = param.name;
+                if (string.IsNullOrEmpty(n) || n.IndexOf("teleport", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                if (anim.GetBool(n))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void SetTeleportHidden(bool hidden)
+    {
+        if (canvasGroup == null)
+        {
+            return;
+        }
+
+        if (hidden)
+        {
+            if (!isTeleportHidden)
+            {
+                if (canvasGroup.alpha > 0.0001f)
+                {
+                    teleportHiddenPrevAlpha = canvasGroup.alpha;
+                }
+                teleportHiddenPrevInteractable = canvasGroup.interactable;
+                teleportHiddenPrevBlocksRaycasts = canvasGroup.blocksRaycasts;
+            }
+
+            canvasGroup.alpha = 0f;
+            canvasGroup.interactable = false;
+            canvasGroup.blocksRaycasts = false;
+            isTeleportHidden = true;
+            return;
+        }
+
+        if (!isTeleportHidden)
+        {
+            return;
+        }
+
+        canvasGroup.alpha = teleportHiddenPrevAlpha;
+        canvasGroup.interactable = teleportHiddenPrevInteractable;
+        canvasGroup.blocksRaycasts = teleportHiddenPrevBlocksRaycasts;
+        isTeleportHidden = false;
+
+        hasPositionedOnce = false;
+        nextUpdateTime = Time.unscaledTime;
     }
 
     private void RefreshSortingAgainstPlayer()
@@ -674,6 +801,15 @@ public class EnemyStatUIPanel : MonoBehaviour, IBeginDragHandler, IDragHandler, 
         }
 
         float attack = hasBaseAttack ? cachedBaseAttack : 0f;
+
+        if (EnemyScalingSystem.Instance != null)
+        {
+            float damageMultiplier = EnemyScalingSystem.Instance.GetDamageMultiplier();
+            if (damageMultiplier > 0f && !Mathf.Approximately(damageMultiplier, 1f))
+            {
+                attack *= damageMultiplier;
+            }
+        }
         if (attackText != null)
         {
             attackText.text = attack.ToString("0");

@@ -16,6 +16,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     [SerializeField] private float explosionRadius = 3f;
     [Tooltip("Offset for explosion detection area in X and Y coordinates")]
     [SerializeField] private Vector2 explosionRadiusOffset = Vector2.zero;
+    [Range(0f, 1f)] public float RuntimeGizmoAlphaMultiplier = 1f;
     [SerializeField] private float damage = 40f;
     [SerializeField] private LayerMask enemyLayer;
     [SerializeField] private ProjectileType projectileType = ProjectileType.Fire;
@@ -757,15 +758,6 @@ public class FireMine : MonoBehaviour, IInstantModifiable
                     Destroy(gameObject);
                     return;
                 }
-            }
-
-            // Check mana
-            PlayerMana playerMana = FindObjectOfType<PlayerMana>();
-            if (playerMana != null && !playerMana.Spend(finalManaCost))
-            {
-                Debug.Log($"Not enough mana for FireMine (cost: {finalManaCost})");
-                Destroy(gameObject);
-                return;
             }
 
             // Record fire time

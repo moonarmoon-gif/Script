@@ -957,6 +957,11 @@ public class EnemyCardSpawner : MonoBehaviour
         if (!registeredEnemyCards.Contains(card))
         {
             registeredEnemyCards.Add(card);
+
+            if (EnemyScalingSystem.Instance != null)
+            {
+                EnemyScalingSystem.Instance.RegisterPerWaveHealthIncreaseStep();
+            }
             
             // Track rarity in the history used to build Favour-card rarity
             // weights for this phase.
@@ -1722,6 +1727,11 @@ public class EnemyCardSpawner : MonoBehaviour
 
     private IEnumerator SmoothRefillPlayerHealthAndMana(GameObject playerObject)
     {
+        while (CardSelectionManager.Instance != null && CardSelectionManager.Instance.HasPendingLevelUpStages())
+        {
+            yield return null;
+        }
+
         postBossRefillDelayActive = postBossRefillDelay > 0f;
         if (postBossRefillDelay > 0f)
         {

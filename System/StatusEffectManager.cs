@@ -46,7 +46,10 @@ public class StatusEffectManager : MonoBehaviour
         if (DamageNumberManager.Instance != null)
         {
             Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
-            DamageNumberManager.Instance.ShowBurn(anchor);
+            if (!EnemyDamagePopupScope.SuppressPopups)
+            {
+                DamageNumberManager.Instance.ShowBurn(anchor);
+            }
         }
 
         PlayerStats stats = Object.FindObjectOfType<PlayerStats>();
@@ -94,7 +97,10 @@ public class StatusEffectManager : MonoBehaviour
         if (DamageNumberManager.Instance != null)
         {
             Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
-            DamageNumberManager.Instance.ShowSlow(anchor);
+            if (!EnemyDamagePopupScope.SuppressPopups)
+            {
+                DamageNumberManager.Instance.ShowSlow(anchor);
+            }
         }
 
         float finalMultiplier = speedMultiplier;
@@ -148,7 +154,7 @@ public class StatusEffectManager : MonoBehaviour
                 damageable.TakeDamage(damagePerTick, anchor, hitNormal);
                 
                 // Show burn damage number
-                if (DamageNumberManager.Instance != null)
+                if (DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
                 {
                     DamageNumberManager.Instance.ShowDamage(damagePerTick, anchor, DamageNumberManager.DamageType.Fire, false, true);
                 }

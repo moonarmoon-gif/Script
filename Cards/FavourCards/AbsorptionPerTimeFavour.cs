@@ -82,6 +82,18 @@ public class AbsorptionPerTimeFavour : FavourEffect
         currentIntervalGain += Mathf.Max(0, BonusAbsorption);
         currentMaxStacks += Mathf.Max(0, BonusMaxStacks);
         currentMaxStacks = Mathf.Max(0, currentMaxStacks);
+
+        int instantGain = Mathf.Max(0, InstantAbsorptionGain);
+        if (instantGain > 0 && currentMaxStacks > 0)
+        {
+            int existing = statusController.GetStacks(StatusId.Absorption);
+            int remaining = Mathf.Max(0, currentMaxStacks - existing);
+            int toAdd = Mathf.Min(instantGain, remaining);
+            if (toAdd > 0)
+            {
+                statusController.AddStatus(StatusId.Absorption, toAdd, -1f);
+            }
+        }
     }
 
     public override void OnUpdate(GameObject player, FavourEffectManager manager, float deltaTime)

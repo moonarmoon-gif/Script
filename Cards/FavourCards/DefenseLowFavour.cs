@@ -78,6 +78,18 @@ public class DefenseLowFavour : FavourEffect
         currentIntervalGain += Mathf.Max(0, BonusDefenseRecieved);
         currentMaxStacks += Mathf.Max(0, BonusMaxStacks);
         currentMaxStacks = Mathf.Max(0, currentMaxStacks);
+
+        int instantGain = Mathf.Max(0, DefenseRecieved);
+        if (instantGain > 0 && currentMaxStacks > 0)
+        {
+            int existing = statusController.GetStacks(StatusId.Defense);
+            int remaining = Mathf.Max(0, currentMaxStacks - existing);
+            int toAdd = Mathf.Min(instantGain, remaining);
+            if (toAdd > 0)
+            {
+                statusController.AddStatus(StatusId.Defense, toAdd, -1f);
+            }
+        }
     }
 
     public override void OnUpdate(GameObject player, FavourEffectManager manager, float deltaTime)

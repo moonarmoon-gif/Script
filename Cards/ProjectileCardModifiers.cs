@@ -479,3 +479,10 @@ public class ProjectileStatusChanceBaseline : MonoBehaviour
     public float baseSlowChance;
     public float baseStaticChance;
 }
+
+public class ProjectileStatusChanceAdditiveBonus : MonoBehaviour
+{
+    public float burnBonusPercent;
+    public float slowBonusPercent;
+    public float staticBonusPercent;
+}

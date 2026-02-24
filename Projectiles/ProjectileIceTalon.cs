@@ -376,14 +376,13 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
             if (enhancedVariant == 3)
             {
-                SlowEffect slowEffect = GetComponent<SlowEffect>();
-                if (slowEffect != null)
+                ProjectileStatusChanceAdditiveBonus additive = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+                if (additive == null)
                 {
-                    // Variant 3 uses an explicit slow chance; interpret the
-                    // field as 0-1 and convert to the 0-100% range used by
-                    // SlowEffect.
-                    slowEffect.slowChance = Mathf.Clamp01(variant3SlowEffectChance) * 100f;
+                    additive = gameObject.AddComponent<ProjectileStatusChanceAdditiveBonus>();
                 }
+
+                additive.slowBonusPercent = Mathf.Clamp01(variant3SlowEffectChance) * 100f;
             }
         }
 
@@ -435,8 +434,12 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
 
         if (modifiers.sizeMultiplier != 1f)
         {
-            transform.localScale *= modifiers.sizeMultiplier;
-            ColliderScaler.ScaleCollider(_collider2D, modifiers.sizeMultiplier, colliderSizeOffset);
+            transform.localScale = baseScale * modifiers.sizeMultiplier;
+        }
+
+        if (colliderSizeOffset != 0f)
+        {
+            ColliderScaler.ScaleCollider(_collider2D, 1f, colliderSizeOffset);
         }
 
         int totalPierceCount = modifiers.pierceCount + enhancedPierceAdd;
@@ -1017,9 +1020,10 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             baseDamageAfterCards = nd;
             Debug.Log($"<color=lime>Damage:{baseDamage:F2}*{mods.damageMultiplier:F2}x={damage:F2}</color>");
         }
-        if (mods.sizeMultiplier != 1f)
+        Vector3 newScale = baseScale * mods.sizeMultiplier;
+        if (transform.localScale != newScale)
         {
-            transform.localScale = baseScale * mods.sizeMultiplier;
+            transform.localScale = newScale;
             Debug.Log($"<color=lime>Size:{baseScale}*{mods.sizeMultiplier:F2}x={transform.localScale}</color>");
         }
         Debug.Log($"<color=lime>╚═══════════════════════════════════════╝</color>");

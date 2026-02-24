@@ -64,6 +64,11 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
     public bool EnableThunderBurstRotation = true;
     public float ThunderBurstRotationDegreesPerSecond = 180f;
 
+    [Header("Enhanced Variant 3 - Static Chance")]
+    [Tooltip("Additional static chance (0-100%) granted by Enhanced Variant 3. This is ADDED on top of any existing static chance.")]
+    [Range(0f, 100f)]
+    public float StaticChanceIncrease = 25f;
+
     [Header("Collider Scaling")]
     [Tooltip("Offset for collider size relative to visual size (0 = same as visual, -0.2 = 20% smaller, 0.2 = 20% larger)")]
     [SerializeField] private float colliderSizeOffset = 0f;
@@ -81,6 +86,8 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
     private Rigidbody2D _rigidbody2D;
     private Collider2D _collider2D;
     private Animator _animator;
+
+    private StaticEffect cachedStaticEffect;
 
     private Vector2 initialDirection;
     private bool directionSet = false;
@@ -140,6 +147,8 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         _rigidbody2D = GetComponent<Rigidbody2D>();
         _collider2D = GetComponent<Collider2D>();
         _animator = GetComponentInChildren<Animator>();
+
+        cachedStaticEffect = GetComponent<StaticEffect>();
 
         baseSpeed = speed;
         baseLifetime = lifetimeSeconds;
@@ -487,6 +496,11 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
                         Vector3 hitPoint = hit.ClosestPoint(col.bounds.center);
                         Vector3 hitNormal = ((Vector2)col.bounds.center - (Vector2)hitPoint).normalized;
                         enemyHealth.TakeDamage(finalDamage, hitPoint, hitNormal);
+
+                        if (cachedStaticEffect != null)
+                        {
+                            cachedStaticEffect.TryApplyStatic(enemyHealth.gameObject, hitPoint);
+                        }
                     }
                 }
             }
@@ -521,6 +535,11 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         float top = camPos.y + halfHeight + offset;
 
         return pos.x < left || pos.x > right || pos.y < bottom || pos.y > top;
+    }
+
+    private Vector2 GetExplosionCenterWorld(Vector2 radiusOffset)
+    {
+        return (Vector2)transform.position + radiusOffset;
     }
 
     public Vector2 GetSpawnOffset(Vector2 direction)
@@ -574,12 +593,14 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
             : null;
 
         enhancedVariantIndex = 0;
+        bool variant3Active = false;
         if (ProjectileCardLevelSystem.Instance != null && card != null)
         {
             int selected = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
             bool unlocked = ProjectileCardLevelSystem.Instance.IsEnhancedUnlocked(card);
 
             bool hasVariant2History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
+            bool hasVariant3History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
 
             enhancedVariantIndex = selected;
             if (enhancedVariantIndex == 0 && unlocked)
@@ -588,6 +609,17 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
             }
 
             thunderBurstActive = hasVariant2History || selected == 2;
+            variant3Active = hasVariant3History || selected == 3;
+        }
+
+        if (variant3Active)
+        {
+            ProjectileStatusChanceAdditiveBonus additive = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+            if (additive == null)
+            {
+                additive = gameObject.AddComponent<ProjectileStatusChanceAdditiveBonus>();
+            }
+            additive.staticBonusPercent = Mathf.Max(0f, StaticChanceIncrease);
         }
 
         CardModifierStats modifiers = new CardModifierStats();
@@ -621,6 +653,7 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         float finalDamage = damage + modifiers.damageFlat;
 
         float totalSizeMultiplier = modifiers.sizeMultiplier;
+        float explosionRadiusBaseScaled = Mathf.Max(0f, baseExplosionRadius * totalSizeMultiplier);
         if (thunderBurstActive)
         {
             thunderBurstSizeAfterCards = Mathf.Max(0f, baseThunderBurstSize * totalSizeMultiplier);
@@ -630,11 +663,9 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         {
             transform.localScale *= totalSizeMultiplier;
             ColliderScaler.ScaleCollider(_collider2D, totalSizeMultiplier, colliderSizeOffset);
-
-            ExplosionRadius = Mathf.Max(0f, ExplosionRadius * totalSizeMultiplier);
         }
 
-        ExplosionRadius = Mathf.Max(0f, (ExplosionRadius + modifiers.explosionRadiusBonus) * modifiers.explosionRadiusMultiplier);
+        ExplosionRadius = Mathf.Max(0f, (explosionRadiusBaseScaled + modifiers.explosionRadiusBonus) * modifiers.explosionRadiusMultiplier);
 
         float denom = Mathf.Abs(baseExplosionRadius) > 0.0001f ? baseExplosionRadius : 1f;
         explosionEffectScale = ExplosionRadius / denom;
@@ -797,6 +828,13 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
             BeginThunderBurstFadeAndDestroy();
         }
 
+        float denom = Mathf.Abs(baseExplosionRadius) > 0.0001f ? baseExplosionRadius : 1f;
+        float detonationScale = ExplosionRadius / denom;
+        if (detonationScale > 0.0001f && baseScale != Vector3.zero)
+        {
+            transform.localScale = baseScale * detonationScale;
+        }
+
         if (!EnableExplosionEffectPrefab)
         {
             if (_animator != null)
@@ -811,17 +849,12 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         StartCoroutine(DetonateRoutine());
     }
 
-    private Vector2 GetExplosionCenterWorld(Vector2 localOffset)
-    {
-        return (Vector2)transform.TransformPoint((Vector3)localOffset);
-    }
-
     private IEnumerator DetonateRoutine()
     {
-        float damageDelay = Mathf.Max(0f, ExplosionDelay);
-        if (damageDelay > 0f)
+        float delay = Mathf.Max(0f, ExplosionDelay);
+        if (delay > 0f)
         {
-            yield return GameStateManager.WaitForPauseSafeSeconds(damageDelay);
+            yield return GameStateManager.WaitForPauseSafeSeconds(delay);
         }
 
         if (EnableExplosionEffectPrefab && ExplosionEffectPrefab != null)
@@ -873,6 +906,9 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
             ? cachedDetonationCenterWorldPosition
             : GetExplosionCenterWorld(baseExplosionOffset);
         Collider2D[] hitColliders = Physics2D.OverlapCircleAll(explosionCenter, ExplosionRadius, enemyLayer);
+
+        SlowEffect slowEffect = GetComponent<SlowEffect>();
+        StaticEffect staticEffect = cachedStaticEffect != null ? cachedStaticEffect : GetComponent<StaticEffect>();
 
         for (int i = 0; i < hitColliders.Length; i++)
         {
@@ -926,14 +962,10 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
             DamageAoeScope.EndAoeDamage();
 
             StatusController.TryApplyBurnFromProjectile(gameObject, hit.gameObject, hitPoint, finalDamage);
-
-            SlowEffect slowEffect = GetComponent<SlowEffect>();
             if (slowEffect != null)
             {
                 slowEffect.TryApplySlow(hit.gameObject, hitPoint);
             }
-
-            StaticEffect staticEffect = GetComponent<StaticEffect>();
             if (staticEffect != null)
             {
                 staticEffect.TryApplyStatic(hit.gameObject, hitPoint);
@@ -991,6 +1023,7 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         ExplosionRadius = baseExplosionRadius;
 
         float totalSizeMultiplier = mods.sizeMultiplier;
+        float explosionRadiusBaseScaled = Mathf.Max(0f, baseExplosionRadius * totalSizeMultiplier);
         if (thunderBurstActive)
         {
             thunderBurstSizeAfterCards = Mathf.Max(0f, baseThunderBurstSize * totalSizeMultiplier);
@@ -1000,11 +1033,9 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         {
             transform.localScale = baseScale * totalSizeMultiplier;
             ColliderScaler.ScaleCollider(_collider2D, totalSizeMultiplier, colliderSizeOffset);
-
-            ExplosionRadius = Mathf.Max(0f, ExplosionRadius * totalSizeMultiplier);
         }
 
-        ExplosionRadius = Mathf.Max(0f, (ExplosionRadius + mods.explosionRadiusBonus) * mods.explosionRadiusMultiplier);
+        ExplosionRadius = Mathf.Max(0f, (explosionRadiusBaseScaled + mods.explosionRadiusBonus) * mods.explosionRadiusMultiplier);
 
         float denom = Mathf.Abs(baseExplosionRadius) > 0.0001f ? baseExplosionRadius : 1f;
         explosionEffectScale = ExplosionRadius / denom;

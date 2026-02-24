@@ -11,6 +11,7 @@ public class ArmorIncreaseFavour : FavourEffect
     private PlayerLevel playerLevel;
     private StatusController statusController;
     private float totalArmorGranted = 0f;
+    private int totalArmorStacksGranted = 0;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
@@ -70,7 +71,13 @@ public class ArmorIncreaseFavour : FavourEffect
             playerLevel.armor = playerStats.armor;
         }
 
+        if (statusController != null && totalArmorStacksGranted > 0)
+        {
+            statusController.ConsumeStacks(StatusId.Armor, totalArmorStacksGranted);
+        }
+
         totalArmorGranted = 0f;
+        totalArmorStacksGranted = 0;
     }
 
     private void CachePlayerComponents(GameObject player)
@@ -104,6 +111,16 @@ public class ArmorIncreaseFavour : FavourEffect
         if (playerLevel != null)
         {
             playerLevel.armor = playerStats.armor;
+        }
+
+        if (statusController != null)
+        {
+            int stacks = Mathf.RoundToInt(Mathf.Max(0f, amount));
+            if (stacks > 0)
+            {
+                statusController.AddStatus(StatusId.Armor, stacks, -1f);
+                totalArmorStacksGranted += stacks;
+            }
         }
     }
 }

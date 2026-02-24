@@ -7,9 +7,13 @@ public class CritGainOnNotCritFavour : FavourEffect
     [Tooltip("FRENZY stacks gained when damage that can crit does NOT crit.")]
     public float FrenzyGain = 1f;
 
+    [Tooltip("Permanent FRENZY stacks granted immediately when this favour is selected.")]
+    public float PermanentFrenzy = 1f;
+
     private PlayerStats playerStats;
     private StatusController playerStatus;
     private int sourceKey;
+    private int permanentSourceKey;
     private int lastProcessedNuclearStrikeFrame = -1;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -30,7 +34,22 @@ public class CritGainOnNotCritFavour : FavourEffect
             sourceKey = 1;
         }
 
+        permanentSourceKey = sourceKey ^ 0x5f3759df;
+        if (permanentSourceKey == 0)
+        {
+            permanentSourceKey = 1;
+        }
+
         lastProcessedNuclearStrikeFrame = -1;
+
+        if (playerStatus != null)
+        {
+            int permanentStacksToAdd = Mathf.RoundToInt(Mathf.Max(0f, PermanentFrenzy));
+            if (permanentStacksToAdd > 0)
+            {
+                playerStatus.AddStatus(StatusId.Frenzy, permanentStacksToAdd, -1f, 0f, null, permanentSourceKey);
+            }
+        }
 
         // One-time favour: prevent this card from appearing again this run.
         if (sourceCard != null && CardSelectionManager.Instance != null)

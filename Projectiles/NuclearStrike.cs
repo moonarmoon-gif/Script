@@ -109,6 +109,128 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         public Vector2 offsetRight = Vector2.zero;
     }
 
+    private bool TryPickLandingPositionVariant3(Vector3 startPosition, float spawnMinX, float spawnMaxX, bool isPrimarySpawn, out Vector3 landing)
+    {
+        landing = startPosition;
+
+        if (Time.frameCount != lastLandingFrame)
+        {
+            currentFrameLandingPositions.Clear();
+            currentFrameTargetedEnemyIds.Clear();
+            usedSingleEnemyTargetThisFrame = false;
+            lastLandingFrame = Time.frameCount;
+        }
+
+        EnemyHealth[] enemies = Object.FindObjectsOfType<EnemyHealth>();
+        List<EnemyHealth> alive = new List<EnemyHealth>();
+        for (int i = 0; i < enemies.Length; i++)
+        {
+            EnemyHealth e = enemies[i];
+            if (e == null || !e.IsAlive)
+            {
+                continue;
+            }
+
+            if (!OffscreenDamageChecker.CanTakeDamage(e.transform.position))
+            {
+                continue;
+            }
+
+            alive.Add(e);
+        }
+
+        if (alive.Count == 0)
+        {
+            return TryPickLandingPosition(startPosition, spawnMinX, spawnMaxX, out landing);
+        }
+
+        if (alive.Count == 1)
+        {
+            if (isPrimarySpawn && !usedSingleEnemyTargetThisFrame)
+            {
+                usedSingleEnemyTargetThisFrame = true;
+
+                Vector3 pos = alive[0].transform.position;
+                pos.z = startPosition.z;
+
+                currentFrameTargetedEnemyIds.Add(alive[0].gameObject.GetInstanceID());
+                currentFrameLandingPositions.Add(pos);
+                landing = pos;
+                return true;
+            }
+
+            return TryPickLandingPosition(startPosition, spawnMinX, spawnMaxX, out landing);
+        }
+
+        float minDist = Mathf.Max(0f, minStrikeDistance);
+        float minDistSqr = minDist * minDist;
+
+        List<EnemyHealth> candidates = new List<EnemyHealth>(alive.Count);
+        for (int i = 0; i < alive.Count; i++)
+        {
+            EnemyHealth e = alive[i];
+            if (e == null)
+            {
+                continue;
+            }
+
+            int id = e.gameObject.GetInstanceID();
+            if (currentFrameTargetedEnemyIds.Contains(id))
+            {
+                continue;
+            }
+
+            candidates.Add(e);
+        }
+
+        if (candidates.Count == 0)
+        {
+            return TryPickLandingPosition(startPosition, spawnMinX, spawnMaxX, out landing);
+        }
+
+        int attempts = Mathf.Min(12, candidates.Count);
+        for (int attempt = 0; attempt < attempts; attempt++)
+        {
+            int pickIndex = Random.Range(0, candidates.Count);
+            EnemyHealth chosen = candidates[pickIndex];
+            candidates.RemoveAt(pickIndex);
+
+            if (chosen == null)
+            {
+                continue;
+            }
+
+            Vector3 candidate = chosen.transform.position;
+            candidate.z = startPosition.z;
+
+            if (minDistSqr > 0f)
+            {
+                bool tooClose = false;
+                for (int i = 0; i < currentFrameLandingPositions.Count; i++)
+                {
+                    if ((candidate - currentFrameLandingPositions[i]).sqrMagnitude < minDistSqr)
+                    {
+                        tooClose = true;
+                        break;
+                    }
+                }
+
+                if (tooClose)
+                {
+                    continue;
+                }
+            }
+
+            int id = chosen.gameObject.GetInstanceID();
+            currentFrameTargetedEnemyIds.Add(id);
+            currentFrameLandingPositions.Add(candidate);
+            landing = candidate;
+            return true;
+        }
+
+        return TryPickLandingPosition(startPosition, spawnMinX, spawnMaxX, out landing);
+    }
+
     [Header("Per-Size Offsets")]
     [Tooltip("Explosion effect offsets for different size multipliers. Automatically interpolates between values.")]
     [SerializeField] private List<SizeOffsetPair> sizeOffsets = new List<SizeOffsetPair>();
@@ -141,6 +263,11 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     public float HellBeamBaseLifetime = 1f;
     public float HellBeamDamageTickInterval = 0.25f;
 
+    [Header("Enhanced Variant 3 - Targeted Strike")]
+    public float SpeedBonus = 25f;
+    [Range(0f, 100f)]
+    public float IncreasedBurnChance = 25f;
+
     private Rigidbody2D _rigidbody2D;
     private AudioSource _audioSource;
     private Collider2D _collider2D;
@@ -154,8 +281,12 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     private static List<Vector3> currentFrameLandingPositions = new List<Vector3>();
     private static int lastLandingFrame = -1;
 
+    private static HashSet<int> currentFrameTargetedEnemyIds = new HashSet<int>();
+    private static bool usedSingleEnemyTargetThisFrame = false;
+
     // Enhanced system
     private int enhancedVariant = 0; // 0 = basic, 1 = rapid strike, 2-3 = future variants
+    private bool isVariant3Active;
 
     // Instance-based cooldown tracking
     private static System.Collections.Generic.Dictionary<string, float> lastFireTimes = new System.Collections.Generic.Dictionary<string, float>();
@@ -225,12 +356,17 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         // Get card-specific modifiers first
         ProjectileCards card = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
 
+        bool hasVariant3History = false;
+
         // Check for enhanced variant using CARD-based system
         if (ProjectileCardLevelSystem.Instance != null && card != null)
         {
             enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
+            hasVariant3History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
             Debug.Log($"<color=gold>NuclearStrike ({card.cardName}) Enhanced Variant: {enhancedVariant}</color>");
         }
+
+        isVariant3Active = enhancedVariant == 3 || hasVariant3History;
 
         modifiers = new CardModifierStats(); // Default values
 
@@ -242,6 +378,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
 
         // Apply enhanced variant modifiers BEFORE card modifiers
         enhancedSpeedAdd = 0f;
+        float enhancedVariant3SpeedAdd = 0f;
         int enhancedProjectileBonus = 0;
 
         if (enhancedVariant == 1)
@@ -253,6 +390,17 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             enhancedProjectileBonus = enhancedProjectileCountBonus;
 
             Debug.Log($"<color=gold>Enhanced Rapid Strike: Speed +{enhancedSpeedAdd}, Additional Projectiles +{enhancedProjectileBonus}</color>");
+        }
+        else if (isVariant3Active)
+        {
+            enhancedVariant3SpeedAdd = SpeedBonus;
+
+            ProjectileStatusChanceAdditiveBonus additive = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+            if (additive == null)
+            {
+                additive = gameObject.AddComponent<ProjectileStatusChanceAdditiveBonus>();
+            }
+            additive.burnBonusPercent = Mathf.Max(0f, IncreasedBurnChance);
         }
 
         // CRITICAL: Use ProjectileCards spawnInterval if available, otherwise use script cooldown.
@@ -287,7 +435,6 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         {
             finalCooldown = Mathf.Max(0.1f, finalCooldown);
         }
-        int finalManaCost = Mathf.Max(1, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
         damage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
 
         // Calculate speed increase and animation speed
@@ -299,6 +446,9 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
 
         // Then add enhanced speed bonus (RAW value)
         dropSpeed += enhancedSpeedAdd;
+
+        // Variant 3 speed bonus (RAW value)
+        dropSpeed += enhancedVariant3SpeedAdd;
 
         // Calculate speed multiplier for lifetime adjustment (how many times faster than base)
         float speedMultiplier = dropSpeed / originalDropSpeed;
@@ -414,15 +564,6 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                 }
             }
 
-            // Check mana
-            PlayerMana playerMana = FindObjectOfType<PlayerMana>();
-            if (playerMana != null && !playerMana.Spend(finalManaCost))
-            {
-                Debug.Log($"Not enough mana for NuclearStrike (cost: {finalManaCost})");
-                Destroy(gameObject);
-                return;
-            }
-
             // Record fire time
             lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
         }
@@ -439,7 +580,9 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
 
         Vector3 landingSeed = new Vector3(spawnPosition.x, spawnPosition.y, spawnPosition.z);
         Vector3 chosenLanding;
-        bool picked = TryPickLandingPosition(landingSeed, float.NegativeInfinity, float.PositiveInfinity, out chosenLanding);
+        bool picked = isVariant3Active
+            ? TryPickLandingPositionVariant3(landingSeed, float.NegativeInfinity, float.PositiveInfinity, !skipCooldownCheck, out chosenLanding)
+            : TryPickLandingPosition(landingSeed, float.NegativeInfinity, float.PositiveInfinity, out chosenLanding);
         if (!picked)
         {
             Transform fallbackPoint = pointA != null ? pointA
@@ -457,6 +600,11 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             {
                 chosenLanding = new Vector3(spawnPosition.x, spawnPosition.y, spawnPosition.z);
             }
+        }
+
+        if (isVariant3Active)
+        {
+            chosenLanding.x -= 2f;
         }
 
         Vector3 startPosition = new Vector3(chosenLanding.x, spawnY, spawnPosition.z);

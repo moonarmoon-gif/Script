@@ -437,6 +437,11 @@ public class EnemySpawner : MonoBehaviour
         if (waveNumber < waves.Count - 1)
         {
             waveNumber++;
+
+            if (EnemyScalingSystem.Instance != null)
+            {
+                EnemyScalingSystem.Instance.RegisterPerWaveHealthIncreaseStep();
+            }
         }
 
         waveElapsedTimer = 0f;
@@ -956,7 +961,13 @@ public class EnemySpawner : MonoBehaviour
 
     private IEnumerator SmoothRefillPlayerHealthAndMana(GameObject playerObject)
     {
+        while (CardSelectionManager.Instance != null && CardSelectionManager.Instance.HasPendingLevelUpStages())
+        {
+            yield return null;
+        }
+
         postBossRefillDelayActive = postBossRefillDelay > 0f;
+
         if (postBossRefillDelay > 0f)
         {
             yield return GameStateManager.WaitForPauseSafeSeconds(postBossRefillDelay);

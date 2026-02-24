@@ -330,16 +330,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
                     return;
                 }
             }
-            
-            // Check mana
-            PlayerMana playerMana = FindObjectOfType<PlayerMana>();
-            if (playerMana != null && !playerMana.Spend(finalManaCost))
-            {
-                Debug.Log($"Not enough mana for CinderBloom (cost: {finalManaCost})");
-                Destroy(gameObject);
-                return;
-            }
-            
+
             // Record fire time
             lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
         }

@@ -109,6 +109,12 @@ public class BurnEffect : MonoBehaviour
             }
         }
 
+        ProjectileStatusChanceAdditiveBonus additiveBonus = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+        if (additiveBonus != null)
+        {
+            effectiveChance += Mathf.Max(0f, additiveBonus.burnBonusPercent);
+        }
+
         effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
 
         // Only roll RNG if we do NOT have a predetermined roll.
@@ -171,7 +177,7 @@ public class BurnEffect : MonoBehaviour
 
         statusController.AddStatus(StatusId.Burn, burnStacksPerHit, duration, damagePerTick, sourceCard);
 
-        if (DamageNumberManager.Instance != null)
+        if (DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
         {
             Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(ownerGO, ownerGO.transform.position);
             DamageNumberManager.Instance.ShowBurn(anchor);
@@ -397,7 +403,7 @@ public class BurnEffect : MonoBehaviour
                 float resolved = StatusDamageScope.LastResolvedDamage;
                 StatusDamageScope.EndStatusTick();
 
-                if (DamageNumberManager.Instance != null && resolved > 0f)
+                if (DamageNumberManager.Instance != null && resolved > 0f && !EnemyDamagePopupScope.SuppressPopups)
                 {
                     DamageNumberManager.Instance.ShowDamage(resolved, anchor, DamageNumberManager.DamageType.Fire, isCrit, true);
                 }

@@ -181,6 +181,22 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
     private Vector3 baseScale;
     private float baseBaseDamage; // Base of baseDamage (for damage multiplier)
 
+    private int enhancedVariantIndex = 0;
+    private float variantScaleMultiplier = 1f;
+    private float Variant3ScaleMultiplier = 1.25f;
+    private const float Variant3ExtraBurnChancePercent = 40f;
+    private bool variant3BonusApplied = false;
+
+    private float GetVisualDeltaTime()
+    {
+        if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.IsSelectionActive())
+        {
+            return 0f;
+        }
+
+        return GameStateManager.GetPauseSafeDeltaTime();
+    }
+
     private void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
@@ -286,6 +302,11 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
         baseScale = transform.localScale;
         baseBaseDamage = baseDamage;
 
+        enhancedVariantIndex = 0;
+        variantScaleMultiplier = 1f;
+        variant3BonusApplied = false;
+        sizeMultiplier = 1f;
+
         // Get size modifier from card
         ProjectileCards card = ProjectileCardModifiers.Instance.GetCardFromProjectile(gameObject);
         if (card != null)
@@ -303,6 +324,37 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
 
             sizeMultiplier = modifiers.sizeMultiplier;
 
+            if (ProjectileCardLevelSystem.Instance != null)
+            {
+                enhancedVariantIndex = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
+                OrbitalStarManager manager2 = FindObjectOfType<OrbitalStarManager>();
+                if (manager2 != null)
+                {
+                    Variant3ScaleMultiplier = manager2.NewScale;
+                }
+
+                bool hasVariant3Stack = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
+                if (hasVariant3Stack)
+                {
+                    variantScaleMultiplier = Variant3ScaleMultiplier;
+
+                    BurnEffect burn = GetComponent<BurnEffect>();
+                    if (burn == null)
+                    {
+                        burn = gameObject.AddComponent<BurnEffect>();
+                    }
+                    if (!variant3BonusApplied)
+                    {
+                        burn.burnChance = Mathf.Clamp(burn.burnChance + Variant3ExtraBurnChancePercent, 0f, 100f);
+                        variant3BonusApplied = true;
+                    }
+                }
+            }
+
+            transform.localScale = baseScale * (sizeMultiplier * variantScaleMultiplier);
+            radiusOffsetY = transform.localScale.y;
+            baseDamageRadius = 2f * Mathf.Abs(baseScale.x * variantScaleMultiplier);
+
             // CRITICAL: Apply flat damage modifier immediately so the very first
             // NovaStar ticks include mythic/rare damage bonuses.
             float newBaseDamage = baseBaseDamage + modifiers.damageFlat;
@@ -314,14 +366,16 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
 
             // CRITICAL: Apply damage radius modifier (RAW value added)
             float damageRadiusBonus = modifiers.damageRadiusIncrease;
-            currentRadius = (damageRadius + damageRadiusBonus) * sizeMultiplier;
+            currentRadius = baseDamageRadius * sizeMultiplier + damageRadiusBonus;
 
-            Debug.Log($"<color=yellow>NovaStar Initialize: Card={card.cardName}, BaseDamageRadius={damageRadius:F2}, Modifier=+{damageRadiusBonus:F2}, Size={sizeMultiplier:F2}x, FinalRadius={currentRadius:F2}</color>");
+            Debug.Log($"<color=yellow>NovaStar Initialize: Card={card.cardName}, BaseDamageRadius={baseDamageRadius:F2}, Modifier=+{damageRadiusBonus:F2}, Size={sizeMultiplier:F2}x, FinalRadius={currentRadius:F2}</color>");
         }
         else
         {
-            // No modifiers - use base radius with size multiplier
-            currentRadius = damageRadius * sizeMultiplier;
+            baseDamageRadius = 2f * Mathf.Abs(baseScale.x);
+            transform.localScale = baseScale;
+            radiusOffsetY = transform.localScale.y;
+            currentRadius = baseDamageRadius * sizeMultiplier;
             Debug.Log($"<color=red>NovaStar Initialize: NO CARD FOUND! Using base radius={damageRadius:F2}</color>");
         }
 
@@ -365,7 +419,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
         float elapsed = 0f;
         while (elapsed < fadeInDuration)
         {
-            elapsed += GameStateManager.GetPauseSafeDeltaTime();
+            elapsed += GetVisualDeltaTime();
             color.a = Mathf.Lerp(0f, 1f, elapsed / fadeInDuration);
             spriteRenderer.color = color;
             yield return null;
@@ -387,7 +441,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
                 float effectiveSpeed = currentSpeed;
 
                 // Move along the orbit
-                float angleStep = (effectiveSpeed / GetCurrentLevelRadius()) * Mathf.Rad2Deg * GameStateManager.GetPauseSafeDeltaTime();
+                float angleStep = (effectiveSpeed / GetCurrentLevelRadius()) * Mathf.Rad2Deg * GetVisualDeltaTime();
 
                 // NovaStar: Move clockwise (decreasing angles)
                 currentAngle -= angleStep;
@@ -463,7 +517,7 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
                     }
 
                     // Continue moving
-                    float angleChange = currentSpeed * GameStateManager.GetPauseSafeDeltaTime();
+                    float angleChange = currentSpeed * GetVisualDeltaTime();
                     currentAngle -= angleChange;
 
                     float angleRad = currentAngle * Mathf.Deg2Rad;
@@ -521,7 +575,12 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
     {
         if (radiusCollider != null)
         {
-            radiusCollider.radius = currentRadius;
+            Vector3 s = transform.localScale;
+            float sx = Mathf.Max(0.0001f, Mathf.Abs(s.x));
+            float sy = Mathf.Max(0.0001f, Mathf.Abs(s.y));
+
+            radiusCollider.radius = currentRadius / sx;
+            radiusCollider.offset = new Vector2(radiusOffsetX / sx, radiusOffsetY / sy);
         }
     }
 
@@ -714,8 +773,10 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
     {
         if (radiusIndicator == null) return;
 
-        float scale = currentRadius * 2f;
-        radiusIndicator.localScale = new Vector3(scale, scale, 1f);
+        float worldDiameter = currentRadius * 2f;
+        float sx = Mathf.Max(0.0001f, Mathf.Abs(transform.localScale.x));
+        float sy = Mathf.Max(0.0001f, Mathf.Abs(transform.localScale.y));
+        radiusIndicator.localScale = new Vector3(worldDiameter / sx, worldDiameter / sy, 1f);
     }
 
     private void UpdateOnCameraStatus()
@@ -755,16 +816,50 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
             }
         }
 
+        if (card != null && ProjectileCardLevelSystem.Instance != null)
+        {
+            int newVariantIndex = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
+            if (newVariantIndex != enhancedVariantIndex)
+            {
+                enhancedVariantIndex = newVariantIndex;
+                OrbitalStarManager manager2 = FindObjectOfType<OrbitalStarManager>();
+                if (manager2 != null)
+                {
+                    Variant3ScaleMultiplier = manager2.NewScale;
+                }
+
+                bool hasVariant3Stack = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
+                variantScaleMultiplier = hasVariant3Stack ? Variant3ScaleMultiplier : 1f;
+
+                if (enhancedVariantIndex == 3 && !variant3BonusApplied)
+                {
+                    BurnEffect burn = GetComponent<BurnEffect>();
+                    if (burn == null)
+                    {
+                        burn = gameObject.AddComponent<BurnEffect>();
+                    }
+                    burn.burnChance = Mathf.Clamp(burn.burnChance + Variant3ExtraBurnChancePercent, 0f, 100f);
+                    variant3BonusApplied = true;
+                }
+
+                baseDamageRadius = 2f * Mathf.Abs(baseScale.x * variantScaleMultiplier);
+                transform.localScale = baseScale * (sizeMultiplier * variantScaleMultiplier);
+                radiusOffsetY = transform.localScale.y;
+                UpdateRadiusCollider();
+                UpdateRadiusIndicatorScale();
+            }
+        }
+
         Debug.Log($"<color=lime>╔═══ NOVASTAR INSTANT MODIFIERS ═══╗</color>");
 
         // Recalculate damage radius
-        float newRadius = (baseDamageRadius + modifiers.damageRadiusIncrease) * modifiers.sizeMultiplier;
+        float newRadius = baseDamageRadius * modifiers.sizeMultiplier + modifiers.damageRadiusIncrease;
         if (newRadius != currentRadius)
         {
             currentRadius = newRadius;
             UpdateRadiusCollider();
             UpdateRadiusIndicatorScale();
-            Debug.Log($"<color=lime>  Damage Radius: {baseDamageRadius:F2} + {modifiers.damageRadiusIncrease:F2} * {modifiers.sizeMultiplier:F2}x = {currentRadius:F2}</color>");
+            Debug.Log($"<color=lime>  Damage Radius: {baseDamageRadius:F2} * {modifiers.sizeMultiplier:F2}x + {modifiers.damageRadiusIncrease:F2} = {currentRadius:F2}</color>");
         }
 
         // Recalculate speed (affects baseOrbitSpeed)
@@ -821,7 +916,10 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
         if (modifiers.sizeMultiplier != sizeMultiplier)
         {
             sizeMultiplier = modifiers.sizeMultiplier;
-            transform.localScale = baseScale * sizeMultiplier;
+            transform.localScale = baseScale * (sizeMultiplier * variantScaleMultiplier);
+            radiusOffsetY = transform.localScale.y;
+            UpdateRadiusCollider();
+            UpdateRadiusIndicatorScale();
             Debug.Log($"<color=lime>  Size: {baseScale} * {sizeMultiplier:F2}x = {transform.localScale}</color>");
         }
 

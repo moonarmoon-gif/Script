@@ -187,6 +187,12 @@ public class ProjectileSpawner : MonoBehaviour
         advancedPlayerController = GetComponent<AdvancedPlayerController>();
     }
 
+    private void OnDisable()
+    {
+        StopAllCoroutines();
+        activeBeamCoroutines.Clear();
+    }
+
     private Vector3 GetSpawnOriginPosition()
     {
         if (advancedPlayerController == null)
@@ -216,6 +222,7 @@ public class ProjectileSpawner : MonoBehaviour
             card.projectilePrefab.GetComponent<PlayerProjectiles>() != null ||
             card.projectilePrefab.GetComponent<FireBall>() != null ||
             card.projectilePrefab.GetComponent<ElectroBall>() != null ||
+            card.projectilePrefab.GetComponent<ThunderDisc>() != null ||
             card.projectilePrefab.GetComponent<ProjectileFireTalon>() != null ||
             card.projectilePrefab.GetComponent<ProjectileIceTalon>() != null;
 
@@ -421,19 +428,8 @@ public class ProjectileSpawner : MonoBehaviour
                 ThunderBird birdPrefab = card.projectilePrefab.GetComponent<ThunderBird>();
                 if (birdPrefab != null)
                 {
-                    bool hasVariant1 = ProjectileCardLevelSystem.Instance != null && ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
-                    bool hasVariant2 = ProjectileCardLevelSystem.Instance != null && ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
-
-                    if (hasVariant1 && hasVariant2 && birdPrefab.variant12BaseCooldown > 0f)
-                    {
-                        baseInterval = birdPrefab.variant12BaseCooldown;
-                        Debug.Log($"<color=gold>{card.cardName}: Using ThunderBird.variant12BaseCooldown = {birdPrefab.variant12BaseCooldown:F2}s as enhanced base cooldown (V1+V2 stack)</color>");
-                    }
-                    else if (enhancedVariant == 2)
-                    {
-                        baseInterval = birdPrefab.variant2BaseCooldown;
-                        Debug.Log($"<color=gold>{card.cardName}: Using ThunderBird.variant2BaseCooldown = {birdPrefab.variant2BaseCooldown:F2}s as enhanced base cooldown</color>");
-                    }
+                    // Thunderbird cooldown overrides are handled by the generic
+                    // reflection fallback below (variant{N}BaseCooldown fields).
                 }
 
                 // GENERIC FALLBACK: If other enhanced variants expose a float field named
@@ -608,18 +604,18 @@ public class ProjectileSpawner : MonoBehaviour
             // Check if this is Variant 1 (dual spawn)
             int enhancedVariant = 0;
             bool hasVariant1History = false;
-            bool hasVariant2History = false;
-            bool isVariant12Active = false;
+            bool hasVariant3History = false;
             if (ProjectileCardLevelSystem.Instance != null)
             {
                 enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(data.card);
                 hasVariant1History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 1);
-                hasVariant2History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 2);
-                isVariant12Active = hasVariant1History && hasVariant2History;
+                hasVariant3History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 3);
             }
+
+            bool isVariant13Active = hasVariant1History && hasVariant3History;
             
             int birdProjectileCount;
-            if (enhancedVariant == 1 || isVariant12Active)
+            if (enhancedVariant == 1 || isVariant13Active)
             {
                 // VARIANT 1: Spawns in PAIRS (left + right)
                 // Base: 2 birds (1 left + 1 right)
@@ -910,6 +906,7 @@ public class ProjectileSpawner : MonoBehaviour
             ProjectileFireTalon fireTalonComponent = data.card.projectilePrefab.GetComponent<ProjectileFireTalon>();
             ProjectileIceTalon iceTalonComponent = data.card.projectilePrefab.GetComponent<ProjectileIceTalon>();
             FireBall fireBallComponent = data.card.projectilePrefab.GetComponent<FireBall>();
+            ThunderDisc thunderDiscComponent = data.card.projectilePrefab.GetComponent<ThunderDisc>();
             PlayerProjectiles playerProjComponent = data.card.projectilePrefab.GetComponent<PlayerProjectiles>();
             ElectroBall electroBallComponent = electroBallPrefabComponent;
             
@@ -936,6 +933,12 @@ public class ProjectileSpawner : MonoBehaviour
                 Vector2 offset = fireBallComponent.GetSpawnOffset(spawnDirection);
                 spawnPosition += new Vector3(offset.x, offset.y, 0f);
                 Debug.Log($"<color=cyan>ProjectileSpawner: Applied FireBall offset {offset} to spawn position</color>");
+            }
+            else if (thunderDiscComponent != null)
+            {
+                Vector2 offset = thunderDiscComponent.GetSpawnOffset(spawnDirection);
+                spawnPosition += new Vector3(offset.x, offset.y, 0f);
+                Debug.Log($"<color=cyan>ProjectileSpawner: Applied ThunderDisc offset {offset} to spawn position</color>");
             }
             else if (playerProjComponent != null)
             {
@@ -1147,6 +1150,7 @@ public class ProjectileSpawner : MonoBehaviour
                 float leftZ = Mathf.Atan2(leftDir.y, leftDir.x) * Mathf.Rad2Deg;
                 Quaternion leftRot = Quaternion.Euler(0f, 0f, leftZ);
                 GameObject leftProjectile = Instantiate(data.card.projectilePrefab, leftPos, leftRot);
+                leftProjectile.tag = "Projectile";
                 ProjectileCardModifiers.Instance.TagProjectileWithCard(leftProjectile, data.card);
 
                 ElectroBall leftElectroBall = leftProjectile.GetComponent<ElectroBall>();
@@ -1168,6 +1172,7 @@ public class ProjectileSpawner : MonoBehaviour
                 float rightZ = Mathf.Atan2(rightDir.y, rightDir.x) * Mathf.Rad2Deg;
                 Quaternion rightRot = Quaternion.Euler(0f, 0f, rightZ);
                 GameObject rightProjectile = Instantiate(data.card.projectilePrefab, rightPos, rightRot);
+                rightProjectile.tag = "Projectile";
                 ProjectileCardModifiers.Instance.TagProjectileWithCard(rightProjectile, data.card);
 
                 ElectroBall rightElectroBall = rightProjectile.GetComponent<ElectroBall>();
@@ -1253,6 +1258,7 @@ public class ProjectileSpawner : MonoBehaviour
             Quaternion finalRotation = Quaternion.Euler(0f, 0f, finalAngle);
             
             GameObject projectile = Instantiate(data.card.projectilePrefab, spawnPosition, finalRotation);
+            projectile.tag = "Projectile";
             
             // Tag projectile with card reference
             ProjectileCardModifiers.Instance.TagProjectileWithCard(projectile, data.card);
@@ -1263,6 +1269,7 @@ public class ProjectileSpawner : MonoBehaviour
             ProjectileIceTalon iceTalon1 = projectile.GetComponent<ProjectileIceTalon>();
             ElementalBeam beam = projectile.GetComponent<ElementalBeam>();
             FireBall fireBall = projectile.GetComponent<FireBall>();
+            ThunderDisc thunderDisc = projectile.GetComponent<ThunderDisc>();
             PlayerProjectiles playerProj = projectile.GetComponent<PlayerProjectiles>();
             ElectroBall electroBall = projectile.GetComponent<ElectroBall>();
 
@@ -1313,6 +1320,16 @@ public class ProjectileSpawner : MonoBehaviour
                 if (skipCheck)
                 {
                     Debug.Log($"<color=gold>FireBall #{i+1}: Spawned as additional projectile (skipping cooldown/mana)</color>");
+                }
+            }
+            else if (thunderDisc != null)
+            {
+                bool skipCheck = (i > 0);
+                thunderDisc.Launch(finalDirection, playerCollider, playerMana, skipCheck);
+
+                if (skipCheck)
+                {
+                    Debug.Log($"<color=gold>ThunderDisc #{i+1}: Spawned as additional projectile (skipping cooldown/mana)</color>");
                 }
             }
             else if (playerProj != null)
@@ -1500,6 +1517,8 @@ public class ProjectileSpawner : MonoBehaviour
             Quaternion rotationSingle = Quaternion.Euler(0f, 0f, angleSingle);
             GameObject singleBeam = Instantiate(data.card.projectilePrefab, spawnPosition, rotationSingle);
 
+            singleBeam.tag = "Projectile";
+
             ProjectileCardModifiers.Instance.TagProjectileWithCard(singleBeam, data.card);
 
             ElementalBeam singleComponent = singleBeam.GetComponent<ElementalBeam>();
@@ -1552,6 +1571,8 @@ public class ProjectileSpawner : MonoBehaviour
             float angle = Mathf.Atan2(spawnDirection.y, spawnDirection.x) * Mathf.Rad2Deg;
             Quaternion rotation = Quaternion.Euler(0f, 0f, angle);
             GameObject beamObj = Instantiate(data.card.projectilePrefab, spawnPosition, rotation);
+
+            beamObj.tag = "Projectile";
             
             // Tag with card
             ProjectileCardModifiers.Instance.TagProjectileWithCard(beamObj, data.card);
@@ -1612,6 +1633,7 @@ public class ProjectileSpawner : MonoBehaviour
             // Spawn beam
             Quaternion rotation = Quaternion.Euler(0f, 0f, beamAngle);
             GameObject beamObj = Instantiate(data.card.projectilePrefab, spawnPosition, rotation);
+            beamObj.tag = "Projectile";
             
             // Tag with card
             ProjectileCardModifiers.Instance.TagProjectileWithCard(beamObj, data.card);
@@ -1762,18 +1784,8 @@ public class ProjectileSpawner : MonoBehaviour
                 ThunderBird birdPrefab = data.card.projectilePrefab.GetComponent<ThunderBird>();
                 if (birdPrefab != null && ProjectileCardLevelSystem.Instance != null)
                 {
-                    bool hasVariant1 = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 1);
-                    bool hasVariant2 = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 2);
-                    int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(data.card);
-
-                    if (hasVariant1 && hasVariant2 && birdPrefab.variant12BaseCooldown > 0f)
-                    {
-                        baseInterval = birdPrefab.variant12BaseCooldown;
-                    }
-                    else if (enhancedVariant == 2)
-                    {
-                        baseInterval = birdPrefab.variant2BaseCooldown;
-                    }
+                    // Thunderbird cooldown overrides are handled by the generic
+                    // reflection fallback above.
                 }
             }
             
