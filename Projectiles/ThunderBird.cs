@@ -1019,7 +1019,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         int maxStrikesPerFrame = 0;
         if (DamageNumberManager.Instance != null)
         {
-            maxStrikesPerFrame = DamageNumberManager.Instance.ThunderbirdV2MaxStrikesPerFrame;
+            maxStrikesPerFrame = DamageNumberManager.Instance.MaxStrikesPerFrame;
         }
 
         Collider2D[] allEnemies = Physics2D.OverlapBoxAll(
