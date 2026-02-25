@@ -10,6 +10,9 @@ public class ThunderBirdV2 : MonoBehaviour
     [Range(0f, 100f)]
     [SerializeField] private float globalStrikeChance = 10f;
 
+    [Header("Offscreen Destruction Grace Period")]
+    [SerializeField] private float variant2GracePeriod = 10f;
+
     private bool isActive;
 
     public void Configure(bool active)
@@ -20,6 +23,11 @@ public class ThunderBirdV2 : MonoBehaviour
     public bool IsActive => isActive;
 
     public float GlobalStrikeChancePercent => globalStrikeChance;
+
+    public float GetGracePeriod(float baseGracePeriod)
+    {
+        return isActive ? variant2GracePeriod : baseGracePeriod;
+    }
 
     public bool TryGetBaseCooldownOverride(out float baseCooldownOverride)
     {
