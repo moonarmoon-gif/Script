@@ -607,9 +607,9 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             }
         }
 
-        if (hasVariant3Context)
+        if (hasVariant3Context && !hasVariant2Context)
         {
-            chosenLanding.x += hasVariant2Context ? 2f : -2f;
+            chosenLanding.x -= 2f;
         }
 
         Vector3 startPosition = new Vector3(chosenLanding.x, spawnY, spawnPosition.z);

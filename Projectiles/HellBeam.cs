@@ -251,7 +251,7 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
         bool hasVariant3Context = (enhancedVariant == 3) || hasVariant3History;
         bool isVariant23Context = hasVariant2Context && hasVariant3Context;
 
-        spawnXOffset = isVariant23Context ? 2f : (hasVariant3Context ? -2f : 0f);
+        spawnXOffset = isVariant23Context ? 0f : (hasVariant3Context ? -2f : 0f);
         useVariant3TargetedSpawn = hasVariant3Context;
 
         CardModifierStats modifiers = new CardModifierStats();

@@ -316,6 +316,31 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         return false;
     }
 
+    private static Vector3 GetSmartTargetingOriginForElement(AdvancedPlayerController playerController, ProjectileType elementType, Vector3 fallback)
+    {
+        if (playerController == null)
+        {
+            return fallback;
+        }
+
+        if (elementType == ProjectileType.Ice)
+        {
+            if (playerController.elementalBeamFirePointRight != null)
+            {
+                return playerController.elementalBeamFirePointRight.position;
+            }
+        }
+        else
+        {
+            if (playerController.elementalBeamFirePointLeft != null)
+            {
+                return playerController.elementalBeamFirePointLeft.position;
+            }
+        }
+
+        return playerController.transform.position;
+    }
+
     // Shared smart-targeting batches so that multiple ElementalBeams spawned
     // from the same card/volley can claim different raycast-sampled
     // directions instead of all stacking on the single best angle.
@@ -856,6 +881,9 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         // Store player controller reference for later firepoint selection
         AdvancedPlayerController playerController = FindObjectOfType<AdvancedPlayerController>();
 
+        Vector3 smartTargetOriginFire = GetSmartTargetingOriginForElement(playerController, ProjectileType.Fire, transform.position);
+        Vector3 smartTargetOriginIce = GetSmartTargetingOriginForElement(playerController, ProjectileType.Ice, transform.position);
+
         // We'll select the correct firepoint AFTER determining firing direction
         Vector3 playerPos = playerController != null ? playerController.transform.position : transform.position;
         bool tempIsOnLeftSide = mainCam != null && playerPos.x < mainCam.transform.position.x;
@@ -1050,7 +1078,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             {
                 Vector2 primaryDir;
                 Vector2 secondaryDir;
-                ClaimSmartTargetDirectionPair(card, skipCooldownCheck, out primaryDir, out secondaryDir);
+                ClaimSmartTargetDirectionPair(card, skipCooldownCheck, smartTargetOriginFire, 1, smartTargetOriginIce, 2, out primaryDir, out secondaryDir);
 
                 // Use primary direction for THIS beam
                 initialDir = primaryDir;
@@ -1086,7 +1114,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             {
                 Vector2 primaryDir;
                 Vector2 secondaryDir;
-                ClaimSmartTargetDirectionPair(card, skipCooldownCheck, out primaryDir, out secondaryDir);
+                ClaimSmartTargetDirectionPair(card, skipCooldownCheck, smartTargetOriginFire, 1, smartTargetOriginIce, 2, out primaryDir, out secondaryDir);
 
                 // Use primary direction for THIS beam
                 initialDir = primaryDir;
@@ -1119,7 +1147,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             if (isStackedVariant12)
             {
                 // STACKED 1+2: pure smart-targeted direction, no clamping.
-                initialDir = ClaimSmartTargetDirection(card, skipCooldownCheck);
+                initialDir = ClaimSmartTargetDirection(card, skipCooldownCheck, smartTargetOriginFire, 1);
                 float smartAngle = Mathf.Atan2(initialDir.y, initialDir.x) * Mathf.Rad2Deg;
                 Debug.Log($"<color=magenta>ElementalBeam STACKED 1+2: Using pure smart-targeted angle {smartAngle:F1}° with no angle-range clamp.</color>");
             }
@@ -1139,7 +1167,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
                 // Use smart targeting within base detection, then clamp to the
                 // selected angle window.
-                initialDir = ClaimSmartTargetDirection(card, skipCooldownCheck);
+                initialDir = ClaimSmartTargetDirection(card, skipCooldownCheck, smartTargetOriginFire, 1);
                 float smartAngle = Mathf.Atan2(initialDir.y, initialDir.x) * Mathf.Rad2Deg;
 
                 if (smartAngle < minAngle || smartAngle > maxAngle)
@@ -1162,7 +1190,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             // SmartTargetingBatch from an earlier beam in the volley. This
             // prevents later beams from aiming at spots where enemies have
             // already died.
-            initialDir = FindBestTargetingDirection(card);
+            initialDir = FindBestTargetingDirection(card, smartTargetOriginFire);
             float smartAngle = Mathf.Atan2(initialDir.y, initialDir.x) * Mathf.Rad2Deg;
             Debug.Log($"<color=cyan>ElementalBeam BASE: Initial smart direction (per-beam scan): ({initialDir.x:F2}, {initialDir.y:F2}), angle: {smartAngle:F1}°</color>");
         }
@@ -1190,17 +1218,17 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         if (playerController != null)
         {
-            Transform selectedFirePoint = firingRight ? playerController.elementalBeamFirePointRight : playerController.elementalBeamFirePointLeft;
+            Transform selectedFirePoint = projectileType == ProjectileType.Ice ? playerController.elementalBeamFirePointRight : playerController.elementalBeamFirePointLeft;
 
             if (selectedFirePoint != null)
             {
                 firePointTransform = selectedFirePoint;
                 playerPos = selectedFirePoint.position;
-                Debug.Log($"<color=lime>ElementalBeam: Firing {(firingRight ? "RIGHT" : "LEFT")} - Using firepoint '{selectedFirePoint.name}' at {selectedFirePoint.position}</color>");
+                Debug.Log($"<color=lime>ElementalBeam: Using firepoint '{selectedFirePoint.name}' at {selectedFirePoint.position}</color>");
             }
             else
             {
-                Debug.LogWarning($"<color=yellow>ElementalBeam: No firepoint for {(firingRight ? "RIGHT" : "LEFT")} side, using player position!</color>");
+                Debug.LogWarning($"<color=yellow>ElementalBeam: No firepoint available, using player position!</color>");
                 firePointTransform = playerController.transform;
                 playerPos = playerController.transform.position;
             }
@@ -1967,14 +1995,19 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     /// </summary>
     private Vector2 FindBestTargetingDirection(ProjectileCards card)
     {
-        return FindBestDirection_RaycastSampling(card);
+        return FindBestDirection_RaycastSampling(card, transform.position);
+    }
+
+    private Vector2 FindBestTargetingDirection(ProjectileCards card, Vector3 origin)
+    {
+        return FindBestDirection_RaycastSampling(card, origin);
     }
 
     // Build a raycast-sampling batch for the given card using the same rules
     // as FindBestDirection_RaycastSampling, but keeping ALL sampled angles and
     // hit counts so multiple beams from the same volley can claim different
     // hit-capable directions.
-    private SmartTargetingBatch BuildRaycastSmartTargetingBatchForCard(ProjectileCards card)
+    private SmartTargetingBatch BuildRaycastSmartTargetingBatchForCard(ProjectileCards card, Vector3 origin)
     {
         SmartTargetingBatch batch = new SmartTargetingBatch();
 
@@ -2008,7 +2041,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         batch.maxAngle = maxAngle;
 
         // PERFORMANCE: Use OverlapCircleNonAlloc with cached array (no GC allocation!)
-        int colliderCount = Physics2D.OverlapCircleNonAlloc(transform.position, smartTargetingDetectionRange, cachedColliders, enemyLayer);
+        int colliderCount = Physics2D.OverlapCircleNonAlloc(origin, smartTargetingDetectionRange, cachedColliders, enemyLayer);
 
         // PERFORMANCE: Clear and reuse cached collections (no GC!)
         cachedEnemySet.Clear();
@@ -2142,7 +2175,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     enemyPosition = enemy.transform.position;
                 }
 
-                Vector2 vectorToEnemy = enemyPosition - (Vector2)transform.position;
+                Vector2 vectorToEnemy = enemyPosition - (Vector2)origin;
                 float distAlongBeam = Vector2.Dot(vectorToEnemy, testDirection);
 
                 // Skip if behind or too far
@@ -2198,7 +2231,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 if (enemy == null) continue;
 
                 Vector2 enemyPos = enemy.transform.position;
-                Vector2 toEnemy = enemyPos - (Vector2)transform.position;
+                Vector2 toEnemy = enemyPos - (Vector2)origin;
                 if (toEnemy.sqrMagnitude <= 0.0001f)
                 {
                     continue;
@@ -2254,29 +2287,30 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     // volley (skipCooldownCheck == false) rebuilds the batch; subsequent beams
     // (skipCooldownCheck == true) reuse it and claim different hit-capable
     // samples when possible.
-    private Vector2 ClaimSmartTargetDirection(ProjectileCards card, bool skipCooldownCheck)
+    private Vector2 ClaimSmartTargetDirection(ProjectileCards card, bool skipCooldownCheck, Vector3 origin, int originKey)
     {
         // Only the RaycastSampling mode participates in per-beam sample
         // distribution. Other modes fall back to the original behaviour.
         if (targetingMode != SmartTargetingMode.RaycastSampling)
         {
-            return FindBestTargetingDirection(card);
+            return FindBestTargetingDirection(card, origin);
         }
 
-        int key = card != null ? card.GetInstanceID() : 0;
+        int cardKey = card != null ? card.GetInstanceID() : 0;
+        int key = (cardKey * 397) ^ originKey;
 
         SmartTargetingBatch batch;
         if (!smartTargetingBatches.TryGetValue(key, out batch) || !skipCooldownCheck)
         {
             // First beam of a volley OR no existing batch: rebuild.
-            batch = BuildRaycastSmartTargetingBatchForCard(card);
+            batch = BuildRaycastSmartTargetingBatchForCard(card, origin);
             smartTargetingBatches[key] = batch;
         }
 
         if (batch == null || batch.candidateDirections.Count == 0)
         {
             // Fallback to single-beam behaviour.
-            return FindBestDirection_RaycastSampling(card);
+            return FindBestDirection_RaycastSampling(card, origin);
         }
 
         // Prefer unused hit-capable samples first.
@@ -2310,7 +2344,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
 
         // Absolute fallback: use the original single-beam logic.
-        return FindBestDirection_RaycastSampling(card);
+        return FindBestDirection_RaycastSampling(card, origin);
     }
 
     // Claim a PAIR of smart-targeted directions for dual-beam variants (pure
@@ -2318,185 +2352,13 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     // SmartTargetingBatch as ClaimSmartTargetDirection so that all primary
     // beams from one volley share a single sampling pass and each claim
     // consumes unique hit-capable angles when possible.
-    private void ClaimSmartTargetDirectionPair(ProjectileCards card, bool skipCooldownCheck, out Vector2 primaryDir, out Vector2 secondaryDir)
+    private void ClaimSmartTargetDirectionPair(ProjectileCards card, bool skipCooldownCheck, Vector3 primaryOrigin, int primaryOriginKey, Vector3 secondaryOrigin, int secondaryOriginKey, out Vector2 primaryDir, out Vector2 secondaryDir)
     {
         primaryDir = Vector2.up;
         secondaryDir = Vector2.up;
 
-        if (targetingMode != SmartTargetingMode.RaycastSampling)
-        {
-            // Non-raycast modes: just reuse the single best direction for both
-            // beams to preserve legacy behaviour.
-            Vector2 best = FindBestTargetingDirection(card);
-            primaryDir = best;
-            secondaryDir = best;
-            return;
-        }
-
-        int key = card != null ? card.GetInstanceID() : 0;
-
-        SmartTargetingBatch batch;
-        if (!smartTargetingBatches.TryGetValue(key, out batch) || !skipCooldownCheck)
-        {
-            // First primary beam of the volley OR missing batch – rebuild.
-            batch = BuildRaycastSmartTargetingBatchForCard(card);
-            smartTargetingBatches[key] = batch;
-        }
-
-        if (batch == null || batch.candidateDirections.Count == 0)
-        {
-            Vector2 fallback = FindBestDirection_RaycastSampling(card);
-            primaryDir = fallback;
-            secondaryDir = fallback;
-            return;
-        }
-
-        // Prefer unused hit-capable samples first so different primaries fan
-        // out across the best angles.
-        if (batch.hasAnyHits && batch.unusedHitIndices.Count > 0)
-        {
-            int primaryIndex = batch.unusedHitIndices[0];
-            batch.unusedHitIndices.RemoveAt(0);
-
-            int secondaryIndex = -1;
-
-            if (batch.unusedHitIndices.Count > 0)
-            {
-                float primaryAngle = batch.candidateAngles[primaryIndex];
-                int bestHits = -1;
-                float bestAngleDelta = -1f;
-
-                // Choose the remaining hit-capable direction that both hits as
-                // many enemies as possible and is as far in angle from the
-                // primary as we can get.
-                for (int i = 0; i < batch.unusedHitIndices.Count; i++)
-                {
-                    int idx = batch.unusedHitIndices[i];
-                    int hits = batch.candidateHits[idx];
-                    float angle = batch.candidateAngles[idx];
-                    float delta = Mathf.Abs(Mathf.DeltaAngle(angle, primaryAngle));
-
-                    if (hits > bestHits || (hits == bestHits && delta > bestAngleDelta))
-                    {
-                        bestHits = hits;
-                        bestAngleDelta = delta;
-                        secondaryIndex = idx;
-                    }
-                }
-
-                if (secondaryIndex >= 0)
-                {
-                    batch.unusedHitIndices.Remove(secondaryIndex);
-                }
-            }
-
-            // If we couldn't find a second unused index (e.g., only one
-            // hit-capable sample), fall back to reusing an existing hit index
-            // that is far from the primary when possible.
-            if (secondaryIndex < 0 && batch.usedHitIndices.Count > 0)
-            {
-                float primaryAngle = batch.candidateAngles[primaryIndex];
-                float bestAngleDelta = -1f;
-                int bestIdx = batch.usedHitIndices[0];
-
-                for (int i = 0; i < batch.usedHitIndices.Count; i++)
-                {
-                    int idx = batch.usedHitIndices[i];
-                    float angle = batch.candidateAngles[idx];
-                    float delta = Mathf.Abs(Mathf.DeltaAngle(angle, primaryAngle));
-
-                    if (delta > bestAngleDelta)
-                    {
-                        bestAngleDelta = delta;
-                        bestIdx = idx;
-                    }
-                }
-
-                secondaryIndex = bestIdx;
-            }
-
-            if (secondaryIndex < 0)
-            {
-                secondaryIndex = primaryIndex;
-            }
-
-            if (!batch.usedHitIndices.Contains(primaryIndex))
-            {
-                batch.usedHitIndices.Add(primaryIndex);
-            }
-            if (!batch.usedHitIndices.Contains(secondaryIndex))
-            {
-                batch.usedHitIndices.Add(secondaryIndex);
-            }
-
-            primaryDir = batch.candidateDirections[primaryIndex];
-            secondaryDir = batch.candidateDirections[secondaryIndex];
-            return;
-        }
-
-        // All hit-capable samples have been used at least once. Reuse them in
-        // a round-robin fashion so extra primaries still aim at good spots.
-        if (batch.hasAnyHits && batch.usedHitIndices.Count > 0)
-        {
-            int reuseCount = batch.usedHitIndices.Count;
-            int primaryIndex = batch.usedHitIndices[Mathf.Abs(batch.reuseCursor) % reuseCount];
-            batch.reuseCursor++;
-            int secondaryIndex = batch.usedHitIndices[Mathf.Abs(batch.reuseCursor) % reuseCount];
-            batch.reuseCursor++;
-
-            primaryDir = batch.candidateDirections[primaryIndex];
-            secondaryDir = batch.candidateDirections[secondaryIndex];
-            return;
-        }
-
-        // No hit-capable samples at all – fan out across the sample window
-        // using the same noHitCursor that ClaimSmartTargetDirection uses, but
-        // consume two distinct samples per claim when possible.
-        if (batch.candidateDirections.Count > 0)
-        {
-            int count = batch.candidateDirections.Count;
-            int primaryIndex = batch.noHitCursor % count;
-            batch.noHitCursor++;
-
-            int secondaryIndex;
-            if (batch.noHitCursor < count)
-            {
-                secondaryIndex = batch.noHitCursor;
-                batch.noHitCursor++;
-            }
-            else
-            {
-                // Choose the sample that is farthest in angle from the primary
-                // to maximize spread.
-                float primaryAngle = batch.candidateAngles[primaryIndex];
-                float bestAngleDelta = -1f;
-                int bestIdx = primaryIndex;
-
-                for (int i = 0; i < count; i++)
-                {
-                    if (i == primaryIndex) continue;
-                    float angle = batch.candidateAngles[i];
-                    float delta = Mathf.Abs(Mathf.DeltaAngle(angle, primaryAngle));
-
-                    if (delta > bestAngleDelta)
-                    {
-                        bestAngleDelta = delta;
-                        bestIdx = i;
-                    }
-                }
-
-                secondaryIndex = bestIdx;
-            }
-
-            primaryDir = batch.candidateDirections[primaryIndex];
-            secondaryDir = batch.candidateDirections[secondaryIndex];
-            return;
-        }
-
-        // Absolute fallback: keep the old dual-beam behaviour.
-        Vector2 fallbackDir = FindBestDirection_RaycastSampling(card);
-        primaryDir = fallbackDir;
-        secondaryDir = fallbackDir;
+        primaryDir = ClaimSmartTargetDirection(card, skipCooldownCheck, primaryOrigin, primaryOriginKey);
+        secondaryDir = ClaimSmartTargetDirection(card, skipCooldownCheck, secondaryOrigin, secondaryOriginKey);
     }
 
     private void GetBeamDimensions(out float beamWidth, out float beamLength)
@@ -2533,7 +2395,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     /// Test multiple directions with raycasts and count hits
     /// PERFORMANCE: Uses cached arrays, minimal allocations, no Debug.Log spam
     /// </summary>
-    private Vector2 FindBestDirection_RaycastSampling(ProjectileCards card)
+    private Vector2 FindBestDirection_RaycastSampling(ProjectileCards card, Vector3 origin)
     {
         // Get angle range from card settings
         float minAngle = -90f;
@@ -2562,7 +2424,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
 
         // PERFORMANCE: Use OverlapCircleNonAlloc with cached array (no GC allocation!)
-        int colliderCount = Physics2D.OverlapCircleNonAlloc(transform.position, smartTargetingDetectionRange, cachedColliders, enemyLayer);
+        int colliderCount = Physics2D.OverlapCircleNonAlloc(origin, smartTargetingDetectionRange, cachedColliders, enemyLayer);
 
         // PERFORMANCE: Clear and reuse cached collections (no GC!)
         cachedEnemySet.Clear();
@@ -2684,7 +2546,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     enemyPosition = enemy.transform.position;
                 }
 
-                Vector2 vectorToEnemy = enemyPosition - (Vector2)transform.position;
+                Vector2 vectorToEnemy = enemyPosition - (Vector2)origin;
                 float distAlongBeam = Vector2.Dot(vectorToEnemy, testDirection);
 
                 // Skip if behind or too far
@@ -2728,7 +2590,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     /// logic, ensuring the second direction only matches the first when there is
     /// literally no other direction that hits any enemy.
     /// </summary>
-    private void FindBestTwoDirections_RaycastSampling(ProjectileCards card, out Vector2 primaryDir, out Vector2 secondaryDir)
+    private void FindBestTwoDirections_RaycastSampling(ProjectileCards card, Vector3 origin, out Vector2 primaryDir, out Vector2 secondaryDir)
     {
         primaryDir = Vector2.up;
         secondaryDir = Vector2.up;
@@ -2757,7 +2619,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
 
         // PERFORMANCE: Use OverlapCircleNonAlloc with cached array (no GC allocation!)
-        int colliderCount = Physics2D.OverlapCircleNonAlloc(transform.position, smartTargetingDetectionRange, cachedColliders, enemyLayer);
+        int colliderCount = Physics2D.OverlapCircleNonAlloc(origin, smartTargetingDetectionRange, cachedColliders, enemyLayer);
 
         // PERFORMANCE: Clear and reuse cached collections (no GC!)
         cachedEnemySet.Clear();
@@ -2874,7 +2736,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     enemyPosition = enemy.transform.position;
                 }
 
-                Vector2 vectorToEnemy = enemyPosition - (Vector2)transform.position;
+                Vector2 vectorToEnemy = enemyPosition - (Vector2)origin;
                 float distAlongBeam = Vector2.Dot(vectorToEnemy, testDirection);
 
                 if (distAlongBeam < 0 || distAlongBeam > beamLength)
@@ -2899,7 +2761,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         // PRIMARY: use the same global smart-targeting core as base / Variant 2
         // (FindBestTargetingDirection), then snap to the closest sampled angle so
         // both beams share the same notion of "best" direction.
-        Vector2 preferredPrimaryDir = FindBestTargetingDirection(card);
+        Vector2 preferredPrimaryDir = FindBestTargetingDirection(card, origin);
         float preferredPrimaryAngle = Mathf.Atan2(preferredPrimaryDir.y, preferredPrimaryDir.x) * Mathf.Rad2Deg;
 
         int primaryIndex = 0;

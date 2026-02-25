@@ -205,6 +205,15 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
             return;
         }
 
+        if (hasLaunched && !isDetonating)
+        {
+            Vector3 euler = transform.eulerAngles;
+            if (!Mathf.Approximately(euler.z, 0f) || !Mathf.Approximately(euler.x, 0f) || !Mathf.Approximately(euler.y, 0f))
+            {
+                transform.rotation = Quaternion.identity;
+            }
+        }
+
         if (thunderBurstActive && !isDetonating && thunderBurstTransforms != null && EnableThunderBurstRotation)
         {
             float dt = GameStateManager.GetPauseSafeDeltaTime();
@@ -741,13 +750,8 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
 
         _rigidbody2D.velocity = chosenDir * finalSpeed;
 
-        if (!keepInitialRotation)
-        {
-            float baseAngle = Mathf.Atan2(chosenDir.y, chosenDir.x) * Mathf.Rad2Deg;
-            float facingCorrection = (int)spriteFacing;
-            float finalAngle = baseAngle + facingCorrection + additionalRotationOffsetDeg;
-            transform.rotation = Quaternion.Euler(0f, 0f, finalAngle);
-        }
+        rotateToVelocity = false;
+        transform.rotation = Quaternion.identity;
 
         PauseSafeSelfDestruct.Schedule(gameObject, finalLifetime);
     }
