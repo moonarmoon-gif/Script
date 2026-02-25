@@ -287,7 +287,7 @@ public class OrbitalStarManager : MonoBehaviour
             {
                 GetNovaStarTrackActivity(out bool seqActive, out bool revActive);
 
-                if (novaV1JustStacked)
+                if (novaV1JustStacked && previousNovaVariant2Stack)
                 {
                     novaSequentialLevel = 1;
                     if (!seqActive)
@@ -296,7 +296,7 @@ public class OrbitalStarManager : MonoBehaviour
                     }
                 }
 
-                if (novaV2JustStacked)
+                if (novaV2JustStacked && previousNovaVariant1Stack)
                 {
                     novaReverseSequentialLevel = 6;
                     if (!revActive)
@@ -310,7 +310,7 @@ public class OrbitalStarManager : MonoBehaviour
             {
                 GetDwarfStarTrackActivity(out bool seqActive, out bool revActive);
 
-                if (dwarfV1JustStacked)
+                if (dwarfV1JustStacked && previousDwarfVariant2Stack)
                 {
                     dwarfSequentialLevel = 1;
                     if (!seqActive)
@@ -319,7 +319,7 @@ public class OrbitalStarManager : MonoBehaviour
                     }
                 }
 
-                if (dwarfV2JustStacked)
+                if (dwarfV2JustStacked && previousDwarfVariant1Stack)
                 {
                     dwarfReverseSequentialLevel = 6;
                     if (!revActive)
@@ -1452,24 +1452,8 @@ public class OrbitalStarManager : MonoBehaviour
                         CheckEnhancedMode();
                         if (!megaSync && novaHasVariant1Stack && novaHasVariant2Stack)
                         {
-                            if (!spawnedReverseDuringSequential)
-                            {
-                                SpawnSingleNovaStarAtLevelReverse(novaReverseSequentialLevel, 0f);
-                                spawnedReverseDuringSequential = true;
-                            }
-
                             transitionToStacked = true;
                             break;
-                        }
-                        if (!megaSync && !spawnedReverseDuringSequential && novaHasVariant1Stack && novaHasVariant2Stack)
-                        {
-                            if (novaReverseSequentialLevel < 4 || novaReverseSequentialLevel > 6)
-                            {
-                                novaReverseSequentialLevel = 6;
-                            }
-
-                            SpawnSingleNovaStarAtLevelReverse(novaReverseSequentialLevel, 0f);
-                            spawnedReverseDuringSequential = true;
                         }
 
                         GetNovaStarTrackActivity(out bool anyNovaSeq, out _);
@@ -1623,24 +1607,8 @@ public class OrbitalStarManager : MonoBehaviour
                         CheckEnhancedMode();
                         if (!megaSync && novaHasVariant1Stack && novaHasVariant2Stack)
                         {
-                            if (!spawnedSequentialDuringReverse)
-                            {
-                                SpawnSingleNovaStarAtLevel(novaSequentialLevel, 0f);
-                                spawnedSequentialDuringReverse = true;
-                            }
-
                             transitionToStacked = true;
                             break;
-                        }
-                        if (!megaSync && !spawnedSequentialDuringReverse && novaHasVariant1Stack && novaHasVariant2Stack)
-                        {
-                            if (novaSequentialLevel < 1 || novaSequentialLevel > 3)
-                            {
-                                novaSequentialLevel = 1;
-                            }
-
-                            SpawnSingleNovaStarAtLevel(novaSequentialLevel, 0f);
-                            spawnedSequentialDuringReverse = true;
                         }
 
                         GetNovaStarTrackActivity(out _, out bool anyNovaRev);
@@ -1991,24 +1959,8 @@ public class OrbitalStarManager : MonoBehaviour
                     CheckEnhancedMode();
                     if (!megaSyncActive && dwarfHasVariant1Stack && dwarfHasVariant2Stack)
                     {
-                        if (!spawnedReverseDuringSequential)
-                        {
-                            SpawnSingleDwarfStarAtLevelReverse(dwarfReverseSequentialLevel, 0f);
-                            spawnedReverseDuringSequential = true;
-                        }
-
                         transitionToStacked = true;
                         break;
-                    }
-                    if (!megaSyncActive && !spawnedReverseDuringSequential && dwarfHasVariant1Stack && dwarfHasVariant2Stack)
-                    {
-                        if (dwarfReverseSequentialLevel < 4 || dwarfReverseSequentialLevel > 6)
-                        {
-                            dwarfReverseSequentialLevel = 6;
-                        }
-
-                        SpawnSingleDwarfStarAtLevelReverse(dwarfReverseSequentialLevel, 0f);
-                        spawnedReverseDuringSequential = true;
                     }
 
                     GetDwarfStarTrackActivity(out bool anyDwarfSeq, out _);
@@ -2074,24 +2026,8 @@ public class OrbitalStarManager : MonoBehaviour
                     CheckEnhancedMode();
                     if (!megaSyncActive && dwarfHasVariant1Stack && dwarfHasVariant2Stack)
                     {
-                        if (!spawnedSequentialDuringReverse)
-                        {
-                            SpawnSingleDwarfStarAtLevel(dwarfSequentialLevel, 0f);
-                            spawnedSequentialDuringReverse = true;
-                        }
-
                         transitionToStacked = true;
                         break;
-                    }
-                    if (!megaSyncActive && !spawnedSequentialDuringReverse && dwarfHasVariant1Stack && dwarfHasVariant2Stack)
-                    {
-                        if (dwarfSequentialLevel < 1 || dwarfSequentialLevel > 3)
-                        {
-                            dwarfSequentialLevel = 1;
-                        }
-
-                        SpawnSingleDwarfStarAtLevel(dwarfSequentialLevel, 0f);
-                        spawnedSequentialDuringReverse = true;
                     }
 
                     GetDwarfStarTrackActivity(out _, out bool anyDwarfRev);

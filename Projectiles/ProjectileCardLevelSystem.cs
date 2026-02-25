@@ -155,12 +155,26 @@ public class ProjectileCardLevelSystem : MonoBehaviour
         int storedVariant = variantIndex;
         if (card.projectileType == ProjectileCards.ProjectileType.HolyShield)
         {
+            int variantBit = 0;
+            if (variantIndex == 1)
+            {
+                variantBit = 1;
+            }
+            else if (variantIndex == 2)
+            {
+                variantBit = 2;
+            }
+            else if (variantIndex == 3)
+            {
+                variantBit = 4;
+            }
+
             int previous = 0;
             if (selectedEnhancedVariants.ContainsKey(cardKey))
             {
                 previous = selectedEnhancedVariants[cardKey];
             }
-            storedVariant = Mathf.Max(0, previous) | Mathf.Max(0, variantIndex);
+            storedVariant = Mathf.Max(0, previous) | Mathf.Max(0, variantBit);
         }
 
         selectedEnhancedVariants[cardKey] = storedVariant;
@@ -210,6 +224,44 @@ public class ProjectileCardLevelSystem : MonoBehaviour
         if (card.projectileType == ProjectileCards.ProjectileType.HolyShield && HolyShield.ActiveShield != null)
         {
             HolyShield.ActiveShield.ApplyVariantFromIndex(storedVariant);
+        }
+
+        if (variantIndex == 3)
+        {
+            if (card.projectileType == ProjectileCards.ProjectileType.NovaStar)
+            {
+                CardModifierStats modifiers = new CardModifierStats();
+                if (ProjectileCardModifiers.Instance != null)
+                {
+                    modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
+                }
+
+                NovaStar[] stars = FindObjectsOfType<NovaStar>();
+                for (int i = 0; i < stars.Length; i++)
+                {
+                    if (stars[i] != null)
+                    {
+                        stars[i].ApplyInstantModifiers(modifiers);
+                    }
+                }
+            }
+            else if (card.projectileType == ProjectileCards.ProjectileType.DwarfStar)
+            {
+                CardModifierStats modifiers = new CardModifierStats();
+                if (ProjectileCardModifiers.Instance != null)
+                {
+                    modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
+                }
+
+                DwarfStar[] stars = FindObjectsOfType<DwarfStar>();
+                for (int i = 0; i < stars.Length; i++)
+                {
+                    if (stars[i] != null)
+                    {
+                        stars[i].ApplyInstantModifiers(modifiers);
+                    }
+                }
+            }
         }
     }
     

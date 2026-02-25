@@ -18,10 +18,11 @@ public class AgisEnemy : MonoBehaviour
     public float TeleportOutDuration = 1f;
     public float DeathDuration = 1f;
 
-    public float PortalAnimationDuration = 1f;
+    public float PortalStartDuration = 1f;
     public float SpawnDelay = 0.25f;
+    public float EnemySpawnInterval = 1f;
 
-    public Transform SpawnPoint;
+    public GameObject SpawnPoint;
 
     public GameObject PortalPrefab;
 
@@ -78,12 +79,13 @@ public class AgisEnemy : MonoBehaviour
 
     private void ApplySpawnPointOffset()
     {
-        if (SpawnPoint == null)
+        Transform spawnPointTransform = SpawnPoint != null ? SpawnPoint.transform : null;
+        if (spawnPointTransform == null)
         {
             return;
         }
 
-        Vector3 localOffset = SpawnPoint.localPosition;
+        Vector3 localOffset = spawnPointTransform.localPosition;
         transform.position = transform.position - localOffset;
     }
 
@@ -130,21 +132,37 @@ public class AgisEnemy : MonoBehaviour
 
             Vector3 spawnPos = entry.PortalPosition.position;
 
+            GameObject portalInstance = null;
             if (PortalPrefab != null)
             {
-                Instantiate(PortalPrefab, spawnPos, Quaternion.identity);
+                portalInstance = Instantiate(PortalPrefab, spawnPos, Quaternion.identity);
             }
 
-            StartCoroutine(SpawnFromPortalRoutine(spawnPos, entry.EnemyName, rarity));
+            StartCoroutine(SpawnFromPortalRoutine(portalInstance, spawnPos, entry.EnemyName, rarity));
         }
     }
 
-    private IEnumerator SpawnFromPortalRoutine(Vector3 portalWorldPosition, string enemyName, CardRarity rarity)
+    private IEnumerator SpawnFromPortalRoutine(GameObject portalInstance, Vector3 portalWorldPosition, string enemyName, CardRarity rarity)
     {
-        float portalAnim = Mathf.Max(0f, PortalAnimationDuration);
-        if (portalAnim > 0f)
+        Animator portalAnimator = null;
+        if (portalInstance != null)
         {
-            yield return GameStateManager.WaitForPauseSafeSeconds(portalAnim);
+            portalAnimator = portalInstance.GetComponent<Animator>();
+            if (portalAnimator == null)
+            {
+                portalAnimator = portalInstance.GetComponentInChildren<Animator>();
+            }
+        }
+
+        float portalStart = Mathf.Max(0f, PortalStartDuration);
+        if (portalStart > 0f)
+        {
+            yield return GameStateManager.WaitForPauseSafeSeconds(portalStart);
+        }
+
+        if (portalAnimator != null)
+        {
+            portalAnimator.SetBool("loop", true);
         }
 
         float delay = Mathf.Max(0f, SpawnDelay);
@@ -158,7 +176,17 @@ public class AgisEnemy : MonoBehaviour
             yield break;
         }
 
-        SpawnEnemyByName(enemyName, portalWorldPosition, rarity);
+        float interval = EnemySpawnInterval;
+        if (interval <= 0f)
+        {
+            interval = 1f;
+        }
+
+        while (enemyHealth == null || enemyHealth.IsAlive)
+        {
+            SpawnEnemyByName(enemyName, portalWorldPosition, rarity);
+            yield return GameStateManager.WaitForPauseSafeSeconds(interval);
+        }
     }
 
     private void SpawnEnemyByName(string enemyName, Vector3 spawnPosition, CardRarity rarity)

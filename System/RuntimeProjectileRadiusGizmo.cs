@@ -46,6 +46,10 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
     private NuclearStrike nuclearStrike;
     private ThunderBird thunderBird;
 
+    private OrbitalStarManager orbitalStarManager;
+    private float cachedYAxisRadiusFadeIn = -5f;
+    private int lastFadeInCacheFrame = -9999;
+
     public void Initialize(GizmoSourceKind sourceKind)
     {
         kind = sourceKind;
@@ -96,6 +100,39 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
         }
     }
 
+    private static void ConfigureMaterialForTransparency(Material mat)
+    {
+        if (mat == null) return;
+
+        mat.renderQueue = (int)RenderQueue.Transparent;
+
+        if (mat.HasProperty("_Surface"))
+        {
+            mat.SetFloat("_Surface", 1f);
+        }
+
+        if (mat.HasProperty("_ZWrite"))
+        {
+            mat.SetFloat("_ZWrite", 0f);
+        }
+
+        if (mat.HasProperty("_SrcBlend") && mat.HasProperty("_DstBlend"))
+        {
+            mat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+            mat.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+        }
+
+        if (mat.HasProperty("_AlphaClip"))
+        {
+            mat.SetFloat("_AlphaClip", 0f);
+        }
+
+        if (mat.HasProperty("_Cutoff"))
+        {
+            mat.SetFloat("_Cutoff", 0f);
+        }
+    }
+
     private void LateUpdate()
     {
         UpdateVisual();
@@ -123,6 +160,7 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Unlit");
             if (shader == null) shader = Shader.Find("Sprites/Default");
             wireMaterial = new Material(shader);
+            ConfigureMaterialForTransparency(wireMaterial);
             wire.material = wireMaterial;
 
             wire.startWidth = 0.03f;
@@ -145,6 +183,7 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Unlit");
             if (shader == null) shader = Shader.Find("Sprites/Default");
             fillMaterial = new Material(shader);
+            ConfigureMaterialForTransparency(fillMaterial);
             fillMeshRenderer.material = fillMaterial;
             fillMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             fillMeshRenderer.receiveShadows = false;
@@ -202,6 +241,10 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
         wire.enabled = true;
         wire.startColor = wireColor;
         wire.endColor = wireColor;
+        if (wireMaterial != null)
+        {
+            wireMaterial.color = wireColor;
+        }
 
         float width = Mathf.Clamp(radius * 0.02f, 0.02f, 0.08f);
         wire.startWidth = width;
@@ -330,6 +373,9 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
                 wireColor = novaStar.damageRadiusGizmoColor;
                 fillColor = Color.clear;
                 drawFill = false;
+
+                float alphaMul = GetOrbitalStarAlphaMultiplier(novaStar.transform.position.y);
+                wireColor = new Color(wireColor.r, wireColor.g, wireColor.b, wireColor.a * alphaMul);
                 return radius > 0f;
             }
 
@@ -348,6 +394,9 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
                 wireColor = dwarfStar.damageRadiusGizmoColor;
                 fillColor = Color.clear;
                 drawFill = false;
+
+                float alphaMul = GetOrbitalStarAlphaMultiplier(dwarfStar.transform.position.y);
+                wireColor = new Color(wireColor.r, wireColor.g, wireColor.b, wireColor.a * alphaMul);
                 return radius > 0f;
             }
 
@@ -420,6 +469,27 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
         }
 
         return false;
+    }
+
+    private float GetOrbitalStarAlphaMultiplier(float y)
+    {
+        if (Time.frameCount - lastFadeInCacheFrame > 30)
+        {
+            lastFadeInCacheFrame = Time.frameCount;
+            if (orbitalStarManager == null)
+            {
+                orbitalStarManager = FindObjectOfType<OrbitalStarManager>();
+            }
+
+            if (orbitalStarManager != null)
+            {
+                cachedYAxisRadiusFadeIn = orbitalStarManager.yAxisRadiusFadeIn;
+            }
+        }
+
+        float fadeRange = 5f;
+        float t = Mathf.InverseLerp(cachedYAxisRadiusFadeIn - fadeRange, cachedYAxisRadiusFadeIn, y);
+        return Mathf.Clamp01(t);
     }
 
     private static bool TryGetWorldRadiusFromCircleCollider(GameObject go, out float worldRadius)

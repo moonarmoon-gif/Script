@@ -207,6 +207,7 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
 
         if (hasLaunched && !isDetonating)
         {
+            rotateToVelocity = false;
             Vector3 euler = transform.eulerAngles;
             if (!Mathf.Approximately(euler.z, 0f) || !Mathf.Approximately(euler.x, 0f) || !Mathf.Approximately(euler.y, 0f))
             {
@@ -801,6 +802,9 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
                 }
             }
         }
+
+        rotateToVelocity = false;
+        transform.rotation = Quaternion.identity;
 
         cachedDetonationEffectWorldPosition = transform.position;
         cachedDetonationCenterWorldPosition = GetExplosionCenterWorld(baseExplosionOffset);

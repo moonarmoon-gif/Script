@@ -6,6 +6,11 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
     [Header("Health Settings")]
     [SerializeField] private float maxHealth = 100f;
 
+    [Header("Enhanced Variant 3")]
+    public float BonusHealth = 200f;
+    public float DecreaseRegenDelayBy = 5f;
+    public float ReduceRespawnDelayBy = 15f;
+
     [Header("Spawn Offset")]
     [SerializeField] private Vector2 spawnOffset = Vector2.zero;
 
@@ -34,6 +39,7 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
     private Collider2D shieldCollider;
     private Collider2D ownerCollider;
     private float baseMaxHealth;
+    private float baseRegenDelay;
     private float baseRespawnDelay;
     private Vector2 baseSpawnOffset;
     private Vector3 baseScale;
@@ -63,6 +69,7 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
             animator = GetComponentInChildren<Animator>();
         }
         baseMaxHealth = maxHealth;
+        baseRegenDelay = regenDelay;
         baseRespawnDelay = respawnDelay;
         baseSpawnOffset = spawnOffset;
         baseScale = transform.localScale;
@@ -181,6 +188,10 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
         }
 
         float newMaxHealth = (baseMaxHealth * healthMult) + modifiers.shieldHealthBonus;
+        if ((activeVariantMask & 4) != 0)
+        {
+            newMaxHealth += BonusHealth;
+        }
         if (newMaxHealth < 1f)
         {
             newMaxHealth = 1f;
@@ -206,6 +217,13 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
         {
             transform.localScale = baseScale;
         }
+
+        float regenBase = baseRegenDelay;
+        if ((activeVariantMask & 4) != 0)
+        {
+            regenBase = Mathf.Max(0f, regenBase - DecreaseRegenDelayBy);
+        }
+        regenDelay = regenBase;
     }
 
     /// <summary>
@@ -233,9 +251,11 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
         int newMask = Mathf.Max(0, variantIndex);
         bool wantsReflect = (newMask & 1) != 0;
         bool wantsNullify = (newMask & 2) != 0;
+        bool wantsVariant3 = (newMask & 4) != 0;
 
         bool hadReflect = (activeVariantMask & 1) != 0;
         bool hadNullify = (activeVariantMask & 2) != 0;
+        bool hadVariant3 = (activeVariantMask & 4) != 0;
 
         if (wantsReflect)
         {
@@ -254,6 +274,30 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
         {
             DestroyNullifyShield();
         }
+
+        if (wantsVariant3 != hadVariant3)
+        {
+            float delta = wantsVariant3 ? BonusHealth : -BonusHealth;
+            if (Mathf.Abs(delta) > 0.001f)
+            {
+                maxHealth = Mathf.Max(1f, maxHealth + delta);
+                if (!isBroken)
+                {
+                    currentHealth = Mathf.Clamp(currentHealth + delta, 0f, maxHealth);
+                }
+                else
+                {
+                    currentHealth = Mathf.Clamp(currentHealth, 0f, maxHealth);
+                }
+            }
+        }
+
+        float regenBase = baseRegenDelay;
+        if (wantsVariant3)
+        {
+            regenBase = Mathf.Max(0f, regenBase - DecreaseRegenDelayBy);
+        }
+        regenDelay = regenBase;
 
         activeVariantMask = newMask;
     }
@@ -455,7 +499,7 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
 
         DestroyReflectShield();
         DestroyNullifyShield();
-        activeVariantMask = 0;
+        activeVariantMask = activeVariantMask & 4;
 
         isBroken = true;
         lastDestroyedTime = GameStateManager.PauseSafeTime;
@@ -604,7 +648,21 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
             modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
         }
 
-        float effectiveRespawnDelay = ComputeEffectiveCooldownSeconds(baseRespawnDelay, card, modifiers);
+        float baseRespawn = baseRespawnDelay;
+        if (card != null && ProjectileCardLevelSystem.Instance != null)
+        {
+            int mask = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
+            if ((mask & 4) != 0)
+            {
+                baseRespawn = Mathf.Max(0.1f, baseRespawnDelay - ReduceRespawnDelayBy);
+            }
+        }
+
+        float effectiveRespawnDelay = ComputeEffectiveCooldownSeconds(baseRespawn, card, modifiers);
+        if (MinCooldownManager.Instance != null)
+        {
+            effectiveRespawnDelay = Mathf.Max(MinCooldownManager.Instance.HolyShield, effectiveRespawnDelay);
+        }
         yield return GameStateManager.WaitForPauseSafeSeconds(effectiveRespawnDelay);
 
         currentHealth = maxHealth;

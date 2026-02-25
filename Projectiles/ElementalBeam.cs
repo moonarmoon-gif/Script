@@ -341,6 +341,47 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         return playerController.transform.position;
     }
 
+    private Vector3 GetSpawnOriginForSmartTargeting(Vector3 firepointOrigin, Vector2 dir, bool useSecondaryOffsets)
+    {
+        Vector2 n = dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector2.right;
+        float angle = Mathf.Atan2(n.y, n.x) * Mathf.Rad2Deg;
+        bool firingRight = n.x >= 0f;
+        float absAngle = Mathf.Abs(angle);
+        bool firingAbove45 = absAngle > 45f && absAngle < 135f;
+
+        Vector2 sideBaseOffset = firingRight ? beamOffsetRight : beamOffsetLeft;
+
+        Vector2 selectedOffset;
+        if (firingRight)
+        {
+            if (useSecondaryOffsets)
+            {
+                Vector2 variantOffset = firingAbove45 ? variant3OffsetRightAbove45 : variant3OffsetRightBelow45;
+                selectedOffset = sideBaseOffset + variantOffset;
+            }
+            else
+            {
+                Vector2 baseOffset = firingAbove45 ? offsetRightAbove45 : offsetRightBelow45;
+                selectedOffset = sideBaseOffset + baseOffset;
+            }
+        }
+        else
+        {
+            if (useSecondaryOffsets)
+            {
+                Vector2 variantOffset = firingAbove45 ? variant3OffsetLeftAbove45 : variant3OffsetLeftBelow45;
+                selectedOffset = sideBaseOffset + variantOffset;
+            }
+            else
+            {
+                Vector2 baseOffset = firingAbove45 ? offsetLeftAbove45 : offsetLeftBelow45;
+                selectedOffset = sideBaseOffset + baseOffset;
+            }
+        }
+
+        return firepointOrigin + (Vector3)selectedOffset;
+    }
+
     // Shared smart-targeting batches so that multiple ElementalBeams spawned
     // from the same card/volley can claim different raycast-sampled
     // directions instead of all stacking on the single best angle.
@@ -351,6 +392,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         public List<float> candidateAngles = new List<float>();
         public List<Vector2> candidateDirections = new List<Vector2>();
         public List<int> candidateHits = new List<int>();
+        public List<float> candidateAimDeltas = new List<float>();
         public List<int> unusedHitIndices = new List<int>();
         public List<int> usedHitIndices = new List<int>();
         public bool hasAnyHits;
@@ -1078,7 +1120,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             {
                 Vector2 primaryDir;
                 Vector2 secondaryDir;
-                ClaimSmartTargetDirectionPair(card, skipCooldownCheck, smartTargetOriginFire, 1, smartTargetOriginIce, 2, out primaryDir, out secondaryDir);
+                ClaimSmartTargetDirectionPair(card, skipCooldownCheck, smartTargetOriginFire, false, 1, smartTargetOriginIce, true, 2, out primaryDir, out secondaryDir);
 
                 // Use primary direction for THIS beam
                 initialDir = primaryDir;
@@ -1114,7 +1156,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             {
                 Vector2 primaryDir;
                 Vector2 secondaryDir;
-                ClaimSmartTargetDirectionPair(card, skipCooldownCheck, smartTargetOriginFire, 1, smartTargetOriginIce, 2, out primaryDir, out secondaryDir);
+                ClaimSmartTargetDirectionPair(card, skipCooldownCheck, smartTargetOriginFire, false, 1, smartTargetOriginIce, true, 2, out primaryDir, out secondaryDir);
 
                 // Use primary direction for THIS beam
                 initialDir = primaryDir;
@@ -1147,7 +1189,9 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             if (isStackedVariant12)
             {
                 // STACKED 1+2: pure smart-targeted direction, no clamping.
-                initialDir = ClaimSmartTargetDirection(card, skipCooldownCheck, smartTargetOriginFire, 1);
+                Vector3 smartOrigin = projectileType == ProjectileType.Ice ? smartTargetOriginIce : smartTargetOriginFire;
+                int batchGroupKey = projectileType == ProjectileType.Ice ? 2 : 1;
+                initialDir = ClaimSmartTargetDirection(card, skipCooldownCheck, smartOrigin, false, batchGroupKey);
                 float smartAngle = Mathf.Atan2(initialDir.y, initialDir.x) * Mathf.Rad2Deg;
                 Debug.Log($"<color=magenta>ElementalBeam STACKED 1+2: Using pure smart-targeted angle {smartAngle:F1}° with no angle-range clamp.</color>");
             }
@@ -1167,7 +1211,9 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
                 // Use smart targeting within base detection, then clamp to the
                 // selected angle window.
-                initialDir = ClaimSmartTargetDirection(card, skipCooldownCheck, smartTargetOriginFire, 1);
+                Vector3 smartOrigin = projectileType == ProjectileType.Ice ? smartTargetOriginIce : smartTargetOriginFire;
+                int batchGroupKey = projectileType == ProjectileType.Ice ? 2 : 1;
+                initialDir = ClaimSmartTargetDirection(card, skipCooldownCheck, smartOrigin, false, batchGroupKey);
                 float smartAngle = Mathf.Atan2(initialDir.y, initialDir.x) * Mathf.Rad2Deg;
 
                 if (smartAngle < minAngle || smartAngle > maxAngle)
@@ -1190,7 +1236,8 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             // SmartTargetingBatch from an earlier beam in the volley. This
             // prevents later beams from aiming at spots where enemies have
             // already died.
-            initialDir = FindBestTargetingDirection(card, smartTargetOriginFire);
+            Vector3 smartOrigin = projectileType == ProjectileType.Ice ? smartTargetOriginIce : smartTargetOriginFire;
+            initialDir = FindBestTargetingDirection(card, smartOrigin);
             float smartAngle = Mathf.Atan2(initialDir.y, initialDir.x) * Mathf.Rad2Deg;
             Debug.Log($"<color=cyan>ElementalBeam BASE: Initial smart direction (per-beam scan): ({initialDir.x:F2}, {initialDir.y:F2}), angle: {smartAngle:F1}°</color>");
         }
@@ -1995,19 +2042,19 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     /// </summary>
     private Vector2 FindBestTargetingDirection(ProjectileCards card)
     {
-        return FindBestDirection_RaycastSampling(card, transform.position);
+        return FindBestDirection_RaycastSampling(card, transform.position, false);
     }
 
     private Vector2 FindBestTargetingDirection(ProjectileCards card, Vector3 origin)
     {
-        return FindBestDirection_RaycastSampling(card, origin);
+        return FindBestDirection_RaycastSampling(card, origin, false);
     }
 
     // Build a raycast-sampling batch for the given card using the same rules
     // as FindBestDirection_RaycastSampling, but keeping ALL sampled angles and
     // hit counts so multiple beams from the same volley can claim different
     // hit-capable directions.
-    private SmartTargetingBatch BuildRaycastSmartTargetingBatchForCard(ProjectileCards card, Vector3 origin)
+    private SmartTargetingBatch BuildRaycastSmartTargetingBatchForCard(ProjectileCards card, Vector3 origin, bool useSecondaryOffsets)
     {
         SmartTargetingBatch batch = new SmartTargetingBatch();
 
@@ -2117,6 +2164,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         batch.candidateAngles.Clear();
         batch.candidateDirections.Clear();
         batch.candidateHits.Clear();
+        batch.candidateAimDeltas.Clear();
         batch.unusedHitIndices.Clear();
         batch.usedHitIndices.Clear();
         batch.hasAnyHits = false;
@@ -2137,6 +2185,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 batch.candidateAngles.Add(angleDeg);
                 batch.candidateDirections.Add(dir);
                 batch.candidateHits.Add(0);
+                batch.candidateAimDeltas.Add(float.PositiveInfinity);
             }
 
             // No hit-capable samples
@@ -2152,8 +2201,10 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             float angleDeg = Mathf.Lerp(minAngle, maxAngle, (float)angleIndex / lerpDenom);
             float angleRad = angleDeg * Mathf.Deg2Rad;
             Vector2 testDirection = new Vector2(Mathf.Cos(angleRad), Mathf.Sin(angleRad));
+            Vector3 sampleOrigin = GetSpawnOriginForSmartTargeting(origin, testDirection, useSecondaryOffsets);
 
             int hitsThisAngle = 0;
+            float aimDeltaThisAngle = float.PositiveInfinity;
 
             for (int enemyIndex = 0; enemyIndex < enemyCount; enemyIndex++)
             {
@@ -2175,7 +2226,16 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     enemyPosition = enemy.transform.position;
                 }
 
-                Vector2 vectorToEnemy = enemyPosition - (Vector2)origin;
+                Vector2 vectorToEnemy = enemyPosition - (Vector2)sampleOrigin;
+                if (vectorToEnemy.sqrMagnitude > 0.0001f)
+                {
+                    float enemyAngle = Mathf.Atan2(vectorToEnemy.y, vectorToEnemy.x) * Mathf.Rad2Deg;
+                    float delta = Mathf.Abs(Mathf.DeltaAngle(angleDeg, enemyAngle));
+                    if (delta < aimDeltaThisAngle)
+                    {
+                        aimDeltaThisAngle = delta;
+                    }
+                }
                 float distAlongBeam = Vector2.Dot(vectorToEnemy, testDirection);
 
                 // Skip if behind or too far
@@ -2199,6 +2259,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             batch.candidateAngles.Add(angleDeg);
             batch.candidateDirections.Add(testDirection);
             batch.candidateHits.Add(hitsThisAngle);
+            batch.candidateAimDeltas.Add(aimDeltaThisAngle);
 
             if (hitsThisAngle > 0)
             {
@@ -2210,7 +2271,12 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         {
             // Sort hit-capable indices by descending hit count so the earliest
             // beams in a volley get the strongest angles.
-            hitIndices.Sort((a, b) => batch.candidateHits[b].CompareTo(batch.candidateHits[a]));
+            hitIndices.Sort((a, b) =>
+            {
+                int hitCmp = batch.candidateHits[b].CompareTo(batch.candidateHits[a]);
+                if (hitCmp != 0) return hitCmp;
+                return batch.candidateAimDeltas[a].CompareTo(batch.candidateAimDeltas[b]);
+            });
             batch.unusedHitIndices.AddRange(hitIndices);
             batch.hasAnyHits = true;
             return batch;
@@ -2231,7 +2297,8 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 if (enemy == null) continue;
 
                 Vector2 enemyPos = enemy.transform.position;
-                Vector2 toEnemy = enemyPos - (Vector2)origin;
+                Vector3 approxOrigin = GetSpawnOriginForSmartTargeting(origin, enemyPos - (Vector2)origin, useSecondaryOffsets);
+                Vector2 toEnemy = enemyPos - (Vector2)approxOrigin;
                 if (toEnemy.sqrMagnitude <= 0.0001f)
                 {
                     continue;
@@ -2268,7 +2335,12 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             {
                 // Sort by descending hit count (number of enemies mapped to
                 // this direction) so the strongest approximations fire first.
-                fallbackIndices.Sort((a, b) => batch.candidateHits[b].CompareTo(batch.candidateHits[a]));
+                fallbackIndices.Sort((a, b) =>
+                {
+                    int hitCmp = batch.candidateHits[b].CompareTo(batch.candidateHits[a]);
+                    if (hitCmp != 0) return hitCmp;
+                    return batch.candidateAimDeltas[a].CompareTo(batch.candidateAimDeltas[b]);
+                });
                 batch.unusedHitIndices.AddRange(fallbackIndices);
                 batch.hasAnyHits = true;
                 return batch;
@@ -2287,7 +2359,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     // volley (skipCooldownCheck == false) rebuilds the batch; subsequent beams
     // (skipCooldownCheck == true) reuse it and claim different hit-capable
     // samples when possible.
-    private Vector2 ClaimSmartTargetDirection(ProjectileCards card, bool skipCooldownCheck, Vector3 origin, int originKey)
+    private Vector2 ClaimSmartTargetDirection(ProjectileCards card, bool skipCooldownCheck, Vector3 origin, bool useSecondaryOffsets, int batchGroupKey)
     {
         // Only the RaycastSampling mode participates in per-beam sample
         // distribution. Other modes fall back to the original behaviour.
@@ -2297,20 +2369,20 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
 
         int cardKey = card != null ? card.GetInstanceID() : 0;
-        int key = (cardKey * 397) ^ originKey;
+        int key = (cardKey * 397) ^ (batchGroupKey * 31) ^ (useSecondaryOffsets ? 1 : 0);
 
         SmartTargetingBatch batch;
         if (!smartTargetingBatches.TryGetValue(key, out batch) || !skipCooldownCheck)
         {
             // First beam of a volley OR no existing batch: rebuild.
-            batch = BuildRaycastSmartTargetingBatchForCard(card, origin);
+            batch = BuildRaycastSmartTargetingBatchForCard(card, origin, useSecondaryOffsets);
             smartTargetingBatches[key] = batch;
         }
 
         if (batch == null || batch.candidateDirections.Count == 0)
         {
             // Fallback to single-beam behaviour.
-            return FindBestDirection_RaycastSampling(card, origin);
+            return FindBestDirection_RaycastSampling(card, origin, useSecondaryOffsets);
         }
 
         // Prefer unused hit-capable samples first.
@@ -2344,7 +2416,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
 
         // Absolute fallback: use the original single-beam logic.
-        return FindBestDirection_RaycastSampling(card, origin);
+        return FindBestDirection_RaycastSampling(card, origin, useSecondaryOffsets);
     }
 
     // Claim a PAIR of smart-targeted directions for dual-beam variants (pure
@@ -2352,13 +2424,13 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     // SmartTargetingBatch as ClaimSmartTargetDirection so that all primary
     // beams from one volley share a single sampling pass and each claim
     // consumes unique hit-capable angles when possible.
-    private void ClaimSmartTargetDirectionPair(ProjectileCards card, bool skipCooldownCheck, Vector3 primaryOrigin, int primaryOriginKey, Vector3 secondaryOrigin, int secondaryOriginKey, out Vector2 primaryDir, out Vector2 secondaryDir)
+    private void ClaimSmartTargetDirectionPair(ProjectileCards card, bool skipCooldownCheck, Vector3 primaryOrigin, bool primaryUseSecondaryOffsets, int primaryBatchGroupKey, Vector3 secondaryOrigin, bool secondaryUseSecondaryOffsets, int secondaryBatchGroupKey, out Vector2 primaryDir, out Vector2 secondaryDir)
     {
         primaryDir = Vector2.up;
         secondaryDir = Vector2.up;
 
-        primaryDir = ClaimSmartTargetDirection(card, skipCooldownCheck, primaryOrigin, primaryOriginKey);
-        secondaryDir = ClaimSmartTargetDirection(card, skipCooldownCheck, secondaryOrigin, secondaryOriginKey);
+        primaryDir = ClaimSmartTargetDirection(card, skipCooldownCheck, primaryOrigin, primaryUseSecondaryOffsets, primaryBatchGroupKey);
+        secondaryDir = ClaimSmartTargetDirection(card, skipCooldownCheck, secondaryOrigin, secondaryUseSecondaryOffsets, secondaryBatchGroupKey);
     }
 
     private void GetBeamDimensions(out float beamWidth, out float beamLength)
@@ -2395,7 +2467,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     /// Test multiple directions with raycasts and count hits
     /// PERFORMANCE: Uses cached arrays, minimal allocations, no Debug.Log spam
     /// </summary>
-    private Vector2 FindBestDirection_RaycastSampling(ProjectileCards card, Vector3 origin)
+    private Vector2 FindBestDirection_RaycastSampling(ProjectileCards card, Vector3 origin, bool useSecondaryOffsets)
     {
         // Get angle range from card settings
         float minAngle = -90f;
@@ -2491,6 +2563,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         int bestCount = 0;
         Vector2 bestDirection = Vector2.up;
         float bestAngleDeg = 90f;
+        float bestAimDelta = float.PositiveInfinity;
 
         int samplesToUse;
         if (enhancedVariant == 2)
@@ -2520,9 +2593,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             float angleDeg = Mathf.Lerp(minAngle, maxAngle, (float)angleIndex / lerpDenom);
             float angleRad = angleDeg * Mathf.Deg2Rad;
             Vector2 testDirection = new Vector2(Mathf.Cos(angleRad), Mathf.Sin(angleRad));
+            Vector3 sampleOrigin = GetSpawnOriginForSmartTargeting(origin, testDirection, useSecondaryOffsets);
 
             // Count how many enemies THIS angle hits
             int hitsThisAngle = 0;
+            float aimDeltaThisAngle = float.PositiveInfinity;
 
             // Test each enemy
             for (int enemyIndex = 0; enemyIndex < enemyCount; enemyIndex++)
@@ -2546,7 +2621,16 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     enemyPosition = enemy.transform.position;
                 }
 
-                Vector2 vectorToEnemy = enemyPosition - (Vector2)origin;
+                Vector2 vectorToEnemy = enemyPosition - (Vector2)sampleOrigin;
+                if (vectorToEnemy.sqrMagnitude > 0.0001f)
+                {
+                    float enemyAngle = Mathf.Atan2(vectorToEnemy.y, vectorToEnemy.x) * Mathf.Rad2Deg;
+                    float delta = Mathf.Abs(Mathf.DeltaAngle(angleDeg, enemyAngle));
+                    if (delta < aimDeltaThisAngle)
+                    {
+                        aimDeltaThisAngle = delta;
+                    }
+                }
                 float distAlongBeam = Vector2.Dot(vectorToEnemy, testDirection);
 
                 // Skip if behind or too far
@@ -2568,18 +2652,13 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             }
 
             // Update best if this angle hits more enemies
-            if (hitsThisAngle > bestCount)
+            if (hitsThisAngle > bestCount || (hitsThisAngle == bestCount && aimDeltaThisAngle < bestAimDelta))
             {
                 bestCount = hitsThisAngle;
                 bestDirection = testDirection;
                 bestAngleDeg = angleDeg;
+                bestAimDelta = aimDeltaThisAngle;
             }
-        }
-
-        // If no angle hits any enemies, fire straight up
-        if (bestCount == 0)
-        {
-            return Vector2.up;
         }
 
         return bestDirection;
