@@ -88,7 +88,7 @@ public class PlayerLevel : MonoBehaviour
 
         // Apply experience multiplier from PlayerStats if it exists
         PlayerStats playerStats = GetComponent<PlayerStats>();
-        float multiplier = playerStats != null ? playerStats.experienceMultiplier : 1f;
+        float multiplier = playerStats != null ? (playerStats.experienceMultiplier / 100f) : 1f;
         float actualAmount = amount * multiplier;
 
         currentExp += actualAmount;

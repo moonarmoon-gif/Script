@@ -83,6 +83,11 @@ public class BatEnemy : MonoBehaviour
         {
             attackDamageDelayV2 = attackDamageDelay;
         }
+    }
+
+    private void ApplyInitialSpriteFlip()
+    {
+        if (spriteRenderer == null) return;
 
         float referenceX = transform.position.x;
         if (AdvancedPlayerController.Instance != null)
@@ -109,7 +114,11 @@ public class BatEnemy : MonoBehaviour
         attackActionToken++;
     }
 
-    void OnEnable() => health.OnDeath += HandleDeath;
+    void OnEnable()
+    {
+        ApplyInitialSpriteFlip();
+        health.OnDeath += HandleDeath;
+    }
 
     void OnDisable()
     {

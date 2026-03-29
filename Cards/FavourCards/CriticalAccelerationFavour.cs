@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [CreateAssetMenu(fileName = "CriticalAccelerationFavour", menuName = "Favour Effects/Critical Acceleration")] 
 public class CriticalAccelerationFavour : FavourEffect
@@ -21,8 +22,8 @@ public class CriticalAccelerationFavour : FavourEffect
     [Tooltip("Additional MaxStack granted when this favour is enhanced.")]
     public int BonusMaxStack = 1;
 
-    [Header("Pick Limit")]
-    public int MaxPickLimit = 0;
+    [FormerlySerializedAs("MaxPickLimit")]
+    [SerializeField, HideInInspector] private int legacyMaxPickLimit = 0;
 
     private PlayerStats playerStats;
     private StatusController statusController;
@@ -33,9 +34,27 @@ public class CriticalAccelerationFavour : FavourEffect
     private bool initialized;
     private int currentMaxStack;
 
-    protected override int GetMaxPickLimit()
+    private void OnEnable()
     {
-        return MaxPickLimit;
+        MigratePickLimitIfNeeded();
+    }
+
+    private void OnValidate()
+    {
+        MigratePickLimitIfNeeded();
+    }
+
+    private void MigratePickLimitIfNeeded()
+    {
+        if (maxPickLimit <= 0 && legacyMaxPickLimit > 0)
+        {
+            maxPickLimit = legacyMaxPickLimit;
+        }
+
+        if (legacyMaxPickLimit != 0 && maxPickLimit == legacyMaxPickLimit)
+        {
+            legacyMaxPickLimit = 0;
+        }
     }
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)

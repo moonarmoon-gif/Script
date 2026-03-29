@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Button script to toggle auto-fire mode
@@ -11,6 +12,8 @@ public class AutoFireButton : MonoBehaviour
 {
     private Button button;
     private bool autoFireEnabled = false;
+
+    private AdvancedPlayerController cachedController;
     
     [Header("Visual Feedback")]
     [Tooltip("Text to show on button (optional - supports both Text and TextMeshProUGUI)")]
@@ -29,26 +32,69 @@ public class AutoFireButton : MonoBehaviour
     {
         button = GetComponent<Button>();
         button.onClick.AddListener(ToggleAutoFire);
-        
-        UpdateButtonText();
+
+        SyncFromController();
+    }
+
+    private void OnEnable()
+    {
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+        SceneManager.sceneLoaded += HandleSceneLoaded;
+        SyncFromController();
+    }
+
+    private void OnDisable()
+    {
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+    }
+
+    private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        SyncFromController();
     }
 
     void ToggleAutoFire()
     {
-        autoFireEnabled = !autoFireEnabled;
-        
-        // Find AdvancedPlayerController and toggle auto-fire
-        AdvancedPlayerController playerController = FindObjectOfType<AdvancedPlayerController>();
-        if (playerController != null)
+        if (cachedController == null)
         {
-            playerController.enableAutoFire = autoFireEnabled;
-            Debug.Log($"<color=yellow>Auto-Fire: {(autoFireEnabled ? "ENABLED" : "DISABLED")}</color>");
+            cachedController = AdvancedPlayerController.Instance;
         }
-        else
+
+        if (cachedController == null)
+        {
+            cachedController = FindObjectOfType<AdvancedPlayerController>(true);
+        }
+
+        if (cachedController == null)
         {
             Debug.LogWarning("AutoFireButton: AdvancedPlayerController not found!");
+            SyncFromController();
+            return;
         }
-        
+
+        autoFireEnabled = !cachedController.enableAutoFire;
+        cachedController.enableAutoFire = autoFireEnabled;
+        Debug.Log($"<color=yellow>Auto-Fire: {(autoFireEnabled ? "ENABLED" : "DISABLED")}</color>");
+        UpdateButtonText();
+    }
+
+    private void SyncFromController()
+    {
+        if (cachedController == null)
+        {
+            cachedController = AdvancedPlayerController.Instance;
+        }
+
+        if (cachedController == null)
+        {
+            cachedController = FindObjectOfType<AdvancedPlayerController>(true);
+        }
+
+        if (cachedController != null)
+        {
+            autoFireEnabled = cachedController.enableAutoFire;
+        }
+
         UpdateButtonText();
     }
     

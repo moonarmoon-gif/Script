@@ -35,7 +35,9 @@ public class ThunderDisc : MonoBehaviour
     public ProjectileType ProjectileElement => projectileType;
 
     [Header("Bounce")]
+    [Tooltip("Chance to bounce to another enemy after hitting one")] 
     public float BounceChance = 100f;
+    public float BounceSpeedBoost = 5f;
     [Range(0f, 100f)] public float ReducedBounceChance = 50f;
 
     // Instance-based cooldown tracking (per prefab type)
@@ -105,6 +107,7 @@ public class ThunderDisc : MonoBehaviour
     private float lastDamageTime = -999f;
     private bool hasHitEnemy = false;
     private bool hasLaunched = false;
+    private bool suppressNextImpactVfx = false;
     private Camera mainCamera;
     private GameObject player;
     private FavourEffectManager favourEffectManager;
@@ -292,6 +295,22 @@ public class ThunderDisc : MonoBehaviour
             cachedPlayerStats = colliderToIgnore.GetComponent<PlayerStats>();
         }
 
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null)
+        {
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
+
         damage = finalDamage;
         baseDamageAfterCards = damage;
 
@@ -304,7 +323,7 @@ public class ThunderDisc : MonoBehaviour
             {
                 if (lastFireTimes.ContainsKey(prefabKey))
                 {
-                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < finalCooldown)
+                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                     {
                         Debug.Log($"FireBolt ({prefabKey}) on cooldown");
                         Destroy(gameObject);
@@ -371,6 +390,11 @@ public class ThunderDisc : MonoBehaviour
     public float GetProjectileSpeed()
     {
         return speed;
+    }
+
+    public float GetCurrentDamage()
+    {
+        return baseDamageAfterCards > 0f ? baseDamageAfterCards : damage;
     }
 
     private bool IsClickHitboxCollider(Collider2D col)
@@ -478,6 +502,8 @@ public class ThunderDisc : MonoBehaviour
         {
             return false;
         }
+
+        currentMoveSpeed += Mathf.Max(0f, BounceSpeedBoost);
 
         if (_rigidbody2D != null)
         {
@@ -590,6 +616,7 @@ public class ThunderDisc : MonoBehaviour
                     staticEffect.TryApplyStatic(other.gameObject, hitPoint);
                 }
 
+                suppressNextImpactVfx = true;
                 TryPlayHitEffect(effectBasePosition, enemyObject);
 
                 if (enemyObject != null)
@@ -694,6 +721,7 @@ public class ThunderDisc : MonoBehaviour
                     staticEffect.TryApplyStatic(collision.gameObject, hitPoint);
                 }
 
+                suppressNextImpactVfx = true;
                 TryPlayHitEffect(hitPoint, enemyObject);
 
                 if (enemyObject != null)
@@ -724,6 +752,7 @@ public class ThunderDisc : MonoBehaviour
             Vector3 hitPoint = collision.contacts[0].point;
             Vector3 hitNormal = collision.contacts[0].normal;
 
+            suppressNextImpactVfx = true;
             TryPlayHitEffect(hitPoint, null);
             HandleImpact(hitPoint, hitNormal, collision.collider.transform);
         }
@@ -737,6 +766,12 @@ public class ThunderDisc : MonoBehaviour
             AudioSource.PlayClipAtPoint(impactClip, point, impactVolume);
         }
 
+        if (suppressNextImpactVfx)
+        {
+            suppressNextImpactVfx = false;
+            return;
+        }
+
         if (hitEffectPrefab == null)
         {
             return;
@@ -748,6 +783,8 @@ public class ThunderDisc : MonoBehaviour
         }
 
         Quaternion rotation = ComputeImpactRotation(point, normal);
+
+        rotation = Quaternion.Euler(0f, 0f, Random.Range(0f, 360f));
 
         Vector3 spawnPos = point;
         spawnPos += (Vector3)GetHitEffectOffsetForImpact(normal);
@@ -862,6 +899,8 @@ public class ThunderDisc : MonoBehaviour
         float facingCorrection = (int)hitEffectSpriteFacing;
         float desired = baseAngle + facingCorrection + hitEffectAdditionalRotationOffsetDeg;
         Quaternion rotation = Quaternion.Euler(0f, 0f, desired);
+
+        rotation = Quaternion.Euler(0f, 0f, Random.Range(0f, 360f));
 
         Vector3 spawnPos = basePosition;
         spawnPos += (Vector3)GetHitEffectOffsetForImpact(Vector3.up);

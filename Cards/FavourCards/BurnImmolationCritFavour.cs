@@ -1,17 +1,36 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
-[CreateAssetMenu(fileName = "BurnImmolationCritFavour", menuName = "Favour Effects/Burn Immolation Crit")]
+[CreateAssetMenu(fileName = "BurnBlazeCritFavour", menuName = "Favour Effects/Burn Blaze Crit")]
 public class BurnImmolationCritFavour : FavourEffect
 {
-    [Header("Pick Limit")]
-    public int MaxPickLimit = 0;
+    [FormerlySerializedAs("MaxPickLimit")]
+    [SerializeField, HideInInspector] private int legacyMaxPickLimit = 0;
 
     private PlayerStats playerStats;
     private int stacks;
 
-    protected override int GetMaxPickLimit()
+    private void OnEnable()
     {
-        return MaxPickLimit;
+        MigratePickLimitIfNeeded();
+    }
+
+    private void OnValidate()
+    {
+        MigratePickLimitIfNeeded();
+    }
+
+    private void MigratePickLimitIfNeeded()
+    {
+        if (maxPickLimit <= 0 && legacyMaxPickLimit > 0)
+        {
+            maxPickLimit = legacyMaxPickLimit;
+        }
+
+        if (legacyMaxPickLimit != 0 && maxPickLimit == legacyMaxPickLimit)
+        {
+            legacyMaxPickLimit = 0;
+        }
     }
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)

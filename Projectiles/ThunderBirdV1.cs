@@ -24,11 +24,11 @@ public class ThunderBirdV1 : MonoBehaviour
 
     private ThunderBird bird;
 
-    // Static tracking for dual spawn alternation (per side)
-    private static bool leftBirdSpawnTop = true;
-    private static bool rightBirdSpawnTop = false;
-    private static bool isFirstDualSpawn = true;
-    private static int variant1SpawnCounter = 0;
+    private static bool hasPendingPair = false;
+    private static int pendingPairFrame = -999;
+    private static bool pendingPairFirstSpawnFromLeft = true;
+    private static bool pendingPairFirstSpawnTop = true;
+    private static int pendingPairBirdCount = 0;
 
     private bool isActive;
 
@@ -87,37 +87,38 @@ public class ThunderBirdV1 : MonoBehaviour
         float maxY = maxPos.position.y;
         float midY = (minY + maxY) / 2f;
 
-        bool isLeftBird = (variant1SpawnCounter % 2 == 0);
-        variant1SpawnCounter++;
-
-        if (isFirstDualSpawn)
+        bool pendingExpired = (Time.frameCount - pendingPairFrame) > 2;
+        if (!hasPendingPair || pendingExpired || pendingPairBirdCount >= 2)
         {
-            leftBirdSpawnTop = Random.value < 0.5f;
-            rightBirdSpawnTop = !leftBirdSpawnTop;
-            isFirstDualSpawn = false;
+            hasPendingPair = true;
+            pendingPairFrame = Time.frameCount;
+            pendingPairFirstSpawnFromLeft = Random.value < 0.5f;
+            pendingPairFirstSpawnTop = Random.value < 0.5f;
+            pendingPairBirdCount = 0;
         }
+
+        pendingPairBirdCount++;
+        bool isFirstBirdInPair = pendingPairBirdCount == 1;
 
         bool spawnInTopZone;
         float spawnX;
         bool movingRight;
         bool spawnedFromLeft;
 
-        if (isLeftBird)
+        if (isFirstBirdInPair)
         {
-            spawnX = minPos.position.x;
-            spawnInTopZone = leftBirdSpawnTop;
-            movingRight = true;
-            spawnedFromLeft = true;
-            leftBirdSpawnTop = !leftBirdSpawnTop;
+            spawnedFromLeft = pendingPairFirstSpawnFromLeft;
+            spawnInTopZone = pendingPairFirstSpawnTop;
         }
         else
         {
-            spawnX = maxPos.position.x;
-            spawnInTopZone = rightBirdSpawnTop;
-            movingRight = false;
-            spawnedFromLeft = false;
-            rightBirdSpawnTop = !rightBirdSpawnTop;
+            spawnedFromLeft = !pendingPairFirstSpawnFromLeft;
+            spawnInTopZone = !pendingPairFirstSpawnTop;
+            hasPendingPair = false;
         }
+
+        spawnX = spawnedFromLeft ? minPos.position.x : maxPos.position.x;
+        movingRight = spawnedFromLeft;
 
         float spawnY;
         int maxAttempts = 10;

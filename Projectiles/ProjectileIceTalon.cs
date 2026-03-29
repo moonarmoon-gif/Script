@@ -30,6 +30,7 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
     [SerializeField] private float cooldown = 0.5f;
     [SerializeField] private LayerMask enemyLayer;
     [SerializeField] private ProjectileType projectileType = ProjectileType.Ice; // ICE TALON - Always Ice type
+    public ProjectileType ProjectileElement => projectileType;
 
     [Header("Enhanced Variant 3 - Slow Chance")]
     [Tooltip("Slow chance for Enhanced Variant 3 (0 = 0%, 0.5 = 50%, 1 = 100%). Applied to SlowEffect.slowChance.")]
@@ -305,6 +306,16 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
         return Vector2.zero;
     }
 
+    public float GetProjectileSpeed()
+    {
+        return speed;
+    }
+
+    public float GetCurrentDamage()
+    {
+        return baseDamageAfterCards > 0f ? baseDamageAfterCards : damage;
+    }
+
     private Vector2 GetHitEffectDirectionalOffset()
     {
         if (_rigidbody2D == null) return Vector2.zero;
@@ -451,6 +462,22 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
         }
         cachedPlayerStats = stats != null ? stats : FindObjectOfType<PlayerStats>();
 
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null)
+        {
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
+
         baseDamageAfterCards = finalDamage;
 
         damage = finalDamage;
@@ -475,7 +502,7 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             {
                 if (!bypassEnhancedFirstSpawnCooldown && lastFireTimes.ContainsKey(prefabKey))
                 {
-                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < finalCooldown)
+                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                     {
                         Destroy(gameObject);
                         return;

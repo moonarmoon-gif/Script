@@ -24,6 +24,12 @@ public class GameStateManager : MonoBehaviour
 
     public static float GetPauseSafeDeltaTime()
     {
+        Scene active = SceneManager.GetActiveScene();
+        if (!active.IsValid() || active.name != "Game")
+        {
+            return 0f;
+        }
+
         if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.IsSelectionActive())
         {
             return 0f;
@@ -113,6 +119,9 @@ public class GameStateManager : MonoBehaviour
     public bool PlayerIsDead => playerIsDead;
 
     public int ForceIdlePerFrame = 25;
+
+    [InspectorName("HideSpriteOnSpawn/Duration")]
+    public float HideSpriteOnSpawnDuration = 0.15f;
 
     private Coroutine forceIdleBatchRoutine;
 
@@ -215,6 +224,39 @@ public class GameStateManager : MonoBehaviour
         UnbindFromPlayerDeath();
         TryBindToPlayerDeath();
         DisableJoiningIfNoPlayerPrefab();
+        TryMovePlayerToScene(scene);
+
+        if (scene.IsValid() && scene.name == "Game")
+        {
+            GameObject player = null;
+            if (AdvancedPlayerController.Instance != null)
+            {
+                player = AdvancedPlayerController.Instance.gameObject;
+            }
+            else if (PlayerController.Instance != null)
+            {
+                player = PlayerController.Instance.gameObject;
+            }
+            else
+            {
+                player = GameObject.FindGameObjectWithTag("Player");
+            }
+
+            if (player != null)
+            {
+                PlayerHealth health = player.GetComponent<PlayerHealth>();
+                if (health != null)
+                {
+                    health.ResetAfterDeath(fillToMax: true);
+                }
+
+                AdvancedPlayerController advanced = player.GetComponent<AdvancedPlayerController>();
+                if (advanced != null)
+                {
+                    advanced.ResetAfterDeath();
+                }
+            }
+        }
     }
 
     private void DisableJoiningIfNoPlayerPrefab()
@@ -232,6 +274,41 @@ public class GameStateManager : MonoBehaviour
 
         mgr.DisableJoining();
         mgr.joinBehavior = PlayerJoinBehavior.JoinPlayersManually;
+    }
+
+    private static void TryMovePlayerToScene(Scene targetScene)
+    {
+        if (!targetScene.IsValid() || targetScene.name != "Game")
+        {
+            return;
+        }
+
+        GameObject player = null;
+        if (AdvancedPlayerController.Instance != null)
+        {
+            player = AdvancedPlayerController.Instance.gameObject;
+        }
+        else if (PlayerController.Instance != null)
+        {
+            player = PlayerController.Instance.gameObject;
+        }
+        else
+        {
+            player = GameObject.FindGameObjectWithTag("Player");
+        }
+
+        if (player == null)
+        {
+            return;
+        }
+
+        if (player.scene == targetScene)
+        {
+            return;
+        }
+
+        player.transform.SetParent(null, true);
+        SceneManager.MoveGameObjectToScene(player, targetScene);
     }
 
     private void TryBindToPlayerDeath()
@@ -293,8 +370,14 @@ public class GameStateManager : MonoBehaviour
     {
         playerIsDead = false;
         activeProjectiles.Clear();
+
         SetAllEnemiesImmuneToPlayerDeath(false);
         RuntimeProjectileRadiusGizmoManager.ResetGlobalStarGizmoState();
+
+        if (TrueLevelRunTracker.Instance != null)
+        {
+            TrueLevelRunTracker.Instance.ResetRun();
+        }
 
         GameObject player = null;
         if (AdvancedPlayerController.Instance != null)
@@ -312,6 +395,18 @@ public class GameStateManager : MonoBehaviour
 
         if (player != null)
         {
+            PlayerHealth health = player.GetComponent<PlayerHealth>();
+            if (health != null)
+            {
+                health.ResetAfterDeath(fillToMax: true);
+            }
+
+            AdvancedPlayerController advanced = player.GetComponent<AdvancedPlayerController>();
+            if (advanced != null)
+            {
+                advanced.ResetAfterDeath();
+            }
+
             FavourEffectManager favourManager = player.GetComponent<FavourEffectManager>();
             if (favourManager != null)
             {
@@ -320,6 +415,11 @@ public class GameStateManager : MonoBehaviour
         }
 
         ExtraExpPerRarityFavour.ResetRunState();
+
+        if (FavourRarityManager.Instance != null)
+        {
+            FavourRarityManager.Instance.ResetRunState();
+        }
     }
 
     /// <summary>
@@ -341,6 +441,14 @@ public class GameStateManager : MonoBehaviour
 
         // Make all enemies immune to damage
         SetAllEnemiesImmuneToPlayerDeath(true);
+
+        OrbitalStarManager orbital = FindObjectOfType<OrbitalStarManager>();
+        if (orbital != null)
+        {
+            orbital.StopAllStarSpawningOnPlayerDeath();
+        }
+
+        FireMine.ForceExplodeAllOnPlayerDeath();
 
         // Disable EXP gain (handled by EnemyHealth checking PlayerIsDead)
     }

@@ -109,7 +109,7 @@ public class VariantSelectorButton : MonoBehaviour
         // Apply the chosen enhanced variant via ProjectileCardLevelSystem
         if (ProjectileCardLevelSystem.Instance != null)
         {
-            int variantIndex = Mathf.Clamp(variantInfo.variantIndex, 1, 3);
+            int variantIndex = Mathf.Clamp(variantInfo.variantIndex, 1, 4);
             ProjectileCardLevelSystem.Instance.SetEnhancedVariant(targetCard, variantIndex);
         }
 

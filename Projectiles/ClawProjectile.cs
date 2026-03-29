@@ -120,6 +120,22 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
             cachedPlayerStats = FindObjectOfType<PlayerStats>();
         }
 
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null)
+        {
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
+
         baseDamageAfterCards = finalDamage;
         damage = finalDamage;
 
@@ -133,7 +149,7 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
         {
             if (lastFireTimes.ContainsKey(prefabKey))
             {
-                if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < finalCooldown)
+                if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                 {
                     Destroy(gameObject);
                     return;

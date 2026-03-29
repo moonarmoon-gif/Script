@@ -273,6 +273,11 @@ public class FireBall : MonoBehaviour
             return;
         }
 
+        if (IsFireBiteBossTarget(enemyHealth))
+        {
+            return;
+        }
+
         fireBiteHasLockedTarget = true;
         fireBiteTarget = enemyHealth;
         hasHitEnemy = true;
@@ -606,6 +611,22 @@ public class FireBall : MonoBehaviour
             cachedPlayerStats = colliderToIgnore.GetComponent<PlayerStats>();
         }
 
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null)
+        {
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
+
         damage = finalDamage;
         baseDamageAfterCards = damage;
 
@@ -618,7 +639,7 @@ public class FireBall : MonoBehaviour
             {
                 if (lastFireTimes.ContainsKey(prefabKey))
                 {
-                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < finalCooldown)
+                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                     {
                         Debug.Log($"FireBolt ({prefabKey}) on cooldown");
                         Destroy(gameObject);
@@ -723,7 +744,11 @@ public class FireBall : MonoBehaviour
 
         if (other != null && ((1 << other.gameObject.layer) & enemyLayer) != 0 && ShouldUseFireBiteSpecial())
         {
-            return;
+            EnemyHealth enemyHealth = other.GetComponent<EnemyHealth>() ?? other.GetComponentInParent<EnemyHealth>();
+            if (enemyHealth == null || !IsFireBiteBossTarget(enemyHealth))
+            {
+                return;
+            }
         }
 
         if (EnableFireBite && fireBiteHasLockedTarget)
@@ -828,7 +853,11 @@ public class FireBall : MonoBehaviour
     {
         if (collision != null && ((1 << collision.gameObject.layer) & enemyLayer) != 0 && ShouldUseFireBiteSpecial())
         {
-            return;
+            EnemyHealth enemyHealth = collision.gameObject.GetComponent<EnemyHealth>() ?? collision.gameObject.GetComponentInParent<EnemyHealth>();
+            if (enemyHealth == null || !IsFireBiteBossTarget(enemyHealth))
+            {
+                return;
+            }
         }
 
         if (EnableFireBite && fireBiteHasLockedTarget)

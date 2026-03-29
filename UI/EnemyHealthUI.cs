@@ -27,6 +27,8 @@ public class EnemyHealthUI : MonoBehaviour
     [Header("Position Settings")]
     [Tooltip("Offset from enemy position (X, Y)")]
     [SerializeField] private Vector2 offset = new Vector2(0f, 1.5f);
+
+    public Vector2 FlippedOffset = new Vector2(-0.5f, 0f);
     
     [Header("Colors")]
     [SerializeField] private Color highHealthColor = Color.green;
@@ -144,7 +146,19 @@ public class EnemyHealthUI : MonoBehaviour
         // Follow enemy position with offset
         if (enemyTransform != null && mainCamera != null)
         {
-            Vector3 worldPos = enemyTransform.position + (Vector3)offset;
+            Vector2 finalOffset = offset;
+
+            NorcthexEnemy norcthex = enemyTransform.GetComponent<NorcthexEnemy>();
+            if (norcthex != null)
+            {
+                SpriteRenderer enemySprite = enemyTransform.GetComponent<SpriteRenderer>();
+                if (enemySprite != null && enemySprite.flipX)
+                {
+                    finalOffset += FlippedOffset;
+                }
+            }
+
+            Vector3 worldPos = enemyTransform.position + (Vector3)finalOffset;
             transform.position = worldPos;
             
             // CRITICAL: Make health bar face camera WITHOUT inheriting enemy's rotation

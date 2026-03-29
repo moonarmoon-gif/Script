@@ -189,11 +189,6 @@ public class NovaStar : MonoBehaviour, IInstantModifiable
 
     private float GetVisualDeltaTime()
     {
-        if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.IsSelectionActive())
-        {
-            return 0f;
-        }
-
         return GameStateManager.GetPauseSafeDeltaTime();
     }
 

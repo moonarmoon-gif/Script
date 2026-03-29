@@ -90,7 +90,7 @@ public class ManaOnStatusDeathFavour : FavourEffect
             return;
         }
 
-        float now = Time.time;
+        float now = GameStateManager.PauseSafeTime;
         int enemyId = enemy.GetInstanceID();
 
         PruneOldEntries(now);
@@ -123,7 +123,7 @@ public class ManaOnStatusDeathFavour : FavourEffect
             return;
         }
 
-        float now = Time.time;
+        float now = GameStateManager.PauseSafeTime;
         int enemyId = enemy.GetInstanceID();
 
         PruneOldEntries(now);
@@ -205,7 +205,7 @@ public class ManaOnStatusDeathFavour : FavourEffect
 
         playerMana.IncreaseMaxMana(grant);
         totalGrantedMana += grant;
-        grantedTime[enemyId] = Time.time;
+        grantedTime[enemyId] = GameStateManager.PauseSafeTime;
     }
 
     private bool HasGranted(int enemyId)

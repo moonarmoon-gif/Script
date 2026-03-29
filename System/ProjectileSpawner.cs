@@ -21,6 +21,8 @@ public class ProjectileSpawner : MonoBehaviour
     // Track active ElementalBeam stagger coroutines to prevent overlapping spawns
     private Dictionary<string, Coroutine> activeBeamCoroutines = new Dictionary<string, Coroutine>();
 
+    private bool stoppedForPlayerDeath;
+
     // Cancel any running staggered ElementalBeam coroutine for this card so that
     // when the card becomes enhanced (e.g., Variant 3), no leftover base-version
     // beams from the staggered sequence continue firing and visually desync the
@@ -50,7 +52,7 @@ public class ProjectileSpawner : MonoBehaviour
         public float nextSpawnTime;
         public bool isFirstSpawn;
 
-        public ProjectileSpawnData(ProjectileCards projectileCard)
+        public ProjectileSpawnData(ProjectileCards projectileCard, PlayerStats playerStats)
         {
             card = projectileCard;
             isFirstSpawn = true;
@@ -58,13 +60,27 @@ public class ProjectileSpawner : MonoBehaviour
             // Use runtime interval if set, otherwise fall back to inspector value
             float interval = projectileCard.runtimeSpawnInterval > 0 ? projectileCard.runtimeSpawnInterval : projectileCard.spawnInterval;
             
-            // Apply first-time spawn cooldown reduction
             if (isFirstSpawn && projectileCard.firstTimeSelectionCooldownReduction > 0)
             {
                 interval *= (1f - projectileCard.firstTimeSelectionCooldownReduction);
                 Debug.Log($"<color=gold>{projectileCard.cardName} FIRST SPAWN: Cooldown reduced to {interval:F2}s</color>");
             }
-            
+
+            if (playerStats != null)
+            {
+                float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
+                interval *= multiplier;
+            }
+
+            if (MinCooldownManager.Instance != null)
+            {
+                interval = MinCooldownManager.Instance.ClampCooldown(card, interval);
+            }
+            else
+            {
+                interval = Mathf.Max(0.1f, interval);
+            }
+
             nextSpawnTime = GameStateManager.PauseSafeTime + interval;
         }
     }
@@ -130,10 +146,11 @@ public class ProjectileSpawner : MonoBehaviour
 
         float baseInterval = card.runtimeSpawnInterval > 0f ? card.runtimeSpawnInterval : card.spawnInterval;
         float finalInterval = baseInterval;
-        if (playerStats != null && playerStats.projectileCooldownReduction > 0f)
+
+        if (playerStats != null)
         {
-            float totalCdr = Mathf.Max(0f, playerStats.projectileCooldownReduction);
-            finalInterval = baseInterval / (1f + totalCdr);
+            float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
+            finalInterval = baseInterval * multiplier;
         }
 
         if (MinCooldownManager.Instance != null)
@@ -301,7 +318,12 @@ public class ProjectileSpawner : MonoBehaviour
             }
         }
         
-        activeProjectiles.Add(new ProjectileSpawnData(card));
+        if (playerStats == null)
+        {
+            playerStats = GetComponent<PlayerStats>();
+        }
+
+        activeProjectiles.Add(new ProjectileSpawnData(card, playerStats));
     }
 
     public bool HasProjectile(ProjectileCards card)
@@ -318,6 +340,20 @@ public class ProjectileSpawner : MonoBehaviour
 
     void Update()
     {
+        bool playerIsDead = GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead;
+        if (playerIsDead)
+        {
+            if (!stoppedForPlayerDeath)
+            {
+                stoppedForPlayerDeath = true;
+                StopAllCoroutines();
+                activeBeamCoroutines.Clear();
+            }
+            return;
+        }
+
+        stoppedForPlayerDeath = false;
+
         float now = GameStateManager.PauseSafeTime;
         foreach (var data in activeProjectiles)
         {
@@ -348,10 +384,11 @@ public class ProjectileSpawner : MonoBehaviour
                 }
 
                 float finalInterval = interval;
-                if (playerStats != null && playerStats.projectileCooldownReduction > 0f)
+
+                if (playerStats != null)
                 {
-                    float totalCdr = Mathf.Max(0f, playerStats.projectileCooldownReduction);
-                    finalInterval = interval / (1f + totalCdr);
+                    float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
+                    finalInterval = interval * multiplier;
                 }
 
                 if (MinCooldownManager.Instance != null)
@@ -604,18 +641,18 @@ public class ProjectileSpawner : MonoBehaviour
             // Check if this is Variant 1 (dual spawn)
             int enhancedVariant = 0;
             bool hasVariant1History = false;
-            bool hasVariant3History = false;
+            bool hasVariant2History = false;
             if (ProjectileCardLevelSystem.Instance != null)
             {
                 enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(data.card);
                 hasVariant1History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 1);
-                hasVariant3History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 3);
+                hasVariant2History = ProjectileCardLevelSystem.Instance.HasChosenVariant(data.card, 2);
             }
 
-            bool isVariant13Active = hasVariant1History && hasVariant3History;
+            bool isVariant12Active = hasVariant1History && hasVariant2History;
             
             int birdProjectileCount;
-            if (enhancedVariant == 1 || isVariant13Active)
+            if (enhancedVariant == 1 || isVariant12Active)
             {
                 // VARIANT 1: Spawns in PAIRS (left + right)
                 // Base: 2 birds (1 left + 1 right)
@@ -1791,6 +1828,17 @@ public class ProjectileSpawner : MonoBehaviour
             
             // Apply reduction
             float reducedInterval = baseInterval * (1f - reductionPercent);
+
+            if (playerStats == null)
+            {
+                playerStats = GetComponent<PlayerStats>();
+            }
+
+            if (playerStats != null)
+            {
+                float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
+                reducedInterval *= multiplier;
+            }
 
             if (MinCooldownManager.Instance != null)
             {

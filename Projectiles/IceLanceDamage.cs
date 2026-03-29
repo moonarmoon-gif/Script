@@ -145,7 +145,8 @@ public class IceLanceDamage : MonoBehaviour
                 statusController.AddStatus(StatusId.Slow, stacksToAdd, duration, 0f, sourceCard);
 
                 int slowStacksAfter = statusController.GetStacks(StatusId.Slow);
-                if (slowStacksAfter > slowStacksBefore && DamageNumberManager.Instance != null)
+                bool triggeredFreeze = slowStacksBefore < 4 && slowStacksAfter >= 4 && statusController.HasStatus(StatusId.Freeze);
+                if (slowStacksAfter > slowStacksBefore && DamageNumberManager.Instance != null && !triggeredFreeze)
                 {
                     Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(ownerGO, ownerGO.transform.position);
                     DamageNumberManager.Instance.ShowSlow(anchor);

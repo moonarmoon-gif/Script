@@ -45,10 +45,14 @@ public class StatusEffectManager : MonoBehaviour
 
         if (DamageNumberManager.Instance != null)
         {
-            Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
-            if (!EnemyDamagePopupScope.SuppressPopups)
+            StatusController statusController = GetComponent<StatusController>() ?? GetComponentInParent<StatusController>();
+            if (statusController == null || !statusController.HasStatus(StatusId.Immolation))
             {
-                DamageNumberManager.Instance.ShowBurn(anchor);
+                Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
+                if (!EnemyDamagePopupScope.SuppressPopups)
+                {
+                    DamageNumberManager.Instance.ShowBurn(anchor);
+                }
             }
         }
 
@@ -96,10 +100,14 @@ public class StatusEffectManager : MonoBehaviour
 
         if (DamageNumberManager.Instance != null)
         {
-            Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
-            if (!EnemyDamagePopupScope.SuppressPopups)
+            StatusController statusController = GetComponent<StatusController>() ?? GetComponentInParent<StatusController>();
+            if (statusController == null || !statusController.HasStatus(StatusId.Freeze))
             {
-                DamageNumberManager.Instance.ShowSlow(anchor);
+                Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, transform.position);
+                if (!EnemyDamagePopupScope.SuppressPopups)
+                {
+                    DamageNumberManager.Instance.ShowSlow(anchor);
+                }
             }
         }
 

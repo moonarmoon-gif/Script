@@ -538,11 +538,11 @@ public class Collapse : MonoBehaviour, IInstantModifiable
         }
 
         float effectiveCooldown = finalCooldown;
-        if (playerStats != null && playerStats.projectileCooldownReduction > 0f)
+        if (playerStats != null)
         {
-            float totalCdr = Mathf.Max(0f, playerStats.projectileCooldownReduction);
+            float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
 
-            effectiveCooldown = finalCooldown / (1f + totalCdr);
             if (MinCooldownManager.Instance != null && card != null)
             {
                 effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);

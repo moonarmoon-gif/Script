@@ -28,8 +28,8 @@ public class ProjectileCooldownReductionFavour : FavourEffect
         }
 
         stacks = 1;
-        float delta = Mathf.Max(0f, CooldownReduction) / 100f;
-        playerStats.projectileCooldownReduction += delta;
+        float delta = Mathf.Max(0f, CooldownReduction);
+        playerStats.Cooldown -= delta;
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -45,8 +45,8 @@ public class ProjectileCooldownReductionFavour : FavourEffect
         }
 
         stacks++;
-        float delta = Mathf.Max(0f, CooldownReduction) / 100f;
-        playerStats.projectileCooldownReduction += delta;
+        float delta = Mathf.Max(0f, CooldownReduction);
+        playerStats.Cooldown -= delta;
     }
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)
@@ -56,8 +56,8 @@ public class ProjectileCooldownReductionFavour : FavourEffect
             return;
         }
 
-        float delta = Mathf.Max(0f, CooldownReduction) / 100f;
+        float delta = Mathf.Max(0f, CooldownReduction);
         float total = delta * stacks;
-        playerStats.projectileCooldownReduction = Mathf.Max(0f, playerStats.projectileCooldownReduction - total);
+        playerStats.Cooldown += total;
     }
 }

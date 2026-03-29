@@ -94,6 +94,12 @@ public class PlayerHealth : MonoBehaviour, IDamageable
                         float blessPercent = StatusControllerManager.Instance.BlessingHealingIncreasePercent;
                         float totalBonus = Mathf.Max(0f, blessPercent * blessingStacks);
                         regenAmount *= 1f + totalBonus / 100f;
+
+                        float extra = StatusControllerManager.Instance.BlessingExtraHealingPercent;
+                        if (extra > 0f)
+                        {
+                            regenAmount *= 1f + extra / 100f;
+                        }
                     }
                 }
 
@@ -134,6 +140,12 @@ public class PlayerHealth : MonoBehaviour, IDamageable
             {
                 float blessPercent = StatusControllerManager.Instance.BlessingHealingIncreasePercent;
                 healAmount *= 1f + blessPercent / 100f;
+
+                float extra = StatusControllerManager.Instance.BlessingExtraHealingPercent;
+                if (extra > 0f)
+                {
+                    healAmount *= 1f + extra / 100f;
+                }
             }
         }
     
@@ -627,8 +639,87 @@ public class PlayerHealth : MonoBehaviour, IDamageable
         OnHealthChanged?.Invoke(CurrentHealth, MaxHealth);
     }
 
+    public void ResetAfterDeath(bool fillToMax = true)
+    {
+        var collider = GetComponent<Collider2D>();
+        if (collider != null)
+        {
+            collider.enabled = true;
+        }
+
+        var rb = GetComponent<Rigidbody2D>();
+        if (rb != null)
+        {
+            rb.simulated = true;
+        }
+
+        var controller = GetComponent<PlayerController>();
+        if (controller != null)
+        {
+            controller.ResetAfterDeath();
+        }
+
+        var advanced = GetComponent<AdvancedPlayerController>();
+        if (advanced != null)
+        {
+            advanced.ResetAfterDeath();
+        }
+
+        if (animator != null)
+        {
+            animator.ResetTrigger("dead");
+            animator.Rebind();
+            animator.Update(0f);
+        }
+
+        if (fillToMax)
+        {
+            currentHealth = maxHealth;
+        }
+        else
+        {
+            currentHealth = Mathf.Clamp(currentHealth, 0f, maxHealth);
+        }
+
+        lastDamageTime = -999f;
+        nextRegenTime = Time.time + healthRegenInterval;
+        RaiseHealthChanged();
+    }
+
     public void ResetHealth()
     {
+        currentHealth = maxHealth;
+        lastDamageTime = -999f;
+        RaiseHealthChanged();
+    }
+
+    public void ResetPlayer()
+    {
+        var collider = GetComponent<Collider2D>();
+        if (collider != null)
+        {
+            collider.enabled = true;
+        }
+
+        var rb = GetComponent<Rigidbody2D>();
+        if (rb != null)
+        {
+            rb.simulated = true;
+        }
+
+        var controller = GetComponent<PlayerController>();
+        if (controller != null)
+        {
+            controller.enabled = true;
+        }
+
+        if (animator != null)
+        {
+            animator.ResetTrigger("dead");
+            animator.Rebind();
+            animator.Update(0f);
+        }
+
         currentHealth = maxHealth;
         lastDamageTime = -999f;
         RaiseHealthChanged();

@@ -491,6 +491,7 @@ public class SkellyArcherEnemy : MonoBehaviour
         int myToken = BeginShootAction();
         isShootingProjectile = true;
         canShoot = false;
+        isInPreAttackDelay = true;
 
         yield return StaticPauseHelper.WaitWhileStatic(
             () => isDead || isSummoning || isPlayerDead || myToken != shootActionToken || player == null || (AdvancedPlayerController.Instance != null && !AdvancedPlayerController.Instance.enabled),

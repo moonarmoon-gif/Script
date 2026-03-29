@@ -105,7 +105,7 @@ public class ExecuteOnDamageTakenFavour : FavourEffect
             return;
         }
 
-        float now = Time.time;
+        float now = GameStateManager.PauseSafeTime;
         if (now - lastTriggerTime < currentCooldown)
         {
             return;

@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [CreateAssetMenu(fileName = "ManaAccelerationFavour", menuName = "Favour Effects/Mana Acceleration")]
 public class ManaAccelerationFavour : FavourEffect
@@ -11,8 +12,8 @@ public class ManaAccelerationFavour : FavourEffect
     [Header("Enhanced")]
     public int BonusAccelerationGain = 1;
 
-    [Header("Pick Limit")]
-    public int MaxPickLimit = 0;
+    [FormerlySerializedAs("MaxPickLimit")]
+    [SerializeField, HideInInspector] private int legacyMaxPickLimit = 0;
 
     private PlayerMana playerMana;
     private StatusController statusController;
@@ -21,9 +22,27 @@ public class ManaAccelerationFavour : FavourEffect
     private int stacksGranted;
     private float rescanTimer;
 
-    protected override int GetMaxPickLimit()
+    private void OnEnable()
     {
-        return MaxPickLimit;
+        MigratePickLimitIfNeeded();
+    }
+
+    private void OnValidate()
+    {
+        MigratePickLimitIfNeeded();
+    }
+
+    private void MigratePickLimitIfNeeded()
+    {
+        if (maxPickLimit <= 0 && legacyMaxPickLimit > 0)
+        {
+            maxPickLimit = legacyMaxPickLimit;
+        }
+
+        if (legacyMaxPickLimit != 0 && maxPickLimit == legacyMaxPickLimit)
+        {
+            legacyMaxPickLimit = 0;
+        }
     }
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)

@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -16,6 +16,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
     [SerializeField] private float strikeZoneRadius = 2f;
     [Tooltip("Offset for strike zone detection area in X and Y coordinates")]
     [SerializeField] private Vector2 strikeZoneOffset = Vector2.zero;
+    [Range(0f, 1f)] public float RuntimeGizmoAlphaMultiplier = 1f;
     [Tooltip("Delay before damage is registered when enemy enters strike zone (in seconds)")]
     [SerializeField] private float damageDelay = 0.25f;
     [SerializeField] private float damage = 30f;
@@ -58,6 +59,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
     private ThunderBirdV1 variant1Component;
     private ThunderBirdV2 variant2Component;
+    private ThunderBirdV3 variant3Component;
 
     private Rigidbody2D _rigidbody2D;
     private Collider2D _collider2D;
@@ -70,6 +72,9 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
     private HashSet<GameObject> damagedEnemies = new HashSet<GameObject>();
     private Dictionary<GameObject, float> pendingDamageEnemies = new Dictionary<GameObject, float>();
     private readonly HashSet<GameObject> pendingVariant2GlobalStrikeEnemies = new HashSet<GameObject>();
+    private readonly HashSet<GameObject> variant2RolledEnemies = new HashSet<GameObject>();
+    private readonly HashSet<GameObject> variant2EnemiesInStrikeZone = new HashSet<GameObject>();
+    private System.Predicate<GameObject> pruneVariant2RolledPredicate;
 
     private int pendingVariant2StrikeRequests;
     private GameObject pendingVariant2TriggerEnemyRoot;
@@ -124,12 +129,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
     // Enhanced system
     private int enhancedVariant = 0;
-
-    // Static tracking for dual spawn alternation (per side)
-    private static bool leftBirdSpawnTop = true;
-    private static bool rightBirdSpawnTop = false;
-    private static bool isFirstDualSpawn = true;
-    private static int variant1SpawnCounter = 0;
 
     // Static tracking for cross-direction collision avoidance
     private static List<Vector3> currentFrameSpawnPositions = new List<Vector3>();
@@ -370,6 +369,13 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
             _rigidbody2D.bodyType = RigidbodyType2D.Kinematic;
             _rigidbody2D.velocity = Vector2.zero;
         }
+
+        pruneVariant2RolledPredicate = PruneVariant2RolledEnemy;
+    }
+
+    private bool PruneVariant2RolledEnemy(GameObject enemyRoot)
+    {
+        return enemyRoot == null || !variant2EnemiesInStrikeZone.Contains(enemyRoot);
     }
 
     public void Initialize(Vector3 spawnPosition, Collider2D playerCollider, bool skipCooldownCheck = false)
@@ -378,21 +384,26 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
         bool hasVariant1History = false;
         bool hasVariant2History = false;
+        bool hasVariant3History = false;
 
         if (ProjectileCardLevelSystem.Instance != null && card != null)
         {
             enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
             hasVariant1History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
             hasVariant2History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
+            hasVariant3History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
         }
 
         bool hasVariant1Context = (enhancedVariant == 1) || hasVariant1History;
         bool hasVariant2Context = (enhancedVariant == 2) || hasVariant2History;
+        bool hasVariant3Context = (enhancedVariant == 3) || hasVariant3History;
 
         isVariant12Active = hasVariant1Context && hasVariant2Context;
         isVariant2Active = (enhancedVariant == 2) || isVariant12Active;
 
         pendingVariant2GlobalStrikeEnemies.Clear();
+        variant2RolledEnemies.Clear();
+        variant2EnemiesInStrikeZone.Clear();
         pendingVariant2StrikeRequests = 0;
         pendingVariant2TriggerEnemyRoot = null;
 
@@ -406,6 +417,22 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         if (variant2Component != null)
         {
             variant2Component.Configure(isVariant2Active);
+        }
+
+        variant3Component = GetComponent<ThunderBirdV3>();
+        if (variant3Component != null)
+        {
+            variant3Component.Configure(hasVariant3Context);
+
+            if (variant3Component.IsActive)
+            {
+                ProjectileStatusChanceAdditiveBonus additive = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+                if (additive == null)
+                {
+                    additive = gameObject.AddComponent<ProjectileStatusChanceAdditiveBonus>();
+                }
+                additive.staticBonusPercent = Mathf.Max(additive.staticBonusPercent, Mathf.Max(0f, variant3Component.GetStaticChanceIncrease()));
+            }
         }
 
         if (!string.IsNullOrEmpty(minPosTag))
@@ -464,6 +491,12 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
             }
         }
 
+        if (variant3Component != null && variant3Component.TryGetBaseCooldownOverride(out float v3BaseCooldownOverride))
+        {
+            baseCooldown = v3BaseCooldownOverride;
+            if (card != null) card.runtimeSpawnInterval = Mathf.Max(0.1f, v3BaseCooldownOverride);
+        }
+
         if (variant1Active)
         {
             float v1CooldownMult = variant1Component != null
@@ -518,27 +551,43 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         }
 
         strikeZoneOffset = new Vector2(strikeZoneOffset.x, transform.localScale.y * 1.5f);
+        damage = baseDamage + modifiers.damageFlat;
+        baseDamageAfterCards = damage;
 
         cachedPlayerStats = null;
         if (playerCollider != null) cachedPlayerStats = playerCollider.GetComponent<PlayerStats>();
         if (cachedPlayerStats == null) cachedPlayerStats = FindObjectOfType<PlayerStats>();
 
-        baseDamageAfterCards = damage;
-
         prefabKey = "ThunderBird";
+
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null)
+        {
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
 
         if (!skipCooldownCheck)
         {
             if (lastFireTimes.ContainsKey(prefabKey))
             {
-                if (Time.time - lastFireTimes[prefabKey] < finalCooldown)
+                if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                 {
                     Destroy(gameObject);
                     return;
                 }
             }
 
-            lastFireTimes[prefabKey] = Time.time;
+            lastFireTimes[prefabKey] = GameStateManager.PauseSafeTime;
         }
 
         if (_collider2D != null && playerCollider != null)
@@ -555,62 +604,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                 usedV1ComponentSpawn = variant1Component.TryApplyVariant1SpawnPosition(spawnPosition);
             }
 
-            if (!usedV1ComponentSpawn && variant1Active)
-            {
-                float minY = minPos.position.y;
-                float maxY = maxPos.position.y;
-                float midY = (minY + maxY) / 2f;
-
-                bool isLeftBird = (variant1SpawnCounter % 2 == 0);
-                variant1SpawnCounter++;
-
-                if (isFirstDualSpawn)
-                {
-                    leftBirdSpawnTop = Random.value < 0.5f;
-                    rightBirdSpawnTop = !leftBirdSpawnTop;
-                    isFirstDualSpawn = false;
-                }
-
-                bool spawnInTopZone;
-                float spawnX;
-
-                if (isLeftBird)
-                {
-                    spawnX = minPos.position.x;
-                    spawnInTopZone = leftBirdSpawnTop;
-                    isMovingRight = true;
-                    spawnedFromLeft = true;
-                    leftBirdSpawnTop = !leftBirdSpawnTop;
-                }
-                else
-                {
-                    spawnX = maxPos.position.x;
-                    spawnInTopZone = rightBirdSpawnTop;
-                    isMovingRight = false;
-                    spawnedFromLeft = false;
-                    rightBirdSpawnTop = !rightBirdSpawnTop;
-                }
-
-                float spawnY;
-                int maxAttempts = 10;
-                int attempt = 0;
-                bool validPosition = false;
-
-                do
-                {
-                    spawnY = spawnInTopZone ? Random.Range(midY, maxY) : Random.Range(minY, midY);
-                    Vector3 testPos = new Vector3(spawnX, spawnY, spawnPosition.z);
-                    validPosition = !CheckBirdOverlap(testPos);
-                    attempt++;
-                } while (!validPosition && attempt < maxAttempts);
-
-                Vector3 finalPosition = new Vector3(spawnX, spawnY, spawnPosition.z);
-                transform.position = finalPosition;
-
-                currentFrameSpawnPositions.Add(finalPosition);
-                if (spriteRenderer != null) spriteRenderer.flipX = !isMovingRight;
-            }
-            else
+            if (!usedV1ComponentSpawn)
             {
                 Random.InitState(System.DateTime.Now.Millisecond + GetInstanceID());
 
@@ -631,6 +625,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                 } while (!validPosition && attempt < maxAttempts);
 
                 transform.position = new Vector3(spawnX, spawnY, spawnPosition.z);
+                RecordSpawnPosition(transform.position);
 
                 isMovingRight = spawnFromLeftLocal;
                 spawnedFromLeft = spawnFromLeftLocal;
@@ -641,6 +636,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         else
         {
             transform.position = spawnPosition;
+            RecordSpawnPosition(transform.position);
             isMovingRight = true;
         }
 
@@ -650,6 +646,12 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
             _audioSource.volume = flyVolume;
             _audioSource.loop = true;
             _audioSource.Play();
+        }
+
+        PredeterminedStatusRoll pre = GetComponent<PredeterminedStatusRoll>();
+        if (pre == null)
+        {
+            pre = gameObject.AddComponent<PredeterminedStatusRoll>();
         }
 
         StartCoroutine(FlyRoutine(finalLifetime));
@@ -664,6 +666,11 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         if (variant1Component != null && variant1Component.IsActive)
         {
             gracePeriod = variant1Component.GetGracePeriod(baseGracePeriod);
+        }
+
+        if (variant2Component != null && variant2Component.IsActive)
+        {
+            gracePeriod = Mathf.Max(gracePeriod, variant2Component.GetGracePeriod(baseGracePeriod));
         }
 
         while (elapsedTime < lifetime)
@@ -688,14 +695,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
     {
         while (true)
         {
-            bool birdCanDamageHere = OffscreenDamageChecker.CanTakeDamage(transform.position);
-
-            if (!birdCanDamageHere)
-            {
-                yield return new WaitForFixedUpdate();
-                continue;
-            }
-
             if (damagedEnemies.Count > 0)
             {
                 damagedEnemies.RemoveWhere(e => e == null || !e.activeInHierarchy || ((e.GetComponent<EnemyHealth>() ?? e.GetComponentInParent<EnemyHealth>()) != null && !((e.GetComponent<EnemyHealth>() ?? e.GetComponentInParent<EnemyHealth>()).IsAlive)));
@@ -706,8 +705,15 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                 pendingVariant2GlobalStrikeEnemies.RemoveWhere(e => e == null || !e.activeInHierarchy || ((e.GetComponent<EnemyHealth>() ?? e.GetComponentInParent<EnemyHealth>()) != null && !((e.GetComponent<EnemyHealth>() ?? e.GetComponentInParent<EnemyHealth>()).IsAlive)));
             }
 
+            if (variant2RolledEnemies.Count > 0)
+            {
+                variant2RolledEnemies.RemoveWhere(e => e == null || !e.activeInHierarchy || ((e.GetComponent<EnemyHealth>() ?? e.GetComponentInParent<EnemyHealth>()) != null && !((e.GetComponent<EnemyHealth>() ?? e.GetComponentInParent<EnemyHealth>()).IsAlive)));
+            }
+
             Vector2 strikeCenter = (Vector2)transform.position + strikeZoneOffset;
             Collider2D[] hitColliders = Physics2D.OverlapCircleAll(strikeCenter, strikeZoneRadius, enemyLayer);
+
+            variant2EnemiesInStrikeZone.Clear();
 
             foreach (Collider2D hitCollider in hitColliders)
             {
@@ -716,30 +722,37 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                 GameObject enemyRoot = ResolveEnemyRootForStrike(hitCollider.gameObject);
                 if (enemyRoot == null) enemyRoot = hitCollider.gameObject;
 
+                if (enemyRoot != null)
+                {
+                    variant2EnemiesInStrikeZone.Add(enemyRoot);
+                }
+
                 if (pendingVariant2GlobalStrikeEnemies.Contains(enemyRoot)) continue;
-                if (damagedEnemies.Contains(enemyRoot)) continue;
+                bool alreadyDamaged = damagedEnemies.Contains(enemyRoot);
                 if (pendingDamageEnemies.ContainsKey(enemyRoot)) continue;
 
                 IDamageable damageable = enemyRoot.GetComponent<IDamageable>() ?? enemyRoot.GetComponentInParent<IDamageable>();
                 if (damageable == null || !damageable.IsAlive) continue;
 
-                if (!OffscreenDamageChecker.CanTakeDamage(hitCollider.transform.position)) continue;
-
-                bool canAttemptGlobalRoll = isVariant2Active && variant2StrikeRoutine == null && pendingVariant2StrikeRequests == 0;
-                if (canAttemptGlobalRoll)
+                bool canRollVariant2 = isVariant2Active && variant2Component != null && variant2Component.IsActive && !variant2RolledEnemies.Contains(enemyRoot);
+                if (canRollVariant2)
                 {
-                    float chance = variant2Component != null && variant2Component.IsActive
-                        ? variant2Component.GlobalStrikeChancePercent
-                        : 0f;
+                    variant2RolledEnemies.Add(enemyRoot);
 
+                    float chance = variant2Component.GlobalStrikeChancePercent;
                     float rollThreshold = Mathf.Clamp01(chance / 100f);
                     if (Random.value <= rollThreshold)
                     {
-                        RequestVariant2Strike(enemyRoot);
-
-                        break;
+                        bool strikeWasRunning = variant2StrikeRoutine != null;
+                        if (RequestVariant2Strike(enemyRoot) || strikeWasRunning)
+                        {
+                            damagedEnemies.Add(enemyRoot);
+                            continue;
+                        }
                     }
                 }
+
+                if (alreadyDamaged) continue;
 
                 pendingDamageEnemies[enemyRoot] = Time.time + damageDelay;
 
@@ -752,6 +765,11 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
                     SpawnStrikeEffectFollowing(hitCollider, effectPosition, strikeEffectSizeMultiplier);
                 }
+            }
+
+            if (variant2RolledEnemies.Count > 0)
+            {
+                variant2RolledEnemies.RemoveWhere(pruneVariant2RolledPredicate);
             }
 
             // Apply pending damage
@@ -776,12 +794,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                     continue;
                 }
 
-                if (!OffscreenDamageChecker.CanTakeDamage(enemy.transform.position))
-                {
-                    pendingDamageEnemies.Remove(enemy);
-                    continue;
-                }
-
                 Vector3 enemyPosition = enemy.transform.position;
                 Vector3 hitNormal = (strikeCenter - (Vector2)enemyPosition).normalized;
 
@@ -800,7 +812,29 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                     enemyHealth1.SetLastIncomingDamageType(DamageNumberManager.DamageType.Thunder);
                 }
 
-                damageable.TakeDamage(finalDamage, enemyPosition, hitNormal);
+                OffscreenDamageBypassScope.BeginAllowOffscreenDamage();
+                try
+                {
+                    damageable.TakeDamage(finalDamage, enemyPosition, hitNormal);
+                }
+                finally
+                {
+                    OffscreenDamageBypassScope.EndAllowOffscreenDamage();
+                }
+
+                StatusController.TryApplyBurnFromProjectile(gameObject, enemyObj, enemyPosition, finalDamage);
+
+                SlowEffect slowEffect = GetComponent<SlowEffect>();
+                if (slowEffect != null)
+                {
+                    slowEffect.TryApplySlow(enemyObj, enemyPosition);
+                }
+
+                StaticEffect staticEffect = GetComponent<StaticEffect>();
+                if (staticEffect != null)
+                {
+                    staticEffect.TryApplyStatic(enemyObj, enemyPosition);
+                }
 
                 damagedEnemies.Add(enemy);
 
@@ -848,16 +882,22 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         SpawnStrikeEffectFollowing(followCollider, positionAtSchedule, sizeMultiplier);
     }
 
-    private void RequestVariant2Strike(GameObject triggerEnemyRoot)
+    private bool RequestVariant2Strike(GameObject triggerEnemyRoot)
     {
-        if (!isVariant2Active) return;
-        if (mainCamera == null) return;
+        if (!isVariant2Active) return false;
+        if (mainCamera == null) return false;
+
+        if (triggerEnemyRoot != null)
+        {
+            pendingDamageEnemies.Remove(triggerEnemyRoot);
+        }
 
         if (variant2StrikeRoutine != null)
         {
-            pendingVariant2StrikeRequests++;
-            if (pendingVariant2TriggerEnemyRoot == null) pendingVariant2TriggerEnemyRoot = triggerEnemyRoot;
-            return;
+            pendingVariant2StrikeRequests = 1;
+            pendingVariant2TriggerEnemyRoot = triggerEnemyRoot;
+
+            return false;
         }
 
         int maxStrikesPerFrame = 0;
@@ -887,7 +927,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
             if (enemyRoot == null) enemyRoot = enemyCollider.gameObject;
 
             if (pendingVariant2GlobalStrikeEnemies.Contains(enemyRoot)) continue;
-
             pendingDamageEnemies.Remove(enemyRoot);
             pendingVariant2GlobalStrikeEnemies.Add(enemyRoot);
 
@@ -903,6 +942,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         }
 
         variant2StrikeRoutine = StartCoroutine(PerformVariant2StrikeRoutine(targets.ToArray(), maxStrikesPerFrame, damageNumbersPerFrame));
+        return true;
     }
 
     private IEnumerator PerformVariant2StrikeRoutine(Collider2D[] targets, int maxStrikesPerFrame, int damageNumbersPerFrame)
@@ -974,12 +1014,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                 }
 
                 Vector3 enemyPosition = enemyCollider.transform.position;
-                if (!OffscreenDamageChecker.CanTakeDamage(enemyPosition))
-                {
-                    pendingVariant2GlobalStrikeEnemies.Remove(enemyRoot);
-                    continue;
-                }
-
                 Vector2 strikeCenter = (Vector2)transform.position + strikeZoneOffset;
                 Vector3 hitNormal = (strikeCenter - (Vector2)enemyPosition).normalized;
 
@@ -997,11 +1031,33 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                     enemyHealth.SetLastIncomingDamageType(DamageNumberManager.DamageType.Thunder);
                 }
 
-                damageable.TakeDamage(finalDamage, enemyPosition, hitNormal);
+                OffscreenDamageBypassScope.BeginAllowOffscreenDamage();
+                try
+                {
+                    damageable.TakeDamage(finalDamage, enemyPosition, hitNormal);
+                }
+                finally
+                {
+                    OffscreenDamageBypassScope.EndAllowOffscreenDamage();
+                }
+
+                StatusController.TryApplyBurnFromProjectile(gameObject, enemyObj, enemyPosition, finalDamage);
+
+                SlowEffect slowEffect = GetComponent<SlowEffect>();
+                if (slowEffect != null)
+                {
+                    slowEffect.TryApplySlow(enemyObj, enemyPosition);
+                }
+
+                StaticEffect staticEffect = GetComponent<StaticEffect>();
+                if (staticEffect != null)
+                {
+                    staticEffect.TryApplyStatic(enemyObj, enemyPosition);
+                }
+
                 variant2StrikesThisFrame++;
 
                 pendingVariant2GlobalStrikeEnemies.Remove(enemyRoot);
-                damagedEnemies.Add(enemyRoot);
 
                 if (strikeEffectPrefab != null && strikeEffectTimingAdjustment <= 0f)
                 {
@@ -1045,6 +1101,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
             if (pendingVariant2StrikeRequests > 0)
             {
                 pendingVariant2StrikeRequests = 0;
+
                 GameObject trigger = pendingVariant2TriggerEnemyRoot;
                 pendingVariant2TriggerEnemyRoot = null;
                 if (isActiveAndEnabled)

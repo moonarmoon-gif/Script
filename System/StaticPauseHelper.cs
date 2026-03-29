@@ -11,7 +11,18 @@ public static class StaticPauseHelper
             cachedStaticStatus = owner.GetComponent<StaticStatus>();
         }
 
-        return cachedStaticStatus != null && cachedStaticStatus.IsInStaticPeriod;
+        if (cachedStaticStatus != null && cachedStaticStatus.IsInStaticPeriod)
+        {
+            return true;
+        }
+
+        if (owner == null)
+        {
+            return false;
+        }
+
+        StatusController statusController = owner.GetComponent<StatusController>() ?? owner.GetComponentInParent<StatusController>();
+        return statusController != null && statusController.HasStatus(StatusId.Freeze);
     }
 
     public static IEnumerator WaitWhileStatic(Func<bool> shouldCancel, Func<bool> isStaticFrozen)

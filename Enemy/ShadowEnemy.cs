@@ -276,11 +276,27 @@ public class ShadowEnemy : MonoBehaviour
 
     void OnEnable()
     {
+        ApplyInitialSpriteFlip();
         if (health != null)
         {
             health.OnDeath += HandleDeath;
             health.OnDamageTaken += OnDamageTaken;
         }
+    }
+
+    private void ApplyInitialSpriteFlip()
+    {
+        if (spriteRenderer == null) return;
+
+        if (player == null && AdvancedPlayerController.Instance != null)
+        {
+            player = AdvancedPlayerController.Instance.transform;
+        }
+
+        if (player == null) return;
+
+        bool shouldFlip = !(player.position.x > transform.position.x);
+        spriteRenderer.flipX = shouldFlip;
     }
 
     void OnDisable()
@@ -314,13 +330,6 @@ public class ShadowEnemy : MonoBehaviour
         currentBounceSpeed = bounceSpeed;
         bounceSpeedBonus = 0f;
         lastSpeedIncreaseTime = Time.time;
-
-        // Set initial sprite direction immediately based on spawn position
-        if (player != null && spriteRenderer != null)
-        {
-            bool shouldFlip = !(player.position.x > transform.position.x);
-            spriteRenderer.flipX = shouldFlip;
-        }
 
         if (!isDead && bounceRoutine == null)
         {

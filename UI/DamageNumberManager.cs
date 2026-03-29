@@ -24,6 +24,7 @@ public class DamageNumberManager : MonoBehaviour
 
     [Header("Damage Colors")]
     [SerializeField] private Color fireDamageColor = new Color(1f, 0.5f, 0f);
+    [SerializeField] private Color blazeDamageColor = new Color(1f, 0.35f, 0.15f);
     [SerializeField] private Color iceDamageColor = new Color(0.5f, 0.8f, 1f);
     [SerializeField] private Color thunderDamageColor = new Color(1f, 1f, 0f);
     [SerializeField] private Color playerDamageColor = Color.red;
@@ -36,18 +37,25 @@ public class DamageNumberManager : MonoBehaviour
     [Header("Status Popup Colors")]
     [SerializeField] private Color immuneStatusColor = Color.red;
     [SerializeField] private Color burnStatusColor = new Color(1f, 0.4f, 0f);
+    [SerializeField] private Color blazeStatusColor = new Color(1f, 0.35f, 0.15f);
     [SerializeField] private Color slowStatusColor = new Color(0.4f, 0.8f, 1f);
+    [SerializeField] private Color freezeStatusColor = new Color(0.6f, 0.9f, 1f);
+    [SerializeField] private Color staticStatusColor = new Color(1f, 1f, 0f);
     [SerializeField] private Color executeStatusColor = Color.red;
     [SerializeField] private Color poisonStatusColor = new Color(0.5f, 1f, 0.5f);
     [SerializeField] private Color bleedStatusColor = new Color(0.9f, 0.1f, 0.1f);
     [SerializeField] private Color woundStatusColor = new Color(1f, 0.6f, 0.2f);
+    [SerializeField] private Color weakStatusColor = new Color(1f, 0.6f, 0.2f);
     [SerializeField] private Color nullifyStatusColor = new Color(0.6f, 0.9f, 1f);
     [SerializeField] private Color reflectStatusColor = new Color(1f, 1f, 0.6f);
 
     [Header("Status Popup Offsets (world space)")]
     [SerializeField] private Vector3 immuneStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 burnStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 blazeStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 slowStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 freezeStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 staticStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 executeStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 poisonStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 bleedStatusOffset = new Vector3(0f, 1.5f, 0f);
@@ -55,10 +63,10 @@ public class DamageNumberManager : MonoBehaviour
     [SerializeField] private Vector3 reflectStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 nullifyStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 weakStatusOffset = new Vector3(0f, 1.5f, 0f);
-    
-    [Header("Wound Damage Number Offset (world space)")]
-    [SerializeField] private Vector3 woundDamageNumberOffset = new Vector3(0f, 1.5f, 0f);
-    
+
+    [Header("Global Offset")]
+    public Vector3 DamageNumberOffset = Vector3.zero;
+
     [Header("Damage Number Settings")]
     [Tooltip("Base font size for normal damage numbers")]
     [SerializeField] private float damageNumberFontSize = 36f;
@@ -113,6 +121,9 @@ public class DamageNumberManager : MonoBehaviour
     [Tooltip("Maximum number of Thunderbird strike hits processed per frame. 0 or negative = unlimited.")]
     public int MaxStrikesPerFrame = 0;
 
+    [Header("Aggregation")]
+    public float AggregationWindow = 0.3f;
+
     [Header("Camera Scaling")]
     [Tooltip("If true, damage number font size will be scaled inversely with Camera.main.orthographicSize so they keep a consistent apparent size as the camera zooms.")]
     [SerializeField] private bool scaleWithCameraSize = true;
@@ -131,7 +142,19 @@ public class DamageNumberManager : MonoBehaviour
         public bool isBurn;
     }
 
+    private struct AggregatedDamageBucket
+    {
+        public float sumDamage;
+        public Vector3 worldPosition;
+        public DamageType damageType;
+        public bool isCrit;
+        public bool isBurn;
+        public float flushAt;
+    }
+
     private readonly Queue<PendingDamageNumber> pendingDamageNumbers = new Queue<PendingDamageNumber>();
+
+    private readonly Dictionary<int, AggregatedDamageBucket> aggregatedBuckets = new Dictionary<int, AggregatedDamageBucket>();
 
     // Public accessors
     public float DamageNumberFontSize => damageNumberFontSize;
@@ -144,6 +167,12 @@ public class DamageNumberManager : MonoBehaviour
     public float ReflectFontSize => reflectFontSize > 0f ? reflectFontSize : StatusFontSize;
     public float FloatSpeed => floatSpeed;
     public float Duration => duration;
+
+    public Color BlazeDamageColor => blazeDamageColor;
+    public Color BlazeStatusColor => blazeStatusColor;
+    public Color FreezeStatusColor => freezeStatusColor;
+    public Vector3 BlazeStatusOffset => blazeStatusOffset;
+    public Vector3 FreezeStatusOffset => freezeStatusOffset;
 
     public Vector3 ImmuneStatusOffset => immuneStatusOffset;
     public Vector3 ReflectStatusOffset => reflectStatusOffset;
@@ -274,6 +303,11 @@ public class DamageNumberManager : MonoBehaviour
     public AnimationCurve ScaleCurve => scaleCurve;
     public bool ScaleWithCameraSize => scaleWithCameraSize;
 
+    private Vector3 ApplyGlobalOffset(Vector3 worldPosition)
+    {
+        return worldPosition + DamageNumberOffset;
+    }
+
     public enum DamageType
     {
         Fire,
@@ -284,7 +318,8 @@ public class DamageNumberManager : MonoBehaviour
         Poison,
         Thorn,
         Reflect,
-        Wound
+        Wound,
+        Blaze
     }
 
     private void Awake()
@@ -382,8 +417,91 @@ public class DamageNumberManager : MonoBehaviour
 
     private void Update()
     {
+        FlushExpiredAggregates();
+
         int maxPerFrame = DamageNumbersPerFrame <= 0 ? int.MaxValue : DamageNumbersPerFrame;
         ProcessPendingDamageNumbers(maxPerFrame);
+    }
+
+    private void FlushExpiredAggregates()
+    {
+        if (AggregationWindow <= 0f)
+        {
+            aggregatedBuckets.Clear();
+            return;
+        }
+
+        if (aggregatedBuckets.Count == 0)
+        {
+            return;
+        }
+
+        float now = GameStateManager.PauseSafeTime;
+
+        List<int> toRemove = null;
+        foreach (KeyValuePair<int, AggregatedDamageBucket> kvp in aggregatedBuckets)
+        {
+            AggregatedDamageBucket bucket = kvp.Value;
+            if (now >= bucket.flushAt)
+            {
+                EnqueueDamageNumber(bucket.sumDamage, bucket.worldPosition, bucket.damageType, bucket.isCrit, bucket.isBurn);
+
+                toRemove ??= new List<int>();
+                toRemove.Add(kvp.Key);
+            }
+        }
+
+        if (toRemove != null)
+        {
+            for (int i = 0; i < toRemove.Count; i++)
+            {
+                aggregatedBuckets.Remove(toRemove[i]);
+            }
+        }
+    }
+
+    public void ShowDamageAggregated(GameObject target, float damage, Vector3 worldPosition, DamageType damageType, bool isCrit = false, bool isBurn = false)
+    {
+        if (target == null || AggregationWindow <= 0f)
+        {
+            ShowDamage(damage, worldPosition, damageType, isCrit, isBurn);
+            return;
+        }
+
+        int key = target.GetInstanceID();
+        float now = GameStateManager.PauseSafeTime;
+        float flushAt = now + AggregationWindow;
+
+        if (!aggregatedBuckets.TryGetValue(key, out AggregatedDamageBucket bucket))
+        {
+            bucket.sumDamage = 0f;
+            bucket.worldPosition = worldPosition;
+            bucket.damageType = damageType;
+            bucket.isCrit = isCrit;
+            bucket.isBurn = isBurn;
+            bucket.flushAt = flushAt;
+        }
+
+        bucket.sumDamage += damage;
+
+        bucket.worldPosition = worldPosition;
+
+        if (isCrit)
+        {
+            bucket.isCrit = true;
+        }
+        if (isBurn)
+        {
+            bucket.isBurn = true;
+        }
+
+        if ((int)damageType != (int)bucket.damageType)
+        {
+            bucket.damageType = damageType;
+        }
+
+        bucket.flushAt = flushAt;
+        aggregatedBuckets[key] = bucket;
     }
 
     private void EnqueueDamageNumber(float damage, Vector3 worldPosition, DamageType damageType, bool isCrit, bool isBurn)
@@ -415,6 +533,8 @@ public class DamageNumberManager : MonoBehaviour
             Debug.LogWarning("DamageNumberManager: Missing prefab or canvas!");
             return;
         }
+
+        worldPosition = ApplyGlobalOffset(worldPosition);
 
         // Get color based on damage type
         Color color = GetColorForDamageType(damageType);
@@ -477,6 +597,8 @@ public class DamageNumberManager : MonoBehaviour
         {
             case DamageType.Fire:
                 return fireDamageColor;
+            case DamageType.Blaze:
+                return blazeDamageColor;
             case DamageType.Ice:
                 return iceDamageColor;
             case DamageType.Thunder:
@@ -507,6 +629,9 @@ public class DamageNumberManager : MonoBehaviour
         {
             case DamageType.Fire:
                 fireDamageColor = color;
+                break;
+            case DamageType.Blaze:
+                blazeDamageColor = color;
                 break;
             case DamageType.Ice:
                 iceDamageColor = color;
@@ -545,9 +670,19 @@ public class DamageNumberManager : MonoBehaviour
         ShowStatusInternal("Burn", worldPosition + burnStatusOffset, burnStatusColor);
     }
 
+    public void ShowBlaze(Vector3 worldPosition)
+    {
+        ShowStatusInternal("Blaze", worldPosition + blazeStatusOffset, blazeStatusColor);
+    }
+
     public void ShowSlow(Vector3 worldPosition)
     {
-        ShowStatusInternal("Slow", worldPosition + slowStatusOffset, slowStatusColor);
+        ShowStatusInternal("Chill", worldPosition + slowStatusOffset, slowStatusColor);
+    }
+
+    public void ShowFreeze(Vector3 worldPosition)
+    {
+        ShowStatusInternal("Freeze", worldPosition + freezeStatusOffset, freezeStatusColor);
     }
 
     public void ShowExecuted(Vector3 worldPosition)
@@ -572,7 +707,7 @@ public class DamageNumberManager : MonoBehaviour
 
     public void ShowWeak(Vector3 worldPosition)
     {
-        ShowStatusInternal("Weak", worldPosition + weakStatusOffset, woundStatusColor);
+        ShowStatusInternal("Weak", worldPosition + weakStatusOffset, weakStatusColor);
     }
 
     public void ShowNullify(Vector3 worldPosition)
@@ -585,12 +720,19 @@ public class DamageNumberManager : MonoBehaviour
         ShowStatusInternal("Reflect", worldPosition + reflectStatusOffset, reflectStatusColor);
     }
 
+    public void ShowStatic(Vector3 worldPosition)
+    {
+        ShowStatusInternal("Static", worldPosition + staticStatusOffset, staticStatusColor);
+    }
+
     private void ShowStatusInternal(string text, Vector3 worldPosition, Color color)
     {
         if (damageNumberPrefab == null || damageCanvas == null)
         {
             return;
         }
+
+        worldPosition = ApplyGlobalOffset(worldPosition);
 
         GameObject damageObj = Instantiate(damageNumberPrefab, damageCanvas.transform);
         DamageNumber damageNumber = damageObj.GetComponent<DamageNumber>();

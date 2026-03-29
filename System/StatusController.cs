@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 
 public enum StatusId
@@ -255,6 +256,28 @@ public class StatusController : MonoBehaviour
 
     private float burnTickTimer;
 
+    private GameObject freezeOnApplyEffectInstance;
+    private GameObject immolationOnApplyEffectInstance;
+
+    private void EnsureFreezeStatusComponent()
+    {
+        FreezeStatus existing = GetComponent<FreezeStatus>();
+        if (existing == null)
+        {
+            gameObject.AddComponent<FreezeStatus>();
+        }
+    }
+
+    private void ForceEndFreezeStatusComponent()
+    {
+        FreezeStatus existing = GetComponent<FreezeStatus>();
+        if (existing != null)
+        {
+            existing.ForceEndFreeze();
+            Destroy(existing);
+        }
+    }
+
     private void OnEnable()
     {
         cachedEnemyHealth = GetComponent<EnemyHealth>() ?? GetComponentInParent<EnemyHealth>();
@@ -287,6 +310,16 @@ public class StatusController : MonoBehaviour
         if (id == StatusId.Hatred && hatredDebuffSources != null)
         {
             hatredDebuffSources.Clear();
+        }
+
+        if (id == StatusId.Freeze)
+        {
+            ForceEndFreezeStatusComponent();
+            if (freezeOnApplyEffectInstance != null)
+            {
+                Destroy(freezeOnApplyEffectInstance);
+                freezeOnApplyEffectInstance = null;
+            }
         }
     }
 
@@ -644,8 +677,9 @@ public class StatusController : MonoBehaviour
         int slowStacks = GetStacks(StatusId.Slow);
         if (slowStacks > 0)
         {
-            float slowStrength = Mathf.Clamp01(slowStacks / 4f);
-            multiplier *= Mathf.Max(0f, 1f - slowStrength);
+            float per = StatusControllerManager.Instance.EnemySlowMoveSpeedPercentPerStack;
+            float total = Mathf.Max(0f, per * slowStacks);
+            multiplier *= Mathf.Max(0f, 1f - total / 100f);
         }
 
         if (hasOffCameraSpeedBoost)
@@ -1312,7 +1346,11 @@ public class StatusController : MonoBehaviour
                     anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, anchor);
                 }
 
-                StatusDamageScope.BeginStatusTick(DamageNumberManager.DamageType.Fire, true);
+                DamageNumberManager.DamageType burnDamageType = HasStatus(StatusId.Immolation)
+                    ? DamageNumberManager.DamageType.Blaze
+                    : DamageNumberManager.DamageType.Fire;
+
+                StatusDamageScope.BeginStatusTick(burnDamageType, true);
 
                 if (stats != null && stats.burnImmolationCanCrit)
                 {
@@ -1333,7 +1371,7 @@ public class StatusController : MonoBehaviour
 
                 if (DamageNumberManager.Instance != null && resolved > 0f && !EnemyDamagePopupScope.SuppressPopups)
                 {
-                    DamageNumberManager.Instance.ShowDamage(resolved, anchor, DamageNumberManager.DamageType.Fire, isCrit, true);
+                    DamageNumberManager.Instance.ShowDamage(resolved, anchor, burnDamageType, isCrit, true);
                 }
             }
         }
@@ -1397,6 +1435,12 @@ public class StatusController : MonoBehaviour
                 if (status.id == StatusId.Freeze)
                 {
                     SpawnFreezeOnEndEffect();
+                    ForceEndFreezeStatusComponent();
+                    if (freezeOnApplyEffectInstance != null)
+                    {
+                        Destroy(freezeOnApplyEffectInstance);
+                        freezeOnApplyEffectInstance = null;
+                    }
                 }
 
                 activeStatuses.RemoveAt(i);
@@ -1524,7 +1568,14 @@ public class StatusController : MonoBehaviour
         }
 
         float baseDamage = Mathf.Max(1f, hitDamage);
-        float damagePerTick = Mathf.Max(1f, baseDamage * burn.burnDamageMultiplier);
+
+        float tickMultiplier = 1f;
+        if (StatusControllerManager.Instance != null)
+        {
+            tickMultiplier = StatusControllerManager.Instance.BurnTickDamageMultiplier;
+        }
+
+        float damagePerTick = Mathf.Max(1f, baseDamage * tickMultiplier);
         float duration = burn.burnDuration;
 
         if (stats != null)
@@ -1548,12 +1599,15 @@ public class StatusController : MonoBehaviour
         }
 
         int stacks = Mathf.Clamp(burn.burnStacksPerHit, 1, 4);
+        int burnStacksBefore = statusController.GetStacks(StatusId.Burn);
         statusController.AddStatus(StatusId.Burn, stacks, duration, damagePerTick, sourceCard);
+        int burnStacksAfter = statusController.GetStacks(StatusId.Burn);
 
         if (DamageNumberManager.Instance != null)
         {
             Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(ownerGO, ownerGO.transform.position);
-            if (!EnemyDamagePopupScope.SuppressPopups)
+            bool triggeredBlaze = burnStacksBefore < 4 && burnStacksAfter >= 4 && statusController.HasStatus(StatusId.Immolation);
+            if (!EnemyDamagePopupScope.SuppressPopups && burnStacksAfter > burnStacksBefore && !triggeredBlaze)
             {
                 DamageNumberManager.Instance.ShowBurn(anchor);
             }
@@ -1639,6 +1693,16 @@ public class StatusController : MonoBehaviour
 
         switch (id)
         {
+            case StatusId.Freeze:
+                DamageNumberManager.Instance.ShowFreeze(pos);
+                break;
+            case StatusId.Immolation:
+                DamageNumberManager.Instance.ShowBlaze(pos);
+                break;
+            case StatusId.Static:
+            case StatusId.StaticReapply:
+                DamageNumberManager.Instance.ShowStatic(pos);
+                break;
             case StatusId.Poison:
                 DamageNumberManager.Instance.ShowPoison(pos);
                 break;
@@ -1733,6 +1797,11 @@ public class StatusController : MonoBehaviour
         if (stacks <= 0)
         {
             return;
+        }
+
+        if (id == StatusId.Freeze)
+        {
+            freezeDeathEffectPlayed = false;
         }
 
         int previousStacks = 0;
@@ -1883,6 +1952,11 @@ public class StatusController : MonoBehaviour
             NotifyStatusAppliedToFavours(id);
             SpawnStatusOnApplyEffect(id);
 
+            if (id == StatusId.Freeze)
+            {
+                EnsureFreezeStatusComponent();
+            }
+
             if (id == StatusId.Slow)
             {
                 if (previousStacks < 4 && GetStacks(StatusId.Slow) >= 4)
@@ -1916,6 +1990,11 @@ public class StatusController : MonoBehaviour
             ShowStatusApplied(id);
             NotifyStatusAppliedToFavours(id);
             SpawnStatusOnApplyEffect(id);
+
+            if (id == StatusId.Freeze)
+            {
+                EnsureFreezeStatusComponent();
+            }
 
             if (id == StatusId.Slow)
             {
@@ -2019,17 +2098,35 @@ public class StatusController : MonoBehaviour
         }
     }
 
+    private Vector3 GetVisualCenter()
+    {
+        SpriteRenderer sr = GetComponent<SpriteRenderer>()
+            ?? GetComponentInChildren<SpriteRenderer>(true)
+            ?? GetComponentInParent<SpriteRenderer>();
+
+        if (sr != null)
+        {
+            return sr.bounds.center;
+        }
+
+        return transform.position;
+    }
+
     private Vector3 GetColliderCenter()
     {
-        Collider2D col = GetComponent<Collider2D>() ?? GetComponentInParent<Collider2D>();
+        Collider2D col = GetComponent<Collider2D>()
+            ?? GetComponentInChildren<Collider2D>(true)
+            ?? GetComponentInParent<Collider2D>();
+
         if (col != null)
         {
             return col.bounds.center;
         }
+
         return transform.position;
     }
 
-    private void SpawnStatusEffectAtColliderCenter(GameObject prefab, float sizeMultiplier)
+    private void SpawnStatusEffectAtColliderCenter(GameObject prefab, float sizeMultiplier, float lifetimeSeconds)
     {
         if (prefab == null)
         {
@@ -2037,11 +2134,221 @@ public class StatusController : MonoBehaviour
         }
 
         Vector3 pos = GetColliderCenter();
+
         GameObject instance = Object.Instantiate(prefab, pos, Quaternion.identity);
         if (instance != null && sizeMultiplier > 0f)
         {
             instance.transform.localScale *= sizeMultiplier;
         }
+
+        if (instance != null && lifetimeSeconds > 0f)
+        {
+            PauseSafeSelfDestruct.Schedule(instance, lifetimeSeconds);
+        }
+    }
+
+    private void SpawnFreezeOnApplyEffect(float lifetimeSeconds)
+    {
+        if (StatusControllerManager.Instance == null)
+        {
+            return;
+        }
+
+        GameObject prefab = StatusControllerManager.Instance.FreezeOnApplyEffectPrefab;
+        if (prefab == null)
+        {
+            return;
+        }
+
+        if (freezeOnApplyEffectInstance != null)
+        {
+            Destroy(freezeOnApplyEffectInstance);
+            freezeOnApplyEffectInstance = null;
+        }
+
+        Vector3 pos = GetVisualCenter();
+
+        string enemyName = cachedEnemyHealth != null ? cachedEnemyHealth.gameObject.name : gameObject.name;
+        Vector2 extraOffset = Vector2.zero;
+        Vector2 extraScale = Vector2.one;
+        if (StatusControllerManager.Instance.TryGetFreezeOffsetSize(enemyName, out Vector2 offset, out Vector2 scale))
+        {
+            extraOffset = offset;
+            extraScale = scale;
+        }
+
+        if (IsOwnerFlipped())
+        {
+            extraOffset.x = -extraOffset.x;
+        }
+        pos += (Vector3)extraOffset;
+
+        GameObject instance = Object.Instantiate(prefab, pos, Quaternion.identity);
+        freezeOnApplyEffectInstance = instance;
+
+        if (instance == null)
+        {
+            return;
+        }
+
+        float sizeMultiplier = StatusControllerManager.Instance.FreezeOnApplyEffectSizeMultiplier;
+        if (sizeMultiplier > 0f)
+        {
+            instance.transform.localScale *= sizeMultiplier;
+        }
+
+        Vector3 s = instance.transform.localScale;
+        s.x *= Mathf.Max(0f, extraScale.x);
+        s.y *= Mathf.Max(0f, extraScale.y);
+        instance.transform.localScale = s;
+
+        if (lifetimeSeconds > 0f)
+        {
+            PauseSafeSelfDestruct.Schedule(instance, lifetimeSeconds);
+        }
+    }
+
+    private void SpawnImmolationOnApplyEffect()
+    {
+        if (StatusControllerManager.Instance == null)
+        {
+            return;
+        }
+
+        GameObject prefab = StatusControllerManager.Instance.ImmolationOnApplyEffectPrefab;
+        if (prefab == null)
+        {
+            return;
+        }
+
+        if (immolationOnApplyEffectInstance != null)
+        {
+            Destroy(immolationOnApplyEffectInstance);
+            immolationOnApplyEffectInstance = null;
+        }
+
+        Vector3 pos = GetVisualCenter();
+        GameObject instance = Object.Instantiate(prefab, pos, Quaternion.identity);
+        immolationOnApplyEffectInstance = instance;
+
+        if (instance == null)
+        {
+            return;
+        }
+
+        float sizeMultiplier = StatusControllerManager.Instance.ImmolationOnApplyEffectSizeMultiplier;
+        if (sizeMultiplier > 0f)
+        {
+            instance.transform.localScale *= sizeMultiplier;
+        }
+
+        float lifetimeSeconds = StatusControllerManager.Instance.ImmolationOnApplyEffectDuration;
+        if (lifetimeSeconds > 0f)
+        {
+            PauseSafeSelfDestruct.Schedule(instance, lifetimeSeconds);
+        }
+    }
+
+    private void SpawnImmolationOnDeathEffect()
+    {
+        if (StatusControllerManager.Instance == null)
+        {
+            return;
+        }
+
+        GameObject prefab = StatusControllerManager.Instance.ImmolationOnDeathEffectPrefab;
+        if (prefab == null)
+        {
+            return;
+        }
+
+        Vector3 pos = GetVisualCenter();
+
+        Vector2 offset = StatusControllerManager.Instance.ImmolationOnDeathOffset;
+        if (IsOwnerFlipped())
+        {
+            offset.x = -offset.x;
+        }
+        pos += (Vector3)offset;
+
+        GameObject instance = Object.Instantiate(prefab, pos, Quaternion.identity);
+        if (instance != null)
+        {
+            float sizeMultiplier = StatusControllerManager.Instance.ImmolationOnDeathEffectSizeMultiplier;
+            if (sizeMultiplier > 0f)
+            {
+                instance.transform.localScale *= sizeMultiplier;
+            }
+
+            float lifetimeSeconds = StatusControllerManager.Instance.ImmolationOnDeathEffectDuration;
+            if (lifetimeSeconds > 0f)
+            {
+                PauseSafeSelfDestruct.Schedule(instance, lifetimeSeconds);
+            }
+        }
+    }
+
+    private bool IsOwnerFlipped()
+    {
+        SpriteRenderer sr = GetComponent<SpriteRenderer>()
+            ?? GetComponentInChildren<SpriteRenderer>(true)
+            ?? GetComponentInParent<SpriteRenderer>();
+
+        if (sr != null)
+        {
+            bool flipX = sr.flipX;
+            bool invert = false;
+
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+            MonoBehaviour[] parents = sr.GetComponentsInParent<MonoBehaviour>(true);
+            MonoBehaviour[] children = sr.GetComponentsInChildren<MonoBehaviour>(true);
+
+            if (TryReadInvertFlip(parents, flags, out bool value) || TryReadInvertFlip(children, flags, out value))
+            {
+                invert = value;
+            }
+
+            return invert ? !flipX : flipX;
+        }
+
+        return transform.lossyScale.x < 0f;
+    }
+
+    private static bool TryReadInvertFlip(MonoBehaviour[] behaviours, BindingFlags flags, out bool value)
+    {
+        value = false;
+        if (behaviours == null || behaviours.Length == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            MonoBehaviour b = behaviours[i];
+            if (b == null)
+            {
+                continue;
+            }
+
+            System.Type t = b.GetType();
+
+            FieldInfo fi = t.GetField("invertFlip", flags);
+            if (fi != null && fi.FieldType == typeof(bool))
+            {
+                value = (bool)fi.GetValue(b);
+                return true;
+            }
+
+            fi = t.GetField("inverseFlip", flags);
+            if (fi != null && fi.FieldType == typeof(bool))
+            {
+                value = (bool)fi.GetValue(b);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void SpawnStatusOnApplyEffect(StatusId id)
@@ -2054,14 +2361,21 @@ public class StatusController : MonoBehaviour
         switch (id)
         {
             case StatusId.Freeze:
-                SpawnStatusEffectAtColliderCenter(
-                    StatusControllerManager.Instance.FreezeOnApplyEffectPrefab,
-                    StatusControllerManager.Instance.FreezeOnApplyEffectSizeMultiplier);
+                float freezeDuration = Mathf.Max(0f, GetMaxRemainingDurationSeconds(StatusId.Freeze));
+                if (cachedEnemyHealth != null && !cachedEnemyHealth.IsAlive)
+                {
+                    SpawnFreezeOnEndEffect();
+                    return;
+                }
+                SpawnFreezeOnApplyEffect(freezeDuration);
                 break;
             case StatusId.Immolation:
-                SpawnStatusEffectAtColliderCenter(
-                    StatusControllerManager.Instance.ImmolationOnApplyEffectPrefab,
-                    StatusControllerManager.Instance.ImmolationOnApplyEffectSizeMultiplier);
+                if (cachedEnemyHealth != null && !cachedEnemyHealth.IsAlive)
+                {
+                    HandleImmolationDeath();
+                    return;
+                }
+                SpawnImmolationOnApplyEffect();
                 break;
         }
     }
@@ -2073,34 +2387,83 @@ public class StatusController : MonoBehaviour
             return;
         }
 
+        if (freezeOnApplyEffectInstance != null)
+        {
+            Destroy(freezeOnApplyEffectInstance);
+            freezeOnApplyEffectInstance = null;
+        }
+
         if (StatusControllerManager.Instance == null)
         {
             return;
         }
 
-        SpawnStatusEffectAtColliderCenter(
-            StatusControllerManager.Instance.FreezeOnDeathEffectPrefab,
-            StatusControllerManager.Instance.FreezeOnDeathEffectSizeMultiplier);
+        GameObject prefab = StatusControllerManager.Instance.FreezeOnDeathEffectPrefab;
+        if (prefab == null)
+        {
+            return;
+        }
+
+        Vector3 pos = GetVisualCenter();
+
+        string enemyName = cachedEnemyHealth != null ? cachedEnemyHealth.gameObject.name : gameObject.name;
+        Vector2 extraOffset = Vector2.zero;
+        Vector2 extraScale = Vector2.one;
+        if (StatusControllerManager.Instance.TryGetFreezeOffsetSize(enemyName, out Vector2 offset, out Vector2 scale))
+        {
+            extraOffset = offset;
+            extraScale = scale;
+        }
+
+        if (IsOwnerFlipped())
+        {
+            extraOffset.x = -extraOffset.x;
+        }
+        pos += (Vector3)extraOffset;
+
+        GameObject instance = Object.Instantiate(prefab, pos, Quaternion.identity);
+        if (instance != null)
+        {
+            float sizeMultiplier = StatusControllerManager.Instance.FreezeOnDeathEffectSizeMultiplier;
+            if (sizeMultiplier > 0f)
+            {
+                instance.transform.localScale *= sizeMultiplier;
+            }
+
+            Vector3 s = instance.transform.localScale;
+            s.x *= Mathf.Max(0f, extraScale.x);
+            s.y *= Mathf.Max(0f, extraScale.y);
+            instance.transform.localScale = s;
+
+            float lifetimeSeconds = StatusControllerManager.Instance.FreezeOnDeathEffectDuration;
+            if (lifetimeSeconds > 0f)
+            {
+                PauseSafeSelfDestruct.Schedule(instance, lifetimeSeconds);
+            }
+        }
 
         freezeDeathEffectPlayed = true;
     }
 
-    private void HandleOwnerDeath()
+    private void HandleImmolationDeath()
     {
-        if (GetStacks(StatusId.Freeze) > 0)
-        {
-            SpawnFreezeOnEndEffect();
-        }
-
         if (!HasStatus(StatusId.Immolation))
         {
             return;
         }
 
+        if (immolationOnApplyEffectInstance != null)
+        {
+            Destroy(immolationOnApplyEffectInstance);
+            immolationOnApplyEffectInstance = null;
+        }
+
         if (StatusControllerManager.Instance == null)
         {
             return;
         }
+
+        SpawnImmolationOnDeathEffect();
 
         float burnInterval = Mathf.Max(0.01f, StatusControllerManager.Instance.BurnTickIntervalSeconds);
         float totalDamage = ComputeTotalRemainingBurnDamage(burnInterval);
@@ -2171,11 +2534,9 @@ public class StatusController : MonoBehaviour
             return;
         }
 
-        SpawnStatusEffectAtColliderCenter(
-            StatusControllerManager.Instance.ImmolationOnDeathEffectPrefab,
-            StatusControllerManager.Instance.ImmolationOnDeathEffectSizeMultiplier);
+        Vector3 blazeCenter = GetColliderCenter();
+        Collider2D[] hits = Physics2D.OverlapCircleAll(blazeCenter, radius, LayerMask.GetMask("Enemy"));
 
-        Collider2D[] hits = Physics2D.OverlapCircleAll(transform.position, radius, LayerMask.GetMask("Enemy"));
         if (hits == null || hits.Length == 0)
         {
             return;
@@ -2213,16 +2574,58 @@ public class StatusController : MonoBehaviour
             }
 
             Vector3 pos = col.bounds.center;
-            StatusDamageScope.BeginStatusTick(DamageNumberManager.DamageType.Fire, true);
+            StatusDamageScope.BeginStatusTick(DamageNumberManager.DamageType.Blaze, true);
             eh.TakeDamage(totalDamage, pos, Vector3.zero);
             float resolved = StatusDamageScope.LastResolvedDamage;
             StatusDamageScope.EndStatusTick();
 
             if (DamageNumberManager.Instance != null && resolved > 0f && !EnemyDamagePopupScope.SuppressPopups)
             {
-                DamageNumberManager.Instance.ShowDamage(resolved, pos, DamageNumberManager.DamageType.Fire, isCrit, true);
+                DamageNumberManager.Instance.ShowDamage(resolved, pos, DamageNumberManager.DamageType.Blaze, isCrit, true);
             }
         }
         DamageAoeScope.EndAoeDamage();
+    }
+
+    private void HandleOwnerDeath()
+    {
+        if (GetStacks(StatusId.Freeze) > 0)
+        {
+            SpawnFreezeOnEndEffect();
+        }
+
+        HandleImmolationDeath();
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (!HasStatus(StatusId.Immolation))
+        {
+            return;
+        }
+
+        if (StatusControllerManager.Instance == null)
+        {
+            return;
+        }
+
+        float radius = StatusControllerManager.Instance.BlazeRadius;
+        if (radius <= 0f)
+        {
+            return;
+        }
+
+        Vector3 center = GetColliderCenter();
+
+        Gizmos.color = new Color(1f, 0.35f, 0.35f, 0.2f);
+        Gizmos.DrawSphere(center, radius);
+
+        Gizmos.color = new Color(1f, 0.35f, 0.35f, 0.65f);
+        Gizmos.DrawWireSphere(center, radius);
     }
 }

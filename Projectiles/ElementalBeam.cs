@@ -163,7 +163,12 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     public float variant1BaseCooldown = 8f;
 
     [Range(0f, 1f)]
-    public float variant1BurnSlowChance = 0.5f;
+    public float variant4BurnChance = 0.5f;
+
+    [Range(0f, 1f)]
+    public float variant4SlowChance = 0.5f;
+
+    public float Variant4BaseCooldown = 5f;
 
     [Header("Enhanced Variant 1+2 - Rotating Smart Beam")]
     [Tooltip("Fraction of core lifetime (excluding start delay and end duration) before switching from V2-style static beam to V1-style opposite rotation (0.5 = halfway)")]
@@ -240,11 +245,15 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     private bool variant12RotationEnabled = false;
     private float variant12RotationStartTime = 0f;
 
+    private bool variant13RotationEnabled = false;
+    private float variant13RotationStartTime = 0f;
+
     private bool isStackedVariant13Context = false;
     private bool isStackedVariant23Context = false;
     private bool hasVariant1History = false;
     private bool hasVariant2History = false;
     private bool hasVariant3History = false;
+    private bool hasVariant4History = false;
 
     // Variant 3 secondary beam flag
     private bool isVariant3SecondaryBeam = false;
@@ -553,8 +562,24 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         if (enhancedVariant == 1)
         {
-            doRotate = true;
-            rotationSpeed = enhancedRotationSpeed;
+            if (isStackedVariant13Context)
+            {
+                if (!variant13RotationEnabled && GameStateManager.PauseSafeTime >= variant13RotationStartTime)
+                {
+                    variant13RotationEnabled = true;
+                }
+
+                if (variant13RotationEnabled)
+                {
+                    doRotate = true;
+                    rotationSpeed = enhancedRotationSpeed;
+                }
+            }
+            else
+            {
+                doRotate = true;
+                rotationSpeed = enhancedRotationSpeed;
+            }
         }
         else if (isVariant12Stacked)
         {
@@ -610,6 +635,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         bool hasVariant1 = false;
         bool hasVariant2 = false;
         bool hasVariant3 = false;
+        bool hasVariant4 = false;
         bool isStackedVariant13 = false;
         bool isStackedVariant23 = false;
         bool isStackedVariant12 = false;
@@ -659,6 +685,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             hasVariant1 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
             hasVariant2 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
             hasVariant3 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3);
+            hasVariant4 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 4);
             isStackedVariant13 = hasVariant1 && hasVariant3;
             isStackedVariant23 = hasVariant2 && hasVariant3;
             isStackedVariant12 = hasVariant1 && hasVariant2 && !hasVariant3;
@@ -669,6 +696,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             hasVariant1History = hasVariant1;
             hasVariant2History = hasVariant2;
             hasVariant3History = hasVariant3;
+            hasVariant4History = hasVariant4;
 
             isStackedVariant13Context = isStackedVariant13;
             isStackedVariant23Context = isStackedVariant23;
@@ -822,6 +850,18 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
             Debug.Log($"<color=gold>ElementalBeam Variant 3: Using unique cooldown {baseCooldown:F2}s (dual smart beams)</color>");
         }
+        else if (uiEnhancedVariant == 4 && Variant4BaseCooldown > 0f)
+        {
+            baseCooldown = Variant4BaseCooldown;
+
+            if (card != null)
+            {
+                card.runtimeSpawnInterval = Variant4BaseCooldown;
+                Debug.Log($"<color=gold>Variant 4: Updated card.runtimeSpawnInterval to {Variant4BaseCooldown:F2}s (ProjectileSpawner will use this)</color>");
+            }
+
+            Debug.Log($"<color=gold>ElementalBeam Variant 4: Using unique cooldown {baseCooldown:F2}s</color>");
+        }
         else if (card != null && card.runtimeSpawnInterval > 0f)
         {
             // Other variants: Use ProjectileCards spawnInterval if available
@@ -829,22 +869,23 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=gold>ElementalBeam using ProjectileCards spawnInterval: {baseCooldown:F2}s (overriding script cooldown: {cooldown:F2}s)</color>");
         }
 
-        // Apply Variant 1 burn chance to the attached BurnEffect whenever this
-        // card has EVER chosen Variant 1, including stacked cases (1+2, 1+3).
-        // The field is configured as 0–1 so convert to the 0–100% range used
-        // by BurnEffect.
-        BurnEffect beamBurn = GetComponent<BurnEffect>();
-        SlowEffect beamSlow = GetComponent<SlowEffect>();
-        if (hasVariant1)
+        if (hasVariant4)
         {
-            float burnSlowPercent = Mathf.Clamp01(variant1BurnSlowChance) * 100f;
+            float burnPercent = projectileType == ProjectileType.Fire
+                ? Mathf.Clamp01(variant4BurnChance) * 100f
+                : 0f;
+            float slowPercent = projectileType == ProjectileType.Ice
+                ? Mathf.Clamp01(variant4SlowChance) * 100f
+                : 0f;
+
             ProjectileStatusChanceAdditiveBonus additive = GetComponent<ProjectileStatusChanceAdditiveBonus>();
             if (additive == null)
             {
                 additive = gameObject.AddComponent<ProjectileStatusChanceAdditiveBonus>();
             }
-            additive.burnBonusPercent = burnSlowPercent;
-            additive.slowBonusPercent = burnSlowPercent;
+
+            additive.burnBonusPercent = burnPercent;
+            additive.slowBonusPercent = slowPercent;
         }
 
         // Compute final lifetime and cooldown after card modifiers.
@@ -917,6 +958,17 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=magenta>ElementalBeam STACKED 1+2: coreLifetime={coreLifetime:F2}s, fraction={fraction:F2}, rotation starts at t={variant12RotationStartTime:F2}</color>");
         }
 
+        if (isStackedVariant13)
+        {
+            float coreLifetime = Mathf.Max(0f, finalLifetime - finalBeamStartDelay - finalBeamEndDuration);
+            float fraction = Mathf.Clamp01(variant12RotationStartFraction);
+            float rotationDelayWithinCore = coreLifetime * fraction;
+            float coreStartTime = GameStateManager.PauseSafeTime + finalBeamStartDelay;
+            variant13RotationStartTime = coreStartTime + rotationDelayWithinCore;
+            variant13RotationEnabled = false;
+            Debug.Log($"<color=magenta>ElementalBeam STACKED 1+3: coreLifetime={coreLifetime:F2}s, fraction={fraction:F2}, rotation starts at t={variant13RotationStartTime:F2}</color>");
+        }
+
         // Determine which side of screen we're on (left or right of center)
         Camera mainCam = Camera.main;
 
@@ -976,10 +1028,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         damage = finalDamage;
 
         float effectiveCooldown = finalCooldown;
-        if (cachedPlayerStats != null && cachedPlayerStats.projectileCooldownReduction > 0f)
+        if (cachedPlayerStats != null)
         {
-            float totalCdr = Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction);
-            effectiveCooldown = finalCooldown / (1f + totalCdr);
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
             if (MinCooldownManager.Instance != null && card != null)
             {
                 effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
@@ -1057,51 +1110,46 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         }
         else if (enhancedVariant == 1)
         {
-            // VARIANT 1 (and STACKED 1+3 primary): Fire in random direction
-            // within the ENHANCED custom angle range (minAngleEnhanced/maxAngleEnhanced).
-            float minAngle = -90f;
-            float maxAngle = 90f;
-
-            if (card != null)
-            {
-                minAngle = card.minAngleEnhanced;
-                maxAngle = card.maxAngleEnhanced;
-                Debug.Log($"<color=magenta>Variant 1: Using ENHANCED custom angles ({minAngle:F0}° to {maxAngle:F0}°)</color>");
-            }
-
-            float randomAngle = Random.Range(minAngle, maxAngle);
-            float randomAngleRad = randomAngle * Mathf.Deg2Rad;
-
             if (isStackedVariant13)
             {
-                // STACKED Variant 1 + 3 primary: allow the PRIMARY beam to fire
-                // at ANY angle (positive or negative) within the configured
-                // range. The SECONDARY beam fires at the exact opposite angle
-                // (-primaryAngle) so the pair is always mirrored across the
-                // horizontal axis.
+                bool isSecondaryBeam = isVariant13SecondaryBeam;
 
-                // For symmetric angle ranges (e.g. -60°..+60°) this keeps BOTH
-                // beams inside the allowed range. If the range is asymmetric,
-                // we still honour the primary randomAngle and mirror the
-                // secondary.
+                if (!isSecondaryBeam)
+                {
+                    Vector2 primaryDir;
+                    Vector2 secondaryDir;
+                    ClaimSmartTargetDirectionPair(card, skipCooldownCheck, smartTargetOriginFire, false, 1, smartTargetOriginIce, false, 2, out primaryDir, out secondaryDir);
 
-                float primaryAngle = Mathf.Clamp(randomAngle, minAngle, maxAngle);
-                float primaryRad = primaryAngle * Mathf.Deg2Rad;
-                initialDir = new Vector2(Mathf.Cos(primaryRad), Mathf.Sin(primaryRad));
-
-                // Secondary beam uses an angle mirrored around 90° instead of 0°.
-                // Example: 120° → 60°, 30° → 150°.
-                float secondaryAngle = 180f - primaryAngle;
-                float secondaryRad = secondaryAngle * Mathf.Deg2Rad;
-                Vector2 secondaryDir = new Vector2(Mathf.Cos(secondaryRad), Mathf.Sin(secondaryRad));
-
-                Debug.Log($"<color=magenta>ElementalBeam STACKED 1+3: primary {primaryAngle:F1}°, secondary {secondaryAngle:F1}° (seed {randomAngle:F1}°, range {minAngle:F0}°..{maxAngle:F0}°)</color>");
-
-                SpawnVariant13SecondaryBeam(card, colliderToIgnore, playerMana, playerPosition, secondaryDir);
+                    initialDir = primaryDir;
+                    SpawnVariant13SecondaryBeam(card, colliderToIgnore, playerMana, playerPosition, secondaryDir);
+                }
+                else
+                {
+                    if (direction.sqrMagnitude > 0.0001f)
+                    {
+                        initialDir = direction.normalized;
+                    }
+                    else
+                    {
+                        initialDir = Vector2.up;
+                    }
+                }
             }
             else
             {
-                // Non-stacked Variant 1 keeps the original random behaviour.
+                // VARIANT 1: Fire in random direction within the ENHANCED custom angle range.
+                float minAngle = -90f;
+                float maxAngle = 90f;
+
+                if (card != null)
+                {
+                    minAngle = card.minAngleEnhanced;
+                    maxAngle = card.maxAngleEnhanced;
+                    Debug.Log($"<color=magenta>Variant 1: Using ENHANCED custom angles ({minAngle:F0}° to {maxAngle:F0}°)</color>");
+                }
+
+                float randomAngle = Random.Range(minAngle, maxAngle);
+                float randomAngleRad = randomAngle * Mathf.Deg2Rad;
                 initialDir = new Vector2(Mathf.Cos(randomAngleRad), Mathf.Sin(randomAngleRad));
                 Debug.Log($"<color=magenta>ElementalBeam VARIANT 1: Random direction at {randomAngle:F0}°</color>");
             }
@@ -1336,6 +1384,9 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         // Apply spawn offset to world position
         spawnOffsetWorld = selectedOffset;
         transform.position = playerPos + (Vector3)spawnOffsetWorld;
+
+        isOnLeftSide = mainCam != null && transform.position.x < mainCam.transform.position.x;
+
         Debug.Log($"<color=yellow>BEAM POSITIONED AT: {transform.position} (playerPos: {playerPos}, offset: {spawnOffsetWorld})</color>");
 
         // STEP 3: Use the initial direction (already calculated from player position)
@@ -1359,18 +1410,13 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         Debug.Log($"<color=cyan>ElementalBeam FIRING: Dir=({dir.x:F3}, {dir.y:F3}), Angle={angle:F1}°, Final={finalAngle:F1}°, Enhanced={enhancedVariant}</color>");
 
-        // Variant 1 rotation-direction rule (applies to ALL V1-inclusive stacks):
-        //  - Fired RIGHT → rotate LEFT  (CCW, +1)
-        //  - Fired LEFT  → rotate RIGHT (CW, -1)
-        // This must apply even when Variant 3 is active (dual beams) so BOTH
-        // beams follow the same side-based direction rule.
         if (enhancedVariant == 1 || isVariant12Stacked || isVariant12RotationStacked)
         {
             // Set initial rotation to MATCH the sprite rotation we just applied
             // (finalAngle) so there is no snap when rotation begins.
             currentRotation = finalAngle;
 
-            rotationDirection = firingRight ? 1f : -1f;
+            rotationDirection = Mathf.Abs(angle) > 90f ? -1f : 1f;
         }
 
         // Calculate damage interval using variant-specific damage instances
@@ -1438,7 +1484,12 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         bool allowV3 = hasVariant3History;
         bool allowV2 = enhancedVariant == 2;
 
-        if (allowV1)
+        if (isStackedVariant13Context)
+        {
+            startupMult = variant3StartupDamageMultiplier;
+            endMult = variant3EndDamageMultiplier;
+        }
+        else if (allowV1)
         {
             startupMult = variant1StartupDamageMultiplier;
             endMult = variant1EndDamageMultiplier;
@@ -1603,7 +1654,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                         float damageMultiplier = 1f;
                         if (enhancedVariant > 0 && isInStartupOrEndPhase)
                         {
-                            if (hasVariant1History)
+                            if (isStackedVariant13Context)
+                            {
+                                damageMultiplier = isInStartupPhase ? variant3StartupDamageMultiplier : variant3EndDamageMultiplier;
+                            }
+                            else if (hasVariant1History)
                             {
                                 damageMultiplier = isInStartupPhase ? variant1StartupDamageMultiplier : variant1EndDamageMultiplier;
                             }
@@ -1749,7 +1804,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                     float damageMultiplier = 1f;
                     if (isInStartupOrEndPhase)
                     {
-                        if (hasVariant1History)
+                        if (isStackedVariant13Context)
+                        {
+                            damageMultiplier = isInStartupPhase ? variant3StartupDamageMultiplier : variant3EndDamageMultiplier;
+                        }
+                        else if (hasVariant1History)
                         {
                             damageMultiplier = isInStartupPhase ? variant1StartupDamageMultiplier : variant1EndDamageMultiplier;
                         }
@@ -1860,7 +1919,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 float phaseMultiplier = 1f;
                 if (enhancedVariant > 0 && isInStartupOrEndPhase)
                 {
-                    if (hasVariant1History)
+                    if (isStackedVariant13Context)
+                    {
+                        phaseMultiplier = isInStartupPhase ? variant3StartupDamageMultiplier : variant3EndDamageMultiplier;
+                    }
+                    else if (hasVariant1History)
                     {
                         phaseMultiplier = isInStartupPhase ? variant1StartupDamageMultiplier : variant1EndDamageMultiplier;
                     }
@@ -2173,7 +2236,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         // If there are no enemies, we still want a deterministic spread of
         // sample directions across the allowed angle window so multiple beams
-        // can fan out instead of all stacking on a single random direction.
+        // can fan out instead of stacking.
         if (enemyCount == 0)
         {
             for (int angleIndex = 0; angleIndex < samplesToUse; angleIndex++)
@@ -2198,6 +2261,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         for (int angleIndex = 0; angleIndex < samplesToUse; angleIndex++)
         {
+            // Calculate this angle
             float angleDeg = Mathf.Lerp(minAngle, maxAngle, (float)angleIndex / lerpDenom);
             float angleRad = angleDeg * Mathf.Deg2Rad;
             Vector2 testDirection = new Vector2(Mathf.Cos(angleRad), Mathf.Sin(angleRad));
@@ -2297,14 +2361,8 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 if (enemy == null) continue;
 
                 Vector2 enemyPos = enemy.transform.position;
-                Vector3 approxOrigin = GetSpawnOriginForSmartTargeting(origin, enemyPos - (Vector2)origin, useSecondaryOffsets);
-                Vector2 toEnemy = enemyPos - (Vector2)approxOrigin;
-                if (toEnemy.sqrMagnitude <= 0.0001f)
-                {
-                    continue;
-                }
 
-                float enemyAngle = Mathf.Atan2(toEnemy.y, toEnemy.x) * Mathf.Rad2Deg;
+                float enemyAngle = Mathf.Atan2(enemyPos.y - origin.y, enemyPos.x - origin.x) * Mathf.Rad2Deg;
 
                 // Find the closest sampled angle to this enemy direction.
                 int closestIndex = -1;
@@ -2550,8 +2608,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             // variant-specific/custom angle settings (including Variant 2 and
             // stacked 1+2).
             float randomAngle = Random.Range(minAngle, maxAngle);
-            float randomAngleRad = randomAngle * Mathf.Deg2Rad;
-            return new Vector2(Mathf.Cos(randomAngleRad), Mathf.Sin(randomAngleRad));
+            return new Vector2(Mathf.Cos(randomAngle * Mathf.Deg2Rad), Mathf.Sin(randomAngle * Mathf.Deg2Rad));
         }
 
         // Get beam collider dimensions in WORLD space (derived from current collider)
@@ -2789,6 +2846,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         for (int angleIndex = 0; angleIndex < samplesToUse; angleIndex++)
         {
+            // Calculate this angle
             float angleDeg = Mathf.Lerp(minAngle, maxAngle, (float)angleIndex / (samplesToUse - 1));
             float angleRad = angleDeg * Mathf.Deg2Rad;
             Vector2 testDirection = new Vector2(Mathf.Cos(angleRad), Mathf.Sin(angleRad));
@@ -2899,13 +2957,6 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             return;
         }
 
-        EnemyCardSpawner cardSpawner = Object.FindObjectOfType<EnemyCardSpawner>();
-        EnemySpawner enemySpawner = Object.FindObjectOfType<EnemySpawner>();
-        if ((cardSpawner != null && cardSpawner.IsBossEventActive) || (enemySpawner != null && enemySpawner.IsBossEventActive))
-        {
-            return;
-        }
-
         Vector3 spawnPos = playerPosition != default(Vector3) ? playerPosition : transform.position;
 
         GameObject beamObj = Instantiate(card.projectilePrefab, spawnPos, Quaternion.identity);
@@ -2933,13 +2984,6 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             return;
         }
 
-        EnemyCardSpawner cardSpawner = Object.FindObjectOfType<EnemyCardSpawner>();
-        EnemySpawner enemySpawner = Object.FindObjectOfType<EnemySpawner>();
-        if ((cardSpawner != null && cardSpawner.IsBossEventActive) || (enemySpawner != null && enemySpawner.IsBossEventActive))
-        {
-            return;
-        }
-
         Vector3 spawnPos = playerPosition != default(Vector3) ? playerPosition : transform.position;
 
         GameObject beamObj = Instantiate(card.projectilePrefab, spawnPos, Quaternion.identity);
@@ -2963,13 +3007,6 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     private void SpawnVariant13SecondaryBeam(ProjectileCards card, Collider2D colliderToIgnore, PlayerMana playerMana, Vector3 playerPosition, Vector2 secondaryDir)
     {
         if (card == null || card.projectilePrefab == null)
-        {
-            return;
-        }
-
-        EnemyCardSpawner cardSpawner = Object.FindObjectOfType<EnemyCardSpawner>();
-        EnemySpawner enemySpawner = Object.FindObjectOfType<EnemySpawner>();
-        if ((cardSpawner != null && cardSpawner.IsBossEventActive) || (enemySpawner != null && enemySpawner.IsBossEventActive))
         {
             return;
         }

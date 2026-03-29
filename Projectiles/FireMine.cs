@@ -128,6 +128,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     private bool isExploding = false;
 
     private Coroutine explodeDelayCoroutine = null;
+    private Coroutine armingSequenceCoroutine = null;
 
     // Enhanced system
     private int enhancedVariant = 0; // 0 = basic, 1 = mega mine, 2-3 = future variants
@@ -778,7 +779,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         RegisterAndEnforceSpawnLimit();
 
         // Start arming sequence
-        StartCoroutine(ArmingSequence(finalLifetime));
+        armingSequenceCoroutine = StartCoroutine(ArmingSequence(finalLifetime));
 
         // Start visual fade-in (if configured)
         if (fadeInDuration > 0f)
@@ -814,6 +815,64 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
         color.a = 1f;
         spriteRenderer.color = color;
+    }
+
+    public static void ForceExplodeAllOnPlayerDeath()
+    {
+        FireMine[] mines = FindObjectsOfType<FireMine>();
+        if (mines == null || mines.Length == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < mines.Length; i++)
+        {
+            FireMine mine = mines[i];
+            if (mine != null)
+            {
+                mine.ForceExplodeOnPlayerDeath();
+            }
+        }
+    }
+
+    public void ForceExplodeOnPlayerDeath()
+    {
+        if (hasExploded)
+        {
+            return;
+        }
+
+        hasExploded = true;
+        isExploding = false;
+        isArmed = true;
+
+        if (armingSequenceCoroutine != null)
+        {
+            StopCoroutine(armingSequenceCoroutine);
+            armingSequenceCoroutine = null;
+        }
+
+        if (explodeDelayCoroutine != null)
+        {
+            StopCoroutine(explodeDelayCoroutine);
+            explodeDelayCoroutine = null;
+        }
+
+        if (explosionEffectPrefab != null)
+        {
+            Camera mainCam = Camera.main;
+            bool isOnLeftSide = mainCam != null && transform.position.x < mainCam.transform.position.x;
+            Vector2 effectOffset = isOnLeftSide ? explosionEffectOffsetLeft : explosionEffectOffsetRight;
+            Vector3 explosionPosition = transform.position + (Vector3)effectOffset;
+            SpawnExplosionEffectImmediate(explosionPosition);
+        }
+
+        if (explosionClip != null)
+        {
+            AudioSource.PlayClipAtPoint(explosionClip, transform.position, explosionVolume);
+        }
+
+        Destroy(gameObject);
     }
 
     private IEnumerator FadeAwayRoutine()

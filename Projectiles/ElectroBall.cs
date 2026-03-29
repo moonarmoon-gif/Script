@@ -48,6 +48,7 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
     [Header("Explosion")]
     public float ExplosionRadius = 1f;
     public Vector2 ExplosionRadiusOffset = Vector2.zero;
+    [Range(0f, 1f)] public float RuntimeGizmoAlphaMultiplier = 1f;
     public GameObject ExplosionEffectPrefab;
     public Vector2 ExplosionEffectOffset = Vector2.zero;
     public bool EnableExplosionEffectPrefab = true;
@@ -691,6 +692,22 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         }
         cachedPlayerStats = stats != null ? stats : FindObjectOfType<PlayerStats>();
 
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null)
+        {
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
+
         baseDamageAfterCards = finalDamage;
 
         damage = finalDamage;
@@ -705,7 +722,7 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
             {
                 if (lastFireTimes.ContainsKey(prefabKey))
                 {
-                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < finalCooldown)
+                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                     {
                         Destroy(gameObject);
                         return;
@@ -806,6 +823,14 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         rotateToVelocity = false;
         transform.rotation = Quaternion.identity;
 
+        float explosionRadiusIncrease = ExplosionRadius - baseExplosionRadius;
+        if (explosionRadiusIncrease > 0f)
+        {
+            Vector3 p = transform.position;
+            p.y -= explosionRadiusIncrease;
+            transform.position = p;
+        }
+
         cachedDetonationEffectWorldPosition = transform.position;
         cachedDetonationCenterWorldPosition = GetExplosionCenterWorld(baseExplosionOffset);
         hasDetonationWorldSnapshot = true;
@@ -835,7 +860,8 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
 
         if (thunderBurstActive)
         {
-            BeginThunderBurstFadeAndDestroy();
+            SetThunderBurstActive(false);
+            thunderBurstActive = false;
         }
 
         float denom = Mathf.Abs(baseExplosionRadius) > 0.0001f ? baseExplosionRadius : 1f;

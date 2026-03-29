@@ -1,44 +1,49 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [CreateAssetMenu(fileName = "ActivePoisonWoundFavour", menuName = "Favour Effects/Active Poison Wound")]
 public class ActivePoisonWoundFavour : FavourEffect
 {
     [Header("Active Poison Wound Settings")]
-    [Tooltip("Base percent chance for ACTIVE projectiles to inflict each status (Poison and Wound) per hit (e.g. 5 = 5% chance each).")]
-    public float StatusChance = 5f;
+    [FormerlySerializedAs("StatusChance")]
+    [Tooltip("Base percent chance for ACTIVE projectiles to inflict Poison per hit (e.g. 5 = 5% chance).")]
+    public float PoisonChance = 5f;
 
     [Tooltip("Number of Poison stacks to apply on a successful proc.")]
     public int PoisonStack = 5;
 
-    [Tooltip("Number of Wound stacks to apply on a successful proc.")]
-    public int WoundStack = 5;
+    [Tooltip("Duration in seconds for Poison stacks applied by this favour.")]
+    public float PoisonDuration = 5f;
 
     [Header("Enhanced")]
     [Tooltip("Additional percent chance granted when this favour is enhanced.")]
-    public float BonusStatusChance = 5f;
+    [FormerlySerializedAs("BonusStatusChance")]
+    public float BonusPoisonChance = 5f;
 
     [Tooltip("Additional Poison stacks granted when this favour is enhanced.")]
     public int BonusPoisonStack = 5;
 
-    [Tooltip("Additional Wound stacks granted when this favour is enhanced.")]
-    public int BonusWoundStack = 5;
+    [FormerlySerializedAs("WoundStack"), SerializeField, HideInInspector]
+    private int legacyWoundStack = 0;
 
-    private float currentStatusChance;
+    [FormerlySerializedAs("BonusWoundStack"), SerializeField, HideInInspector]
+    private int legacyBonusWoundStack = 0;
+
+    private float currentPoisonChance;
     private int currentPoisonStacks;
-    private int currentWoundStacks;
+    private float currentPoisonDuration;
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        currentStatusChance = Mathf.Max(0f, StatusChance);
+        currentPoisonChance = Mathf.Max(0f, PoisonChance);
         currentPoisonStacks = Mathf.Max(0, PoisonStack);
-        currentWoundStacks = Mathf.Max(0, WoundStack);
+        currentPoisonDuration = Mathf.Max(0f, PoisonDuration);
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        currentStatusChance += Mathf.Max(0f, BonusStatusChance);
+        currentPoisonChance += Mathf.Max(0f, BonusPoisonChance);
         currentPoisonStacks += Mathf.Max(0, BonusPoisonStack);
-        currentWoundStacks += Mathf.Max(0, BonusWoundStack);
     }
 
     public override void OnBeforeDealDamage(GameObject player, GameObject enemy, ref float damage, FavourEffectManager manager)
@@ -53,7 +58,7 @@ public class ActivePoisonWoundFavour : FavourEffect
             return;
         }
 
-        if (currentStatusChance <= 0f || (currentPoisonStacks <= 0 && currentWoundStacks <= 0))
+        if (currentPoisonChance <= 0f || currentPoisonStacks <= 0 || currentPoisonDuration <= 0f)
         {
             return;
         }
@@ -70,27 +75,10 @@ public class ActivePoisonWoundFavour : FavourEffect
             return;
         }
 
-        // Resolve the finite durations for Poison and Wound from the central
-        // StatusControllerManager so these statuses tick only for their
-        // configured duration instead of behaving like permanent stacks.
-        // Roll independently for Poison and Wound so each has its own
-        // chance to be applied on hit.
-        if (currentPoisonStacks > 0)
+        float rollPoison = Random.Range(0f, 100f);
+        if (rollPoison < currentPoisonChance)
         {
-            float rollPoison = Random.Range(0f, 100f);
-            if (rollPoison < currentStatusChance)
-            {
-                status.AddStatus(StatusId.Poison, currentPoisonStacks);
-            }
-        }
-
-        if (currentWoundStacks > 0)
-        {
-            float rollWound = Random.Range(0f, 100f);
-            if (rollWound < currentStatusChance)
-            {
-                status.AddStatus(StatusId.Wound, currentWoundStacks);
-            }
+            status.AddStatus(StatusId.Poison, currentPoisonStacks, currentPoisonDuration);
         }
     }
 }

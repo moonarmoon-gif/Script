@@ -112,7 +112,7 @@ public class ProjectileModifierCoreCards : BaseCard
                 break;
                 
             case ProjectileModType.CooldownReduction:
-                stats.projectileCooldownReduction += primaryVal / 100f;
+                stats.Cooldown -= Mathf.Max(0f, primaryVal);
                 break;
                 
             case ProjectileModType.ManaCostReduction:

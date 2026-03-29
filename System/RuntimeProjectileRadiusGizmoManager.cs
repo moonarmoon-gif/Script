@@ -72,7 +72,12 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
         }
 
         bool allowToggle = Instance.ShouldToggleOnThisCall();
-        bool handled = Instance.TryHandleClickInternal(screenPosition, allowToggle);
+        if (!allowToggle)
+        {
+            return false;
+        }
+
+        bool handled = Instance.TryHandleClickInternal(screenPosition, true);
         if (handled)
         {
             handledClickFrame = Time.frameCount;
@@ -88,7 +93,7 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
             return pointerPressAction.WasPressedThisFrame();
         }
 
-        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+        if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
         {
             return true;
         }
@@ -120,7 +125,7 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
 
         if (pointerPressAction == null)
         {
-            pointerPressAction = new InputAction("ProjectileGizmo_Press", InputActionType.Button, "<Pointer>/press");
+            pointerPressAction = new InputAction("ProjectileGizmo_Press", InputActionType.Button, "<Mouse>/rightButton");
             pointerPressAction.Enable();
         }
 
@@ -171,7 +176,7 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
         }
         else if (Mouse.current != null)
         {
-            pressedThisFrame = Mouse.current.leftButton.wasPressedThisFrame;
+            pressedThisFrame = Mouse.current.rightButton.wasPressedThisFrame;
             pointerPos = Mouse.current.position.ReadValue();
         }
 

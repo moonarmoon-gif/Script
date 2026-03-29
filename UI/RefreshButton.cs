@@ -1,11 +1,16 @@
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
 public class RefreshButton : MonoBehaviour
 {
     public Button Button;
 
-    public int AvailableRefreshPerLevelUp = 1;
+    public float AvailableRefreshPerLevelUp = 1f;
+
+    public int RefreshAmountOnStart = 0;
+
+    public TextMeshProUGUI RefreshAmountText;
 
     public float RefreshedCardDisplayDelay = 0.2f;
 
@@ -18,7 +23,7 @@ public class RefreshButton : MonoBehaviour
 
         if (CardSelectionManager.Instance != null)
         {
-            CardSelectionManager.Instance.ConfigureRefresh(AvailableRefreshPerLevelUp, RefreshedCardDisplayDelay);
+            CardSelectionManager.Instance.ConfigureRefresh(AvailableRefreshPerLevelUp, RefreshedCardDisplayDelay, RefreshAmountOnStart);
         }
     }
 
@@ -39,6 +44,11 @@ public class RefreshButton : MonoBehaviour
 
         CardSelectionManager manager = CardSelectionManager.Instance;
         Button.interactable = manager != null && manager.CanRefreshCurrentLevelUpStage();
+
+        if (RefreshAmountText != null && manager != null)
+        {
+            RefreshAmountText.text = $"x{Mathf.Max(0, manager.CurrentRefreshCurrencyWhole)}";
+        }
     }
 
     private void OnClick()
@@ -49,7 +59,7 @@ public class RefreshButton : MonoBehaviour
             return;
         }
 
-        manager.ConfigureRefresh(AvailableRefreshPerLevelUp, RefreshedCardDisplayDelay);
+        manager.ConfigureRefresh(AvailableRefreshPerLevelUp, RefreshedCardDisplayDelay, RefreshAmountOnStart);
         manager.RequestRefreshCurrentLevelUpStage();
     }
 }

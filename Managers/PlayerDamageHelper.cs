@@ -38,12 +38,7 @@ public static class PlayerDamageHelper
 
     private static float ComputeProjectileDamageInternal(PlayerStats stats, GameObject enemy, float baseDamage, GameObject projectile, bool isContinuousProjectile)
     {
-        if (baseDamage <= 0f)
-        {
-            return baseDamage;
-        }
-
-        float damage = baseDamage;
+        float damage = Mathf.Max(0f, baseDamage);
 
         ProjectileCards card = null;
         if (projectile != null && ProjectileCardModifiers.Instance != null)
@@ -60,6 +55,11 @@ public static class PlayerDamageHelper
             {
                 damage += attackBonus;
             }
+        }
+
+        if (damage <= 0f && stats == null)
+        {
+            return 0f;
         }
 
         // Apply core PlayerStats damage pipeline (flat damage, multipliers, crit, etc.).

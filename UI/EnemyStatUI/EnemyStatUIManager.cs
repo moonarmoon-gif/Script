@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
+[DefaultExecutionOrder(-120)]
 public class EnemyStatUIManager : MonoBehaviour
 {
     [Header("References")]
@@ -41,6 +42,9 @@ public class EnemyStatUIManager : MonoBehaviour
 
     private readonly Dictionary<int, EnemyStatUIPanel> panelsByEnemyId = new Dictionary<int, EnemyStatUIPanel>();
     private int nextSortingOrder = 0;
+
+    private static int handledClickFrame = -1;
+    public static bool WasClickHandledThisFrame => handledClickFrame == Time.frameCount;
 
     private Camera worldCamera;
     private bool lastSelectionActive;
@@ -120,7 +124,8 @@ public class EnemyStatUIManager : MonoBehaviour
 
         if (pointerPressAction == null)
         {
-            pointerPressAction = new InputAction("EnemyStatUI_Press", InputActionType.Button, "<Pointer>/press");
+            pointerPressAction = new InputAction("EnemyStatUI_Press", InputActionType.Button, "<Mouse>/leftButton");
+            pointerPressAction.AddBinding("<Touchscreen>/primaryTouch/press");
             pointerPressAction.Enable();
         }
 
@@ -237,78 +242,84 @@ public class EnemyStatUIManager : MonoBehaviour
             }
         }
 
-        Ray ray = worldCamera.ScreenPointToRay(pointerPos);
-        Vector2 p2;
-        if (Mathf.Abs(ray.direction.z) > 0.0001f)
+        bool prevQueriesHitTriggers = Physics2D.queriesHitTriggers;
+        Physics2D.queriesHitTriggers = true;
+        try
         {
-            float t = -ray.origin.z / ray.direction.z;
-            Vector3 worldPoint = ray.origin + ray.direction * t;
-            p2 = new Vector2(worldPoint.x, worldPoint.y);
-        }
-        else
-        {
-            Vector3 worldPoint = worldCamera.ScreenToWorldPoint(new Vector3(pointerPos.x, pointerPos.y, 0f));
-            p2 = new Vector2(worldPoint.x, worldPoint.y);
-        }
-
-        EnemyHealth enemyHealth = null;
-
-        RaycastHit2D[] hits2d = Physics2D.GetRayIntersectionAll(ray, 9999f, enemyClickMask);
-        for (int i = 0; i < hits2d.Length; i++)
-        {
-            if (hits2d[i].collider == null)
+            Ray ray = worldCamera.ScreenPointToRay(pointerPos);
+            Vector2 p2;
+            if (Mathf.Abs(ray.direction.z) > 0.0001f)
             {
-                continue;
+                float t = -ray.origin.z / ray.direction.z;
+                Vector3 worldPoint = ray.origin + ray.direction * t;
+                p2 = new Vector2(worldPoint.x, worldPoint.y);
+            }
+            else
+            {
+                Vector3 worldPoint = worldCamera.ScreenToWorldPoint(new Vector3(pointerPos.x, pointerPos.y, 0f));
+                p2 = new Vector2(worldPoint.x, worldPoint.y);
             }
 
-            if (TryGetEnemyFromClickHitbox(hits2d[i].collider, out enemyHealth))
-            {
-                break;
-            }
-        }
+            EnemyHealth enemyHealth = null;
 
-        if (enemyHealth == null)
-        {
-            Collider2D[] overlaps = Physics2D.OverlapPointAll(p2, enemyClickMask);
-            for (int i = 0; i < overlaps.Length; i++)
+            RaycastHit2D[] hits2d = Physics2D.GetRayIntersectionAll(ray, 9999f, enemyClickMask);
+            for (int i = 0; i < hits2d.Length; i++)
             {
-                if (overlaps[i] == null)
+                if (hits2d[i].collider == null)
                 {
                     continue;
                 }
 
-                if (TryGetEnemyFromClickHitbox(overlaps[i], out enemyHealth))
+                if (TryGetEnemyFromClickHitbox(hits2d[i].collider, out enemyHealth))
                 {
                     break;
                 }
             }
-        }
 
-        if (enemyHealth == null || !enemyHealth.IsAlive)
-        {
+            if (enemyHealth == null)
+            {
+                Collider2D[] overlaps = Physics2D.OverlapPointAll(p2, enemyClickMask);
+                for (int i = 0; i < overlaps.Length; i++)
+                {
+                    if (overlaps[i] == null)
+                    {
+                        continue;
+                    }
+
+                    if (TryGetEnemyFromClickHitbox(overlaps[i], out enemyHealth))
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (enemyHealth == null || !enemyHealth.IsAlive)
+            {
+                if (debugLogging)
+                {
+                    Debug.Log("[EnemyStatUIManager] No EnemyHealth hit.");
+                }
+                return;
+            }
+
             if (debugLogging)
             {
-                Debug.Log("[EnemyStatUIManager] No EnemyHealth hit.");
+                Debug.Log($"[EnemyStatUIManager] Hit enemy: {enemyHealth.gameObject.name}");
             }
-            return;
-        }
 
-        if (debugLogging)
-        {
-            Debug.Log($"[EnemyStatUIManager] Hit enemy: {enemyHealth.gameObject.name}");
+            handledClickFrame = Time.frameCount;
+            OpenOrBringToFront(enemyHealth);
         }
-        OpenOrBringToFront(enemyHealth);
+        finally
+        {
+            Physics2D.queriesHitTriggers = prevQueriesHitTriggers;
+        }
     }
 
     private bool TryGetEnemyFromClickHitbox(Collider2D hitCollider, out EnemyHealth enemyHealth)
     {
         enemyHealth = null;
         if (hitCollider == null)
-        {
-            return false;
-        }
-
-        if (!hitCollider.isTrigger)
         {
             return false;
         }

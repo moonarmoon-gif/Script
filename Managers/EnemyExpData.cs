@@ -19,8 +19,15 @@ public class EnemyExpData : MonoBehaviour
     [Header("Rarity Settings")]
     public CardRarity EnemyRarity = CardRarity.Common;
 
+    public bool GrantsExpToPlayer => grantExpToPlayer;
+
     private bool hasStarted = false;
     private float pendingPostScalingExpMultiplier = 1f;
+
+    private int trueLevelBaseExpReward;
+    private bool trueLevelBaseUseRandomRange;
+    private int trueLevelBaseMinExpReward;
+    private int trueLevelBaseMaxExpReward;
 
     public int ExpReward
     {
@@ -32,6 +39,16 @@ public class EnemyExpData : MonoBehaviour
             }
             return expReward;
         }
+    }
+
+    public int GetTrueLevelBaseExpReward()
+    {
+        if (trueLevelBaseUseRandomRange)
+        {
+            return Random.Range(trueLevelBaseMinExpReward, trueLevelBaseMaxExpReward + 1);
+        }
+
+        return trueLevelBaseExpReward;
     }
 
     public void SetGrantExpEnabled(bool enabled)
@@ -84,6 +101,11 @@ public class EnemyExpData : MonoBehaviour
 
     private void Awake()
     {
+        trueLevelBaseExpReward = expReward;
+        trueLevelBaseUseRandomRange = useRandomRange;
+        trueLevelBaseMinExpReward = minExpReward;
+        trueLevelBaseMaxExpReward = maxExpReward;
+
         // Subscribe to death event
         var enemyHealth = GetComponent<EnemyHealth>();
         if (enemyHealth != null)

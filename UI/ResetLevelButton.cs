@@ -47,7 +47,7 @@ public class ResetLevelButton : MonoBehaviour
     {
         if (CardSelectionManager.Instance != null)
         {
-            CardSelectionManager.Instance.ForceCloseSelectionUI();
+            CardSelectionManager.Instance.ResetRunState();
         }
 
         GameStateManager.SetManualPause(false);
@@ -81,6 +81,13 @@ public class ResetLevelButton : MonoBehaviour
         
         // 3. Reset PlayerHealth and PlayerMana
         ResetPlayerHealthAndMana();
+
+        PlayerStats allocations = FindObjectOfType<PlayerStats>();
+        if (allocations != null)
+        {
+            allocations.ResetLevelUpAllocationTracking();
+            allocations.ReapplyLevelUpAllocationsFromPrefs(fillToMax: true, refillMana: true);
+        }
         
         // 4. Clear all projectiles from ProjectileSpawner
         ClearProjectileSpawner();
@@ -140,14 +147,14 @@ public class ResetLevelButton : MonoBehaviour
         if (playerStats != null)
         {
             // Reset all stat multipliers to default
-            playerStats.damageMultiplier = 1f;
+            playerStats.damageMultiplier = 100f;
             playerStats.critChance = 5f;
             playerStats.critDamage = 150f;
             playerStats.luck = 0f;
-            playerStats.experienceMultiplier = 1f;
+            playerStats.experienceMultiplier = 100f;
             playerStats.moveSpeedMultiplier = 1f;
             playerStats.manaRegenPerSecond = 1f;
-            playerStats.healthRegenPerSecond = 0f;
+            playerStats.healthRegenPerSecond = 1f;
             
             // Reset projectile stats
             playerStats.projectileSpeedMultiplier = 1f;
@@ -169,8 +176,7 @@ public class ResetLevelButton : MonoBehaviour
             playerStats.hasChainReaction = false;
             playerStats.chainReactionRadius = 0f;
             playerStats.projectileLifetimeMultiplier = 1f;
-            playerStats.projectileLifetimeBonus = 0f;
-            playerStats.projectileCooldownReduction = 0f;
+            playerStats.projectileLifetimeBonus = 0f; // Raw lifetime bonus in seconds (not percentage)
             playerStats.projectileManaCostReduction = 0f;
             playerStats.projectileFlatDamage = 0f;
             playerStats.projectileDamageMultiplier = 1f;
@@ -178,7 +184,8 @@ public class ResetLevelButton : MonoBehaviour
             playerStats.projectileCritDamage = 150f;
             playerStats.hasProjectileStatusEffect = false;
             playerStats.statusEffectChance = 0f;
-            playerStats.attackSpeedPercent = 0f;
+            playerStats.AttackSpeedBonus = 0f;
+            playerStats.Cooldown = 100f;
             
             // Reset level stats
             playerStats.currentLevel = 1;

@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [CreateAssetMenu(fileName = "DefenseOnHpFavour", menuName = "Favour Effects 2/Defense On Hp")]
 public class DefenseOnHpFavour : FavourEffect
@@ -12,8 +13,8 @@ public class DefenseOnHpFavour : FavourEffect
     [Header("Enhanced")]
     public int BonusDefenseGain = 1;
 
-    [Header("Pick Limit")]
-    public int MaxPickLimit = 0;
+    [FormerlySerializedAs("MaxPickLimit")]
+    [SerializeField, HideInInspector] private int legacyMaxPickLimit = 0;
 
     private PlayerHealth playerHealth;
     private StatusController statusController;
@@ -21,9 +22,27 @@ public class DefenseOnHpFavour : FavourEffect
     private int sourceKey;
     private float accumulatedDamagePercent;
 
-    protected override int GetMaxPickLimit()
+    private void OnEnable()
     {
-        return MaxPickLimit;
+        MigratePickLimitIfNeeded();
+    }
+
+    private void OnValidate()
+    {
+        MigratePickLimitIfNeeded();
+    }
+
+    private void MigratePickLimitIfNeeded()
+    {
+        if (maxPickLimit <= 0 && legacyMaxPickLimit > 0)
+        {
+            maxPickLimit = legacyMaxPickLimit;
+        }
+
+        if (legacyMaxPickLimit != 0 && maxPickLimit == legacyMaxPickLimit)
+        {
+            legacyMaxPickLimit = 0;
+        }
     }
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)

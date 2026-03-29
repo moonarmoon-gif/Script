@@ -28,9 +28,6 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
     [Header("Mana")]
     [SerializeField] private int manaCost = 30;
 
-    public int MinOrderInlayer = 201;
-    public int MaxOrderInLayer = 300;
-
     private Transform pointA;
     private Transform pointB;
     private Transform pointC;
@@ -60,8 +57,6 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
 
     private static Dictionary<string, float> lastFireTimes = new Dictionary<string, float>();
     private string prefabKey;
-
-    private static int activeSortingBeamCount = 0;
 
     private float spawnXOffset = 0f;
     private bool useVariant3TargetedSpawn = false;
@@ -109,7 +104,6 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
 
     private void OnEnable()
     {
-        activeSortingBeamCount += 1;
         ForceStopLoopingState();
         SetAnimatorBoolAll("End", false);
         UpdateAnimatorPauseState();
@@ -124,8 +118,6 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
 
     private void OnDisable()
     {
-        activeSortingBeamCount = Mathf.Max(0, activeSortingBeamCount - 1);
-
         if (lifecycleCoroutine != null)
         {
             StopCoroutine(lifecycleCoroutine);
@@ -185,43 +177,6 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
         }
 
         SetAnimatorBoolAll("Loop", false);
-    }
-
-    private void ApplySortingOrderForBeam()
-    {
-        SpriteRenderer[] sprites = GetComponentsInChildren<SpriteRenderer>(true);
-        if (sprites == null || sprites.Length == 0)
-        {
-            return;
-        }
-
-        int instanceBaseOrder = sprites[0].sortingOrder;
-        for (int i = 1; i < sprites.Length; i++)
-        {
-            if (sprites[i] != null && sprites[i].sortingOrder < instanceBaseOrder)
-            {
-                instanceBaseOrder = sprites[i].sortingOrder;
-            }
-        }
-
-        int minOrder = Mathf.Min(MinOrderInlayer, MaxOrderInLayer);
-        int maxOrder = Mathf.Max(MinOrderInlayer, MaxOrderInLayer);
-
-        int desiredBaseOrder = Mathf.Clamp(minOrder + Mathf.Max(0, activeSortingBeamCount - 1), minOrder, maxOrder);
-
-        int delta = desiredBaseOrder - instanceBaseOrder;
-        if (delta == 0)
-        {
-            return;
-        }
-
-        for (int i = 0; i < sprites.Length; i++)
-        {
-            if (sprites[i] != null)
-            {
-                sprites[i].sortingOrder += delta;
-            }
-        }
     }
 
     public void Initialize(Vector3 spawnPosition, Collider2D playerCollider, float configuredBaseDamage, float configuredBaseLifetime, float configuredTickInterval, bool skipCooldownCheck = false)
@@ -298,10 +253,11 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
         }
 
         float effectiveCooldown = finalCooldown;
-        if (cachedPlayerStats != null && cachedPlayerStats.projectileCooldownReduction > 0f)
+        if (cachedPlayerStats != null)
         {
-            float totalCdr = Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction);
-            effectiveCooldown = finalCooldown / (1f + totalCdr);
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
             if (MinCooldownManager.Instance != null && card != null)
             {
                 effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
@@ -357,7 +313,6 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
             ApplySpawnPosition(spawnPosition);
         }
 
-        ApplySortingOrderForBeam();
         SyncChildSpriteSortPoints();
 
         currentDamage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;

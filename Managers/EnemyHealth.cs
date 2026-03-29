@@ -1,5 +1,6 @@
 // EnemyHealth.cs
 using System;
+using System.Collections;
 using UnityEngine;
 
 public class EnemyHealth : MonoBehaviour, IDamageable
@@ -7,6 +8,8 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     [SerializeField] private float maxHealth = 30f;
     [SerializeField] private float currentHealth = 30f;
     [SerializeField] public bool ignoreScalingFromEnemyScalingSystem = false;
+
+    private bool hasTakenDamage;
 
     private bool hasStarted = false;
     private float pendingPostScalingHealthMultiplier = 1f;
@@ -23,6 +26,8 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     public float CurrentHealth => Mathf.Clamp(currentHealth, 0f, MaxHealth);
     public bool IsAlive => CurrentHealth > 0f;
     public bool IsImmuneToBossMenace => immuneToBossMenace;
+
+    public bool HasTakenDamage => hasTakenDamage;
 
     /// <summary>
     /// Multiply max health by a value (used by EnemySpawner)
@@ -57,6 +62,11 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     // fallback 0 number respects the projectile's elemental damage color.
     private DamageNumberManager.DamageType lastIncomingDamageType = DamageNumberManager.DamageType.Fire;
 
+    private SpriteRenderer[] spawnHideRenderers;
+    private bool[] spawnHideForceOffStates;
+    private Coroutine spawnHideRoutine;
+    private int spawnHideToken = 0;
+
     public bool LastHitWasExecute { get; private set; }
     public bool LastHitExecutePopupShown { get; private set; }
 
@@ -68,6 +78,110 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     private void Awake()
     {
         mainCamera = Camera.main;
+        hasTakenDamage = false;
+    }
+
+    private void OnEnable()
+    {
+        hasTakenDamage = false;
+        spawnHideToken++;
+        if (spawnHideRoutine != null)
+        {
+            StopCoroutine(spawnHideRoutine);
+            spawnHideRoutine = null;
+        }
+
+        float durationSeconds = 0f;
+        if (GameStateManager.Instance != null)
+        {
+            durationSeconds = GameStateManager.Instance.HideSpriteOnSpawnDuration;
+        }
+        durationSeconds = Mathf.Max(0f, durationSeconds);
+
+        bool isBoss = false;
+        EnemyExpData expData = GetComponent<EnemyExpData>();
+        if (expData != null)
+        {
+            isBoss = expData.EnemyRarity == CardRarity.Boss;
+        }
+
+        bool skipSpawnHide =
+            GetComponent<SkellySwordEnemy>() != null ||
+            GetComponent<SkellyArcherEnemy>() != null ||
+            GetComponent<SkellySmithEnemy>() != null;
+
+        if (!isBoss && !skipSpawnHide && durationSeconds > 0f)
+        {
+            spawnHideRoutine = StartCoroutine(HideSpriteRenderersForDuration(durationSeconds, spawnHideToken));
+        }
+    }
+
+    private void OnDisable()
+    {
+        spawnHideToken++;
+        if (spawnHideRoutine != null)
+        {
+            StopCoroutine(spawnHideRoutine);
+            spawnHideRoutine = null;
+        }
+
+        if (spawnHideRenderers != null && spawnHideForceOffStates != null)
+        {
+            int count = Mathf.Min(spawnHideRenderers.Length, spawnHideForceOffStates.Length);
+            for (int i = 0; i < count; i++)
+            {
+                SpriteRenderer sr = spawnHideRenderers[i];
+                if (sr != null)
+                {
+                    sr.forceRenderingOff = spawnHideForceOffStates[i];
+                }
+            }
+        }
+    }
+
+    private IEnumerator HideSpriteRenderersForDuration(float durationSeconds, int token)
+    {
+        spawnHideRenderers = GetComponentsInChildren<SpriteRenderer>(true);
+        if (spawnHideRenderers == null || spawnHideRenderers.Length == 0)
+        {
+            spawnHideRoutine = null;
+            yield break;
+        }
+
+        if (spawnHideForceOffStates == null || spawnHideForceOffStates.Length != spawnHideRenderers.Length)
+        {
+            spawnHideForceOffStates = new bool[spawnHideRenderers.Length];
+        }
+
+        for (int i = 0; i < spawnHideRenderers.Length; i++)
+        {
+            SpriteRenderer sr = spawnHideRenderers[i];
+            if (sr != null)
+            {
+                spawnHideForceOffStates[i] = sr.forceRenderingOff;
+                sr.forceRenderingOff = true;
+            }
+        }
+
+        float elapsed = 0f;
+        while (elapsed < durationSeconds)
+        {
+            yield return null;
+            if (token != spawnHideToken) yield break;
+            if (!isActiveAndEnabled) yield break;
+            elapsed += GameStateManager.GetPauseSafeDeltaTime();
+        }
+
+        for (int i = 0; i < spawnHideRenderers.Length; i++)
+        {
+            SpriteRenderer sr = spawnHideRenderers[i];
+            if (sr != null)
+            {
+                sr.forceRenderingOff = spawnHideForceOffStates[i];
+            }
+        }
+
+        spawnHideRoutine = null;
     }
 
     private void Start()
@@ -396,11 +510,11 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             }
 
             Vector3 popupAnchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, hitPoint);
-            DamageNumberManager.Instance.ShowDamage(baseDamageForPopup, popupAnchor, lastIncomingDamageType);
+            DamageNumberManager.Instance.ShowDamageAggregated(gameObject, baseDamageForPopup, popupAnchor, lastIncomingDamageType);
 
             if (woundBonusDamage > 0f)
             {
-                DamageNumberManager.Instance.ShowDamage(woundBonusDamage, popupAnchor, DamageNumberManager.DamageType.Wound);
+                DamageNumberManager.Instance.ShowDamageAggregated(gameObject, woundBonusDamage, popupAnchor, DamageNumberManager.DamageType.Wound);
             }
         }
 
@@ -418,6 +532,8 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             StatusDamageScope.LastResolvedDamage = finalAmount;
         }
 
+        hasTakenDamage = true;
+
         currentHealth = Mathf.Clamp(currentHealth - finalAmount, 0f, MaxHealth);
         OnDamageTaken?.Invoke(finalAmount, hitPoint, hitNormal);
 
@@ -429,6 +545,11 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             {
                 favourManager.NotifyEnemyDamageFinalized(gameObject, finalAmount, isStatusTickLocal);
             }
+        }
+
+        if (TrueLevelRunTracker.Instance != null)
+        {
+            TrueLevelRunTracker.Instance.NotifyEnemyDamageFinalized(gameObject, finalAmount, isStatusTickLocal);
         }
         RaiseChanged();
 
@@ -448,6 +569,11 @@ public class EnemyHealth : MonoBehaviour, IDamageable
                 {
                     favourManager.NotifyEnemyKilled(gameObject);
                 }
+            }
+
+            if (TrueLevelRunTracker.Instance != null)
+            {
+                TrueLevelRunTracker.Instance.NotifyEnemyKilled(gameObject);
             }
 
             OnDeath?.Invoke();
@@ -476,6 +602,12 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             {
                 float blessPercent = StatusControllerManager.Instance.BlessingHealingIncreasePercent;
                 healAmount *= 1f + blessPercent / 100f;
+
+                float extra = StatusControllerManager.Instance.BlessingExtraHealingPercent;
+                if (extra > 0f)
+                {
+                    healAmount *= 1f + extra / 100f;
+                }
             }
         }
 

@@ -235,6 +235,38 @@ public class OrbitalStarManager : MonoBehaviour
     // destroyed externally during boss events).
     private const float enhancedStallTimeout = 10f;
 
+    private static bool IsPlayerDead()
+    {
+        return GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead;
+    }
+
+    private static bool HasAnyNovaStarInstance()
+    {
+        NovaStar[] stars = FindObjectsOfType<NovaStar>();
+        return stars != null && stars.Length > 0;
+    }
+
+    private static bool HasAnyDwarfStarInstance()
+    {
+        DwarfStar[] stars = FindObjectsOfType<DwarfStar>();
+        return stars != null && stars.Length > 0;
+    }
+
+    public void StopAllStarSpawningOnPlayerDeath()
+    {
+        if (novaStarSpawnCoroutine != null)
+        {
+            StopCoroutine(novaStarSpawnCoroutine);
+            novaStarSpawnCoroutine = null;
+        }
+
+        if (dwarfStarSpawnCoroutine != null)
+        {
+            StopCoroutine(dwarfStarSpawnCoroutine);
+            dwarfStarSpawnCoroutine = null;
+        }
+    }
+
     private void Start()
     {
         if (playerTransform == null)
@@ -791,6 +823,18 @@ public class OrbitalStarManager : MonoBehaviour
     {
         while (true)
         {
+            if (IsPlayerDead())
+            {
+                if (!HasAnyNovaStarInstance())
+                {
+                    novaStarSpawnCoroutine = null;
+                    yield break;
+                }
+
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
+                continue;
+            }
+
             // During boss events, pause all new NovaStar spawns so that any
             // existing instances can be cleared by EnemyCardSpawner before
             // boss cards are shown.
@@ -831,6 +875,18 @@ public class OrbitalStarManager : MonoBehaviour
     {
         while (true)
         {
+            if (IsPlayerDead())
+            {
+                if (!HasAnyDwarfStarInstance())
+                {
+                    dwarfStarSpawnCoroutine = null;
+                    yield break;
+                }
+
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
+                continue;
+            }
+
             // During boss events, pause all new DwarfStar spawns so that any
             // existing instances can be cleared by EnemyCardSpawner before
             // boss cards are shown.
@@ -901,6 +957,18 @@ public class OrbitalStarManager : MonoBehaviour
         
         while (true)
         {
+            if (IsPlayerDead())
+            {
+                if (!HasAnyNovaStarInstance())
+                {
+                    novaStarSpawnCoroutine = null;
+                    yield break;
+                }
+
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
+                continue;
+            }
+
             // During boss events, pause all enhanced NovaStar spawns and
             // waits so that any existing instances can be destroyed and no
             // new orbits appear while boss cards/menace are active.
@@ -1779,6 +1847,18 @@ public class OrbitalStarManager : MonoBehaviour
         
         while (true)
         {
+            if (IsPlayerDead())
+            {
+                if (!HasAnyDwarfStarInstance())
+                {
+                    dwarfStarSpawnCoroutine = null;
+                    yield break;
+                }
+
+                yield return GameStateManager.WaitForPauseSafeSeconds(0.5f);
+                continue;
+            }
+
             // During boss events, pause all enhanced DwarfStar behaviour so
             // any existing instances can be destroyed cleanly and no new
             // orbits appear while boss cards/menace are active.

@@ -154,7 +154,7 @@ public class CoreCards : BaseCard
             if (!AddFlatDamage(stats, amount))
             {
                 // Fallback: use multiplier if flatDamage doesn't exist
-                stats.damageMultiplier += amount / 100f;
+                stats.damageMultiplier += amount;
                 Debug.LogWarning($"flatDamage field not found, using multiplier fallback. Damage increased by {amount}%. New multiplier: {stats.damageMultiplier}");
             }
         }
@@ -243,8 +243,8 @@ public class CoreCards : BaseCard
         PlayerStats stats = player.GetComponent<PlayerStats>();
         if (stats != null)
         {
-            stats.experienceMultiplier += amount / 100f;
-            Debug.Log($"Experience gain increased by {amount}%. New multiplier: {stats.experienceMultiplier}");
+            stats.experienceMultiplier += amount;
+            Debug.Log($"Experience gain increased by {amount}%. New: {stats.experienceMultiplier}%");
         }
         else
         {
@@ -257,8 +257,8 @@ public class CoreCards : BaseCard
         PlayerStats stats = player.GetComponent<PlayerStats>();
         if (stats != null)
         {
-            stats.soulGainMultiplier += amount / 100f;
-            Debug.Log($"Soul gain increased by {amount}%. New multiplier: {stats.soulGainMultiplier}");
+            stats.soulGainMultiplier += amount;
+            Debug.Log($"Soul gain increased by {amount}%. New: {(stats.soulGainMultiplier * 100f)}%");
         }
         else
         {
@@ -271,8 +271,8 @@ public class CoreCards : BaseCard
         PlayerStats stats = player.GetComponent<PlayerStats>();
         if (stats != null)
         {
-            stats.attackSpeedPercent += amount;
-            Debug.Log($"Attack Speed increased by {amount}%. New: {stats.attackSpeedPercent}%");
+            stats.AttackSpeedBonus += amount;
+            Debug.Log($"Attack Speed increased by {amount}%. New: {stats.AttackSpeedBonus}%");
         }
         else
         {

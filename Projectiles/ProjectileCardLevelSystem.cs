@@ -98,9 +98,12 @@ public class ProjectileCardLevelSystem : MonoBehaviour
             int oldTier = oldLevel / enhancedUnlockLevel;
             int newTier = newLevel / enhancedUnlockLevel;
 
-            if (newTier > oldTier)
+            int oldClampedTier = Mathf.Clamp(oldTier, 0, 4);
+            int newClampedTier = Mathf.Clamp(newTier, 0, 4);
+
+            if (newClampedTier > oldClampedTier)
             {
-                int clampedTier = Mathf.Clamp(newTier, 1, 3);
+                int clampedTier = Mathf.Clamp(newTier, 1, 4);
                 cardTiers[cardKey] = clampedTier;
 
                 Debug.Log($"<color=gold>★★★ {cardKey} ENHANCED TIER {clampedTier} REACHED! (Level {newLevel}/{enhancedUnlockLevel}x{clampedTier}) ★★★</color>");
@@ -175,6 +178,18 @@ public class ProjectileCardLevelSystem : MonoBehaviour
                 previous = selectedEnhancedVariants[cardKey];
             }
             storedVariant = Mathf.Max(0, previous) | Mathf.Max(0, variantBit);
+        }
+
+        if (card.projectileType == ProjectileCards.ProjectileType.ElementalBeam && variantIndex == 4)
+        {
+            if (selectedEnhancedVariants.ContainsKey(cardKey))
+            {
+                storedVariant = selectedEnhancedVariants[cardKey];
+            }
+            else
+            {
+                storedVariant = 0;
+            }
         }
 
         selectedEnhancedVariants[cardKey] = storedVariant;

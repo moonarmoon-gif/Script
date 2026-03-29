@@ -1,3 +1,6 @@
+using System;
+using System.Collections;
+using System.Reflection;
 using UnityEngine;
 
 /// <summary>
@@ -54,6 +57,9 @@ public class SpriteFlipOffset : MonoBehaviour
     private bool hasShadow = false;
     private bool hasShadowSprite = false;
     private bool isInitialized = false;
+    private int initialFlipFramesRemaining = 0;
+    private Coroutine hideRendererRoutine;
+    private int hideRendererRoutineToken = 0;
     
     // Track last frame's offset to detect animation changes
     private Vector2 lastFrameOffset = Vector2.zero;
@@ -63,10 +69,22 @@ public class SpriteFlipOffset : MonoBehaviour
         sr = GetComponent<SpriteRenderer>();
         if (sr == null)
         {
+            sr = GetComponentInChildren<SpriteRenderer>(true);
+        }
+        if (sr == null)
+        {
+            sr = GetComponentInParent<SpriteRenderer>();
+        }
+        if (sr == null)
+        {
             Debug.LogError($"SpriteFlipOffset on {gameObject.name}: No SpriteRenderer found!");
             enabled = false;
             return;
         }
+
+        TrySyncInvertFlipFromOwner();
+
+        ApplyInitialFlip();
 
         // Find ClickHitbox (used for EnemyStatUI click selection)
         Transform[] children = GetComponentsInChildren<Transform>(true);
@@ -133,6 +151,11 @@ public class SpriteFlipOffset : MonoBehaviour
             Debug.Log($"<color=cyan>SpriteFlipOffset on {gameObject.name}: Found shadow at {baseShadowLocalPosition}, has sprite = {hasShadowSprite}</color>");
         }
     }
+
+    private void OnValidate()
+    {
+        invertFlip = false;
+    }
     
     void Start()
     {
@@ -149,13 +172,150 @@ public class SpriteFlipOffset : MonoBehaviour
         // Mark as initialized when enabled
         if (sr != null)
         {
+            sr.enabled = true;
             isInitialized = true;
+            initialFlipFramesRemaining = 1;
+            TrySyncInvertFlipFromOwner();
+            ApplyInitialFlip();
+            ApplyOffset();
+            TryHideRendererForOneFrame();
         }
+    }
+
+    void OnDisable()
+    {
+        hideRendererRoutineToken++;
+        if (hideRendererRoutine != null)
+        {
+            StopCoroutine(hideRendererRoutine);
+            hideRendererRoutine = null;
+        }
+
+        if (sr != null)
+        {
+            sr.enabled = true;
+        }
+    }
+
+    private void TryHideRendererForOneFrame()
+    {
+        if (sr == null) return;
+
+        EnemyHealth enemyHealth = GetComponentInParent<EnemyHealth>();
+        if (enemyHealth == null) return;
+
+        if (IsBossEnemy()) return;
+
+        hideRendererRoutineToken++;
+        if (hideRendererRoutine != null)
+        {
+            StopCoroutine(hideRendererRoutine);
+        }
+        hideRendererRoutine = StartCoroutine(HideRendererOneFrameRoutine(hideRendererRoutineToken));
+    }
+
+    private bool IsBossEnemy()
+    {
+        EnemyExpData expData = GetComponentInParent<EnemyExpData>();
+        if (expData == null)
+        {
+            expData = GetComponentInChildren<EnemyExpData>(true);
+        }
+
+        if (expData == null) return false;
+
+        return expData.EnemyRarity.ToString().IndexOf("boss", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private IEnumerator HideRendererOneFrameRoutine(int token)
+    {
+        if (sr == null) yield break;
+
+        sr.enabled = false;
+        yield return null;
+
+        if (token != hideRendererRoutineToken) yield break;
+        if (!isActiveAndEnabled) yield break;
+
+        sr.enabled = true;
+        ApplyInitialFlip();
+        ApplyOffset();
+
+        hideRendererRoutine = null;
+    }
+
+    private void ApplyInitialFlip()
+    {
+        if (sr == null) return;
+
+        Camera cam = Camera.main;
+        float referenceX = cam != null ? cam.transform.position.x : 0f;
+        if (AdvancedPlayerController.Instance != null)
+        {
+            referenceX = AdvancedPlayerController.Instance.transform.position.x;
+        }
+        float spriteX = sr.transform.position.x;
+        bool shouldFlipLeft = spriteX >= referenceX;
+        sr.flipX = invertFlip ? !shouldFlipLeft : shouldFlipLeft;
+    }
+
+    private void TrySyncInvertFlipFromOwner()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        MonoBehaviour[] parentBehaviours = GetComponentsInParent<MonoBehaviour>(true);
+        MonoBehaviour[] childBehaviours = GetComponentsInChildren<MonoBehaviour>(true);
+
+        if (TryReadInvertFlip(parentBehaviours, flags, out bool value) ||
+            TryReadInvertFlip(childBehaviours, flags, out value))
+        {
+            invertFlip = value;
+        }
+
+        invertFlip = false;
+    }
+
+    private static bool TryReadInvertFlip(MonoBehaviour[] behaviours, BindingFlags flags, out bool value)
+    {
+        value = false;
+        if (behaviours == null || behaviours.Length == 0) return false;
+
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            MonoBehaviour b = behaviours[i];
+            if (b == null) continue;
+
+            System.Type t = b.GetType();
+
+            FieldInfo fi = t.GetField("invertFlip", flags);
+            if (fi != null && fi.FieldType == typeof(bool))
+            {
+                value = (bool)fi.GetValue(b);
+                return true;
+            }
+
+            fi = t.GetField("inverseFlip", flags);
+            if (fi != null && fi.FieldType == typeof(bool))
+            {
+                value = (bool)fi.GetValue(b);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     void LateUpdate()
     {
         if (sr == null || !sr.enabled) return;
+
+        invertFlip = false;
+
+        if (isInitialized && initialFlipFramesRemaining > 0)
+        {
+            ApplyInitialFlip();
+            initialFlipFramesRemaining--;
+        }
 
         // ALWAYS check and apply offset based on CURRENT flip state
         // This ensures offset is correct even if flip changed this frame

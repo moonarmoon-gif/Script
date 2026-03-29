@@ -117,12 +117,15 @@ public class CardSelectionManager : MonoBehaviour
     private bool isFirstStage = true; // True = Core cards, False = Projectile cards
     private bool waitingForSecondStage = false;
 
-    private int availableRefreshPerLevelUp = 0;
+    private float availableRefreshPerLevelUp = 0f;
+    private int refreshAmountOnStart = 0;
     private float refreshedCardDisplayDelay = 0f;
+    private float refreshCurrency = 0f;
+    private bool refreshStartAmountApplied = false;
+    private bool refreshAwardPendingForThisStage = false;
     private bool currentSelectionIsLevelUpStage = false;
     private bool currentSelectionIsCoreStage = false;
     private bool currentSelectionExcludeCommon = false;
-    private int refreshesRemainingForCurrentStage = 0;
     private bool isRefreshingCurrentStage = false;
     private Coroutine refreshCurrentStageRoutine;
 
@@ -130,12 +133,19 @@ public class CardSelectionManager : MonoBehaviour
     private float timedFavourElapsed = 0f;
     private int timedPseudoSoulLevel = 0;
 
+    private StartingScreen cachedStartingScreen;
+    private LevelUpUI cachedLevelUpUI;
+
     private bool wasTimedModeActive = false;
     private bool soulExpGainEnabledBeforeTimed = true;
     private bool lastAutomaticLevelingFavourSystem;
     private bool lastTimedLevelingFavourSystem;
 
+    private RefreshButton cachedRefreshButton;
+    private int nextRefreshButtonSearchFrame = 0;
+
     public bool IsSelectionUIActive => isSelectionActive;
+    public bool IsCurrentSelectionLevelUpStage => currentSelectionIsLevelUpStage;
 
     // Queue for multiple level-ups
     private Queue<int> pendingLevelUps = new Queue<int>();
@@ -313,10 +323,33 @@ public class CardSelectionManager : MonoBehaviour
                processingExternalCardQueue || pendingExternalCardSelections.Count > 0;
     }
 
-    public void ConfigureRefresh(int availableRefreshPerLevelUp, float refreshedCardDisplayDelay)
+    public float CurrentRefreshCurrency
     {
-        this.availableRefreshPerLevelUp = Mathf.Max(0, availableRefreshPerLevelUp);
+        get { return refreshCurrency; }
+    }
+
+    public int CurrentRefreshCurrencyWhole
+    {
+        get { return Mathf.FloorToInt(refreshCurrency); }
+    }
+
+    public void ConfigureRefresh(float availableRefreshPerLevelUp, float refreshedCardDisplayDelay, int refreshAmountOnStart)
+    {
+        this.availableRefreshPerLevelUp = Mathf.Max(0f, availableRefreshPerLevelUp);
         this.refreshedCardDisplayDelay = Mathf.Max(0f, refreshedCardDisplayDelay);
+
+        this.refreshAmountOnStart = Mathf.Max(0, refreshAmountOnStart);
+        if (!refreshStartAmountApplied && this.refreshAmountOnStart > 0)
+        {
+            refreshCurrency += this.refreshAmountOnStart;
+            refreshStartAmountApplied = true;
+        }
+
+        if (isSelectionActive && currentSelectionIsLevelUpStage && currentSelectionIsCoreStage && refreshAwardPendingForThisStage)
+        {
+            refreshCurrency += this.availableRefreshPerLevelUp;
+            refreshAwardPendingForThisStage = false;
+        }
     }
 
     public bool CanRefreshCurrentLevelUpStage()
@@ -324,7 +357,7 @@ public class CardSelectionManager : MonoBehaviour
         return isSelectionActive &&
                currentSelectionIsLevelUpStage &&
                !isRefreshingCurrentStage &&
-               refreshesRemainingForCurrentStage > 0;
+               refreshCurrency >= 1f;
     }
 
     public void RequestRefreshCurrentLevelUpStage()
@@ -345,7 +378,7 @@ public class CardSelectionManager : MonoBehaviour
     private IEnumerator RefreshCurrentLevelUpStageRoutine()
     {
         isRefreshingCurrentStage = true;
-        refreshesRemainingForCurrentStage = Mathf.Max(0, refreshesRemainingForCurrentStage - 1);
+        refreshCurrency = Mathf.Max(0f, refreshCurrency - 1f);
 
         if (cardSelectionUI != null)
         {
@@ -420,7 +453,13 @@ public class CardSelectionManager : MonoBehaviour
             return;
         }
 
-        favourCardInterval = Mathf.Max(0f, favourCardInterval - seconds);
+        float minInterval = 30f;
+        if (MinCooldownManager.Instance != null)
+        {
+            minInterval = Mathf.Max(30f, MinCooldownManager.Instance.FavourInterval);
+        }
+
+        favourCardInterval = Mathf.Max(minInterval, favourCardInterval - seconds);
 
         if (favourCardInterval <= 0f)
         {
@@ -583,6 +622,36 @@ public class CardSelectionManager : MonoBehaviour
         }
 
         TickTimedFavourSystem();
+        UpdateRefreshButtonVisibility();
+    }
+
+    private void UpdateRefreshButtonVisibility()
+    {
+        if (cachedRefreshButton == null)
+        {
+            if (Time.frameCount < nextRefreshButtonSearchFrame)
+            {
+                return;
+            }
+
+            nextRefreshButtonSearchFrame = Time.frameCount + 30;
+            cachedRefreshButton = FindObjectOfType<RefreshButton>(true);
+            if (cachedRefreshButton == null)
+            {
+                return;
+            }
+        }
+
+        bool shouldBeVisible = true;
+        if (isSelectionActive && !currentSelectionIsLevelUpStage)
+        {
+            shouldBeVisible = false;
+        }
+
+        if (cachedRefreshButton.gameObject.activeSelf != shouldBeVisible)
+        {
+            cachedRefreshButton.gameObject.SetActive(shouldBeVisible);
+        }
     }
 
     private void ApplyFavourSystemMode()
@@ -647,6 +716,11 @@ public class CardSelectionManager : MonoBehaviour
             return;
         }
 
+        if (IsNonGameplayUIActive())
+        {
+            return;
+        }
+
         if (Time.timeScale <= 0.0001f)
         {
             return;
@@ -683,6 +757,39 @@ public class CardSelectionManager : MonoBehaviour
         ShowSoulFavourCardsForSoulLevel(timedPseudoSoulLevel, count);
     }
 
+    private bool IsNonGameplayUIActive()
+    {
+        if (cachedStartingScreen == null)
+        {
+            cachedStartingScreen = FindObjectOfType<StartingScreen>(true);
+        }
+
+        if (cachedStartingScreen != null)
+        {
+            GameObject root = cachedStartingScreen.Root != null ? cachedStartingScreen.Root : cachedStartingScreen.gameObject;
+            if (root != null && root.activeInHierarchy)
+            {
+                return true;
+            }
+        }
+
+        if (cachedLevelUpUI == null)
+        {
+            cachedLevelUpUI = FindObjectOfType<LevelUpUI>(true);
+        }
+
+        if (cachedLevelUpUI != null)
+        {
+            GameObject root = cachedLevelUpUI.Root != null ? cachedLevelUpUI.Root : cachedLevelUpUI.gameObject;
+            if (root != null && root.activeInHierarchy)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public void ForceCloseSelectionUI()
     {
         StopAllCoroutines();
@@ -704,7 +811,7 @@ public class CardSelectionManager : MonoBehaviour
         currentSelectionIsLevelUpStage = false;
         currentSelectionIsCoreStage = false;
         currentSelectionExcludeCommon = false;
-        refreshesRemainingForCurrentStage = 0;
+        refreshAwardPendingForThisStage = false;
         isRefreshingCurrentStage = false;
         refreshCurrentStageRoutine = null;
 
@@ -718,6 +825,28 @@ public class CardSelectionManager : MonoBehaviour
         processingExternalCardQueue = false;
         processingExternalCombinedQueue = false;
 
+        pendingMineElementSelection = false;
+        pendingMineCard = null;
+    }
+
+    public void ResetRunState()
+    {
+        ForceCloseSelectionUI();
+
+        refreshCurrency = 0f;
+        refreshStartAmountApplied = false;
+        refreshAwardPendingForThisStage = false;
+
+        pickedProjectileCards?.Clear();
+        chosenPassiveProjectileCardNames?.Clear();
+        activeProjectileSystemCardName = null;
+        initialActiveProjectileSystemCardName = null;
+
+        usedOneTimeFavourCardNames?.Clear();
+        pendingNoCommonLevelUpStages = 0;
+
+        mineElementChoiceMade = false;
+        mineUsesAlternateElement = false;
         pendingMineElementSelection = false;
         pendingMineCard = null;
     }
@@ -882,6 +1011,10 @@ public class CardSelectionManager : MonoBehaviour
         isFirstStage = isCoreStage;
         waitingForSecondStage = false;
 
+        currentSelectionIsLevelUpStage = false;
+        currentSelectionIsCoreStage = false;
+        currentSelectionExcludeCommon = false;
+
         if (pauseGameOnSelection)
         {
             Time.timeScale = 0f;
@@ -900,8 +1033,14 @@ public class CardSelectionManager : MonoBehaviour
         currentSelectionIsLevelUpStage = true;
         currentSelectionIsCoreStage = isCoreStage;
         currentSelectionExcludeCommon = excludeCommon;
-        refreshesRemainingForCurrentStage = Mathf.Max(0, availableRefreshPerLevelUp);
         isRefreshingCurrentStage = false;
+
+        refreshAwardPendingForThisStage = isCoreStage;
+        if (refreshAwardPendingForThisStage && availableRefreshPerLevelUp > 0f)
+        {
+            refreshCurrency += availableRefreshPerLevelUp;
+            refreshAwardPendingForThisStage = false;
+        }
 
         List<CombinedCard> selectedCards;
         if (isCoreStage)
@@ -991,7 +1130,7 @@ public class CardSelectionManager : MonoBehaviour
         currentSelectionIsLevelUpStage = false;
         currentSelectionIsCoreStage = false;
         currentSelectionExcludeCommon = false;
-        refreshesRemainingForCurrentStage = 0;
+        refreshAwardPendingForThisStage = false;
         isRefreshingCurrentStage = false;
 
         if (pauseGameOnSelection)
@@ -1082,6 +1221,42 @@ public class CardSelectionManager : MonoBehaviour
         return cards;
     }
 
+    private static ProjectileCards GetWeightedRandomProjectileCardBySpawnChance(List<ProjectileCards> candidates)
+    {
+        if (candidates == null || candidates.Count == 0)
+        {
+            return null;
+        }
+
+        float totalWeight = 0f;
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            ProjectileCards c = candidates[i];
+            if (c == null) continue;
+            totalWeight += Mathf.Max(0f, c.spawnChance);
+        }
+
+        if (totalWeight <= 0f)
+        {
+            return candidates[Random.Range(0, candidates.Count)];
+        }
+
+        float roll = Random.Range(0f, totalWeight);
+        float accumulator = 0f;
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            ProjectileCards c = candidates[i];
+            if (c == null) continue;
+            accumulator += Mathf.Max(0f, c.spawnChance);
+            if (roll <= accumulator)
+            {
+                return c;
+            }
+        }
+
+        return candidates[candidates.Count - 1];
+    }
+
     private List<CombinedCard> GenerateRandomActiveProjectileCards(int count, bool forceCommonRarity = false)
     {
         List<CombinedCard> cards = new List<CombinedCard>();
@@ -1149,6 +1324,23 @@ public class CardSelectionManager : MonoBehaviour
             }
         }
 
+        if (forceCommonRarity && cards.Count > 1)
+        {
+            cards.Sort((a, b) =>
+            {
+                int posA = a != null && a.projectileCard != null ? a.projectileCard.ActiveCardPosition : int.MaxValue;
+                int posB = b != null && b.projectileCard != null ? b.projectileCard.ActiveCardPosition : int.MaxValue;
+                if (posA != posB)
+                {
+                    return posA.CompareTo(posB);
+                }
+
+                string nameA = a != null && a.projectileCard != null ? a.projectileCard.cardName : string.Empty;
+                string nameB = b != null && b.projectileCard != null ? b.projectileCard.cardName : string.Empty;
+                return string.CompareOrdinal(nameA, nameB);
+            });
+        }
+
         return cards;
     }
 
@@ -1190,24 +1382,60 @@ public class CardSelectionManager : MonoBehaviour
         }
     }
 
+    private bool IsAlreadyPickedProjectileCard(ProjectileCards c)
+    {
+        if (c == null)
+        {
+            return false;
+        }
+
+        string allowedActiveCardName = !string.IsNullOrEmpty(activeProjectileSystemCardName)
+            ? activeProjectileSystemCardName
+            : initialActiveProjectileSystemCardName;
+
+        if (c.projectileSystem == ProjectileCards.ProjectileSystemType.Active)
+        {
+            return !string.IsNullOrEmpty(allowedActiveCardName) && c.cardName == allowedActiveCardName;
+        }
+
+        if (c.projectileSystem == ProjectileCards.ProjectileSystemType.Passive)
+        {
+            return !string.IsNullOrEmpty(c.cardName) && chosenPassiveProjectileCardNames.Contains(c.cardName);
+        }
+
+        return false;
+    }
+
     private ProjectileCards GetRandomProjectileCard(HashSet<ProjectileCards> usedCards, out CardRarity assignedRarity)
+    {
+        return GetRandomProjectileCard(usedCards, null, out assignedRarity);
+    }
+
+    private ProjectileCards GetRandomProjectileCard(HashSet<ProjectileCards> usedCards, HashSet<ProjectileCards.ProjectileType> usedTypes, out CardRarity assignedRarity, float newPickWeight = 0.5f)
     {
         // Get a random rarity based on odds
         CardRarity targetRarity = GetRandomRarity();
 
         // Get available cards (not used in this selection, spawnChance > 0)
         var availableCards = projectileCardPool
-            .Where(c => c != null && c.spawnChance > 0f && !usedCards.Contains(c))
+            .Where(c => c != null && c.spawnChance > 0f && !usedCards.Contains(c) && (usedTypes == null || !usedTypes.Contains(c.projectileType)))
             .ToList();
 
         availableCards = availableCards.Where(IsProjectileCardAllowedByLevel).ToList();
 
-        // If an active projectile system card is already chosen, block all OTHER active-system cards
-        if (!string.IsNullOrEmpty(activeProjectileSystemCardName))
+        string allowedActiveCardName = !string.IsNullOrEmpty(activeProjectileSystemCardName)
+            ? activeProjectileSystemCardName
+            : initialActiveProjectileSystemCardName;
+
+        if (!string.IsNullOrEmpty(allowedActiveCardName))
         {
             availableCards = availableCards.Where(c =>
                 c.projectileSystem != ProjectileCards.ProjectileSystemType.Active ||
-                c.cardName == activeProjectileSystemCardName).ToList();
+                c.cardName == allowedActiveCardName).ToList();
+        }
+        else
+        {
+            availableCards = availableCards.Where(c => c.projectileSystem != ProjectileCards.ProjectileSystemType.Active).ToList();
         }
 
         if (HasReachedMaxPassiveProjectileLimit())
@@ -1230,100 +1458,48 @@ public class CardSelectionManager : MonoBehaviour
             // Try a lower target rarity, same as previous behaviour
             if (targetRarity > CardRarity.Common)
             {
-                return GetRandomProjectileCardOfRarity(targetRarity - 1, usedCards, out assignedRarity);
+                return GetRandomProjectileCardOfRarity(targetRarity - 1, usedCards, usedTypes, out assignedRarity);
             }
 
             assignedRarity = CardRarity.Common;
             return null;
         }
 
-        // Separate into first-time and already-picked for preference
-        var firstTimeEligible = eligibleCards.Where(c => !pickedProjectileCards.Contains(c)).ToList();
-        var repeatEligible = eligibleCards.Where(c => pickedProjectileCards.Contains(c)).ToList();
+        // Separate into new vs already-picked (based on actual chosen/unlocked state)
+        var firstTimeEligible = eligibleCards.Where(c => !IsAlreadyPickedProjectileCard(c)).ToList();
+        var repeatEligible = eligibleCards.Where(c => IsAlreadyPickedProjectileCard(c)).ToList();
 
-        // Helper local function: apply configurable weighting between exact and upgraded groups
-        ProjectileCards SelectWeighted(List<ProjectileCards> exact, List<ProjectileCards> upgraded, string debugPrefix)
+        // Choose between new vs repeat with equal weighting when both exist.
+        // (Any hard guarantee of at least 1 new offer is handled at the selection-building layer.)
+        bool hasNew = firstTimeEligible.Count > 0;
+        bool hasRepeat = repeatEligible.Count > 0;
+        bool chooseNewGroup;
+
+        if (hasNew && hasRepeat)
         {
-            bool hasExact = exact.Count > 0;
-            bool hasUpgraded = upgraded.Count > 0;
-
-            if (!hasExact && !hasUpgraded)
-            {
-                return null;
-            }
-
-            if (hasExact && hasUpgraded)
-            {
-                float roll = Random.value;
-                float exactWeight = Mathf.Clamp01(exactBaseRarityWeightPercent / 100f);
-                float upgradedWeight = 1f - exactWeight;
-
-                if (roll <= exactWeight)
-                {
-                    ProjectileCards c = exact[Random.Range(0, exact.Count)];
-                    float exactPct = exactWeight * 100f;
-                    float upgradedPct = upgradedWeight * 100f;
-                    Debug.Log($"<color=cyan>{debugPrefix} EXACT ({exactPct:F1}% group): {c.cardName} | Base Rarity: {c.rarity} | Assigned: {targetRarity}</color>");
-                    return c;
-                }
-                else
-                {
-                    ProjectileCards c = upgraded[Random.Range(0, upgraded.Count)];
-                    float exactPct = exactWeight * 100f;
-                    float upgradedPct = upgradedWeight * 100f;
-                    Debug.Log($"<color=yellow>{debugPrefix} UPGRADED ({upgradedPct:F1}% group, exact={exactPct:F1}%): {c.cardName} | Base Rarity: {c.rarity} | Assigned: {targetRarity}</color>");
-                    return c;
-                }
-            }
-
-            if (hasExact)
-            {
-                ProjectileCards c = exact[Random.Range(0, exact.Count)];
-                Debug.Log($"<color=cyan>{debugPrefix} EXACT (100% group): {c.cardName} | Base Rarity: {c.rarity} | Assigned: {targetRarity}</color>");
-                return c;
-            }
-            else
-            {
-                ProjectileCards c = upgraded[Random.Range(0, upgraded.Count)];
-                Debug.Log($"<color=yellow>{debugPrefix} UPGRADED (100% group): {c.cardName} | Base Rarity: {c.rarity} | Assigned: {targetRarity}</color>");
-                return c;
-            }
+            newPickWeight = Mathf.Clamp01(newPickWeight);
+            chooseNewGroup = Random.value < newPickWeight;
+        }
+        else
+        {
+            chooseNewGroup = hasNew;
         }
 
-        // 1) Prefer first-time cards if any are available
-        if (firstTimeEligible.Count > 0)
+        List<ProjectileCards> group = chooseNewGroup ? firstTimeEligible : repeatEligible;
+        string debugPrefix = chooseNewGroup ? "✓ NEW PICK" : "↻ REPEAT PICK";
+
+        if (group.Count > 0)
         {
-            var firstTimeExact = firstTimeEligible.Where(c => c.rarity == targetRarity).ToList();
-            var firstTimeUpgraded = firstTimeEligible.Where(c => c.rarity < targetRarity).ToList();
-
-            ProjectileCards selected = SelectWeighted(firstTimeExact, firstTimeUpgraded, "✓ FIRST PICK");
-            if (selected != null)
-            {
-                assignedRarity = targetRarity;
-                pickedProjectileCards.Add(selected);
-
-                return selected;
-            }
-        }
-
-        // 2) Fallback to repeat cards, still using the same exact vs upgraded weighting
-        if (repeatEligible.Count > 0)
-        {
-            var repeatExact = repeatEligible.Where(c => c.rarity == targetRarity).ToList();
-            var repeatUpgraded = repeatEligible.Where(c => c.rarity < targetRarity).ToList();
-
-            ProjectileCards selected = SelectWeighted(repeatExact, repeatUpgraded, "↻ REPEAT PICK");
-            if (selected != null)
-            {
-                assignedRarity = targetRarity;
-                return selected;
-            }
+            ProjectileCards selected = group[Random.Range(0, group.Count)];
+            Debug.Log($"<color=cyan>{debugPrefix}: {selected.cardName} | Base Rarity: {selected.rarity} | Assigned: {targetRarity}</color>");
+            assignedRarity = targetRarity;
+            return selected;
         }
 
         // If we somehow reach here, fall back to a lower rarity as before
         if (targetRarity > CardRarity.Common)
         {
-            return GetRandomProjectileCardOfRarity(targetRarity - 1, usedCards, out assignedRarity);
+            return GetRandomProjectileCardOfRarity(targetRarity - 1, usedCards, usedTypes, out assignedRarity);
         }
 
         assignedRarity = CardRarity.Common;
@@ -1332,19 +1508,32 @@ public class CardSelectionManager : MonoBehaviour
     
     private ProjectileCards GetRandomProjectileCardOfRarity(CardRarity targetRarity, HashSet<ProjectileCards> usedCards, out CardRarity assignedRarity)
     {
+        return GetRandomProjectileCardOfRarity(targetRarity, usedCards, null, out assignedRarity);
+    }
+
+    private ProjectileCards GetRandomProjectileCardOfRarity(CardRarity targetRarity, HashSet<ProjectileCards> usedCards, HashSet<ProjectileCards.ProjectileType> usedTypes, out CardRarity assignedRarity)
+    {
         // Cards can spawn at their assigned rarity OR ANY HIGHER rarity
         // e.g., Common card (rarity=0) can spawn as any rarity (0-6)
         // e.g., Legendary card (rarity=5) can only spawn as Legendary (5) or Mythic (6)
-        var matchingCards = projectileCardPool.Where(c => c != null && c.spawnChance > 0f && c.rarity <= targetRarity && !usedCards.Contains(c)).ToList();
+        var matchingCards = projectileCardPool.Where(c => c != null && c.spawnChance > 0f && c.rarity <= targetRarity && !usedCards.Contains(c) && (usedTypes == null || !usedTypes.Contains(c.projectileType))).ToList();
 
         matchingCards = matchingCards.Where(IsProjectileCardAllowedByLevel).ToList();
 
+        string allowedActiveCardName = !string.IsNullOrEmpty(activeProjectileSystemCardName)
+            ? activeProjectileSystemCardName
+            : initialActiveProjectileSystemCardName;
+
         // Respect single ACTIVE projectile system rule
-        if (!string.IsNullOrEmpty(activeProjectileSystemCardName))
+        if (!string.IsNullOrEmpty(allowedActiveCardName))
         {
             matchingCards = matchingCards.Where(c =>
                 c.projectileSystem != ProjectileCards.ProjectileSystemType.Active ||
-                c.cardName == activeProjectileSystemCardName).ToList();
+                c.cardName == allowedActiveCardName).ToList();
+        }
+        else
+        {
+            matchingCards = matchingCards.Where(c => c.projectileSystem != ProjectileCards.ProjectileSystemType.Active).ToList();
         }
 
         if (HasReachedMaxPassiveProjectileLimit())
@@ -1358,12 +1547,25 @@ public class CardSelectionManager : MonoBehaviour
         {
             if (targetRarity > CardRarity.Common)
             {
-                return GetRandomProjectileCardOfRarity(targetRarity - 1, usedCards, out assignedRarity);
+                return GetRandomProjectileCardOfRarity(targetRarity - 1, usedCards, usedTypes, out assignedRarity);
             }
             else
             {
-                var unusedCards = projectileCardPool.Where(c => c != null && c.spawnChance > 0f && !usedCards.Contains(c)).ToList();
+                var unusedCards = projectileCardPool
+                    .Where(c => c != null && c.spawnChance > 0f && !usedCards.Contains(c) && (usedTypes == null || !usedTypes.Contains(c.projectileType)))
+                    .ToList();
                 unusedCards = unusedCards.Where(IsProjectileCardAllowedByLevel).ToList();
+
+                if (!string.IsNullOrEmpty(allowedActiveCardName))
+                {
+                    unusedCards = unusedCards.Where(c =>
+                        c.projectileSystem != ProjectileCards.ProjectileSystemType.Active ||
+                        c.cardName == allowedActiveCardName).ToList();
+                }
+                else
+                {
+                    unusedCards = unusedCards.Where(c => c.projectileSystem != ProjectileCards.ProjectileSystemType.Active).ToList();
+                }
 
                 if (HasReachedMaxPassiveProjectileLimit())
                 {
@@ -1379,6 +1581,10 @@ public class CardSelectionManager : MonoBehaviour
                     if (assignedRarity < fallbackCard.rarity)
                     {
                         assignedRarity = fallbackCard.rarity;
+                    }
+                    if (usedTypes != null)
+                    {
+                        usedTypes.Add(fallbackCard.projectileType);
                     }
                     return fallbackCard;
                 }
@@ -1425,13 +1631,13 @@ public class CardSelectionManager : MonoBehaviour
                 unusedCards = unusedCards.Where(IsProjectileCardAllowedByLevel).ToList();
                 if (unusedCards.Count > 0)
                 {
-                    return unusedCards[Random.Range(0, unusedCards.Count)];
+                    return GetWeightedRandomProjectileCardBySpawnChance(unusedCards);
                 }
                 return null;
             }
         }
 
-        return matchingCards[Random.Range(0, matchingCards.Count)];
+        return GetWeightedRandomProjectileCardBySpawnChance(matchingCards);
     }
 
     private CoreCards GetRandomCoreCardOfRarity(CardRarity targetRarity, HashSet<CoreCards> usedCards)
@@ -1439,7 +1645,18 @@ public class CardSelectionManager : MonoBehaviour
         // Cards can spawn at their assigned rarity OR ANY HIGHER rarity
         // e.g., Common card can spawn as Common, Uncommon, Rare, Epic, Legendary, Mythic
         // e.g., Epic card can only spawn as Epic, Legendary, or Mythic
-        var matchingCards = coreCardPool.Where(c => c != null && c.spawnChance > 0f && c.rarity <= targetRarity && !usedCards.Contains(c)).ToList();
+        float minInterval = 30f;
+        if (MinCooldownManager.Instance != null)
+        {
+            minInterval = Mathf.Max(30f, MinCooldownManager.Instance.FavourInterval);
+        }
+
+        bool atMinFavourInterval = favourCardInterval <= minInterval + 0.001f;
+
+        var matchingCards = coreCardPool
+            .Where(c => c != null && c.spawnChance > 0f && c.rarity <= targetRarity && !usedCards.Contains(c))
+            .Where(c => !atMinFavourInterval || c.statType != CoreCards.CoreStatType.FavourInterval)
+            .ToList();
 
         if (matchingCards.Count == 0)
         {
@@ -1449,7 +1666,10 @@ public class CardSelectionManager : MonoBehaviour
             }
             else
             {
-                var unusedCards = coreCardPool.Where(c => c != null && c.spawnChance > 0f && !usedCards.Contains(c)).ToList();
+                var unusedCards = coreCardPool
+                    .Where(c => c != null && c.spawnChance > 0f && !usedCards.Contains(c))
+                    .Where(c => !atMinFavourInterval || c.statType != CoreCards.CoreStatType.FavourInterval)
+                    .ToList();
                 if (unusedCards.Count > 0)
                 {
                     return unusedCards[Random.Range(0, unusedCards.Count)];
@@ -2141,7 +2361,7 @@ public class CardSelectionManager : MonoBehaviour
             return;
         }
 
-        int clampedTier = Mathf.Clamp(tier, 1, 3);
+        int clampedTier = Mathf.Clamp(tier, 1, 4);
         EnqueueVariantSelection(card, set, clampedTier);
     }
 
@@ -2247,7 +2467,7 @@ public class CardSelectionManager : MonoBehaviour
         currentSelectionIsLevelUpStage = false;
         currentSelectionIsCoreStage = false;
         currentSelectionExcludeCommon = false;
-        refreshesRemainingForCurrentStage = 0;
+        refreshAwardPendingForThisStage = false;
         isRefreshingCurrentStage = false;
 
         bool anyButtons = false;
@@ -2273,6 +2493,10 @@ public class CardSelectionManager : MonoBehaviour
                     continue;
                 }
                 if (tier == 2 && info.variantIndex != 2)
+                {
+                    continue;
+                }
+                if (tier == 3 && info.variantIndex != 3)
                 {
                     continue;
                 }
@@ -2462,7 +2686,7 @@ public class CardSelectionManager : MonoBehaviour
         currentSelectionIsLevelUpStage = false;
         currentSelectionIsCoreStage = false;
         currentSelectionExcludeCommon = false;
-        refreshesRemainingForCurrentStage = 0;
+        refreshAwardPendingForThisStage = false;
         isRefreshingCurrentStage = false;
     }
 
@@ -2528,6 +2752,10 @@ public class CardSelectionManager : MonoBehaviour
             Time.timeScale = 0f;
         }
 
+        currentSelectionIsLevelUpStage = false;
+        currentSelectionIsCoreStage = false;
+        currentSelectionExcludeCommon = false;
+
         cardSelectionUI.SetActive(true);
         isSelectionActive = true;
 
@@ -2570,6 +2798,103 @@ public class CardSelectionManager : MonoBehaviour
         return GenerateRandomProjectileCards(count, false);
     }
 
+    private List<CombinedCard> GenerateRandomAlreadyPickedProjectileCards(int count, bool excludeCommon, List<ProjectileCards> eligibleCards)
+    {
+        List<CombinedCard> cards = new List<CombinedCard>();
+        HashSet<ProjectileCards> usedProjectileCards = new HashSet<ProjectileCards>();
+        HashSet<string> usedProjectileCardNames = new HashSet<string>();
+        HashSet<ProjectileCards.ProjectileType> usedProjectileTypes = new HashSet<ProjectileCards.ProjectileType>();
+
+        if (eligibleCards == null || eligibleCards.Count == 0)
+        {
+            return cards;
+        }
+
+        List<ProjectileCards> alreadyPickedCards = eligibleCards.Where(c => c != null && IsAlreadyPickedProjectileCard(c)).ToList();
+        if (alreadyPickedCards.Count == 0)
+        {
+            return cards;
+        }
+
+        int eligibleTypeCount = alreadyPickedCards.Where(c => c != null).Select(c => c.projectileType).Distinct().Count();
+        int targetCount = Mathf.Min(count, eligibleTypeCount);
+
+        int attempts = 0;
+        int maxAttempts = 500;
+        while (cards.Count < targetCount && attempts < maxAttempts)
+        {
+            attempts++;
+
+            CardRarity rolledRarity = GetRandomRarity();
+            if (excludeCommon && rolledRarity == CardRarity.Common)
+            {
+                rolledRarity = CardRarity.Uncommon;
+            }
+
+            ProjectileCards chosen = null;
+            CardRarity assignedRarity = rolledRarity;
+
+            CardRarity searchRarity = rolledRarity;
+            while (chosen == null && searchRarity <= CardRarity.Mythic)
+            {
+                List<ProjectileCards> candidates = alreadyPickedCards
+                    .Where(c => c != null && !usedProjectileTypes.Contains(c.projectileType) && c.rarity <= searchRarity)
+                    .ToList();
+
+                if (candidates.Count > 0)
+                {
+                    chosen = GetWeightedRandomProjectileCardBySpawnChance(candidates);
+                    assignedRarity = searchRarity;
+                    break;
+                }
+
+                searchRarity++;
+            }
+
+            if (chosen == null)
+            {
+                continue;
+            }
+
+            if (usedProjectileTypes.Contains(chosen.projectileType))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(chosen.cardName) && usedProjectileCardNames.Contains(chosen.cardName))
+            {
+                continue;
+            }
+
+            usedProjectileCards.Add(chosen);
+            usedProjectileTypes.Add(chosen.projectileType);
+            if (!string.IsNullOrEmpty(chosen.cardName))
+            {
+                usedProjectileCardNames.Add(chosen.cardName);
+            }
+
+            bool isMineCard = enableMineElementSelection && chosen.projectileType == ProjectileCards.ProjectileType.FireMine && chosen.alternateProjectilePrefab != null;
+
+            ProjectileCards runtimeCopy = Instantiate(chosen);
+
+            if (isMineCard && mineElementChoiceMade && chosen.alternateProjectilePrefab != null)
+            {
+                if (mineUsesAlternateElement)
+                {
+                    runtimeCopy.projectilePrefab = chosen.alternateProjectilePrefab;
+                }
+            }
+
+            runtimeCopy.rarity = assignedRarity;
+            runtimeCopy.OnRarityAssigned();
+
+            CombinedCard combinedCard = new CombinedCard(null, null, assignedRarity) { projectileCard = runtimeCopy };
+            cards.Add(combinedCard);
+        }
+
+        return cards;
+    }
+
     /// <summary>
     /// Generate random PROJECTILE cards only, with optional exclusion of Common rarity
     /// (used by NoCommonNext favour during specific level-up stages).
@@ -2579,6 +2904,7 @@ public class CardSelectionManager : MonoBehaviour
         List<CombinedCard> cards = new List<CombinedCard>();
         HashSet<ProjectileCards> usedProjectileCards = new HashSet<ProjectileCards>();
         HashSet<string> usedProjectileCardNames = new HashSet<string>();
+        HashSet<ProjectileCards.ProjectileType> usedProjectileTypes = new HashSet<ProjectileCards.ProjectileType>();
 
         if (projectileCardPool.Count == 0)
         {
@@ -2595,11 +2921,19 @@ public class CardSelectionManager : MonoBehaviour
 
         eligibleCards = eligibleCards.Where(IsProjectileCardAllowedByLevel).ToList();
 
-        if (!string.IsNullOrEmpty(activeProjectileSystemCardName))
+        string allowedActiveCardName = !string.IsNullOrEmpty(activeProjectileSystemCardName)
+            ? activeProjectileSystemCardName
+            : initialActiveProjectileSystemCardName;
+
+        if (!string.IsNullOrEmpty(allowedActiveCardName))
         {
             eligibleCards = eligibleCards.Where(c =>
                 c.projectileSystem != ProjectileCards.ProjectileSystemType.Active ||
-                c.cardName == activeProjectileSystemCardName).ToList();
+                c.cardName == allowedActiveCardName).ToList();
+        }
+        else
+        {
+            eligibleCards = eligibleCards.Where(c => c.projectileSystem != ProjectileCards.ProjectileSystemType.Active).ToList();
         }
 
         if (HasReachedMaxPassiveProjectileLimit())
@@ -2614,34 +2948,26 @@ public class CardSelectionManager : MonoBehaviour
             return cards;
         }
 
-        // Target count cannot exceed the number of distinct ELIGIBLE projectile cards
-        int targetCount = Mathf.Min(count, eligibleCards.Count);
+        if (HasReachedMaxPassiveProjectileLimit())
+        {
+            return GenerateRandomAlreadyPickedProjectileCards(count, excludeCommon, eligibleCards);
+        }
+
+        int eligibleTypeCount = eligibleCards.Where(c => c != null).Select(c => c.projectileType).Distinct().Count();
+        int targetCount = Mathf.Min(count, eligibleTypeCount);
         int maxAttempts = 1000;
         int attempts = 0;
 
-        bool IsAlreadyPickedProjectileCard(ProjectileCards c)
-        {
-            if (c == null)
-            {
-                return false;
-            }
-
-            if (c.projectileSystem == ProjectileCards.ProjectileSystemType.Active)
-            {
-                return !string.IsNullOrEmpty(activeProjectileSystemCardName) && c.cardName == activeProjectileSystemCardName;
-            }
-
-            if (c.projectileSystem == ProjectileCards.ProjectileSystemType.Passive)
-            {
-                return !string.IsNullOrEmpty(c.cardName) && chosenPassiveProjectileCardNames.Contains(c.cardName);
-            }
-
-            return false;
-        }
+        bool forcedNewAdded = false;
 
         bool TryAddSpecificProjectileOffer(ProjectileCards baseCard)
         {
             if (baseCard == null)
+            {
+                return false;
+            }
+
+            if (usedProjectileTypes.Contains(baseCard.projectileType))
             {
                 return false;
             }
@@ -2681,6 +3007,7 @@ public class CardSelectionManager : MonoBehaviour
             runtimeCopy.OnRarityAssigned();
 
             usedProjectileCards.Add(baseCard);
+            usedProjectileTypes.Add(baseCard.projectileType);
             if (!string.IsNullOrEmpty(baseCard.cardName))
             {
                 usedProjectileCardNames.Add(baseCard.cardName);
@@ -2690,105 +3017,25 @@ public class CardSelectionManager : MonoBehaviour
             return true;
         }
 
-        bool canGuaranteeNewAndOld = targetCount >= 2;
-        if (canGuaranteeNewAndOld)
+        // Guarantee: whenever possible, at least one offered projectile card should be NEW
+        // (i.e., not already chosen/unlocked). We explicitly do NOT force an OLD card anymore.
+        if (targetCount >= 1)
         {
             List<ProjectileCards> newCandidates = eligibleCards
                 .Where(c => c != null && !IsAlreadyPickedProjectileCard(c))
                 .ToList();
 
-            List<ProjectileCards> oldCandidates = eligibleCards
-                .Where(c => c != null && IsAlreadyPickedProjectileCard(c))
-                .ToList();
-
-            if (newCandidates.Count > 0 && oldCandidates.Count > 0)
+            if (newCandidates.Count > 0)
             {
                 ProjectileCards forcedNew = newCandidates[Random.Range(0, newCandidates.Count)];
-                TryAddSpecificProjectileOffer(forcedNew);
-
-                List<ProjectileCards> remainingOldCandidates = oldCandidates
-                    .Where(c => c != null && !usedProjectileCards.Contains(c))
-                    .ToList();
-
-                if (remainingOldCandidates.Count > 0)
-                {
-                    ProjectileCards forcedOld = remainingOldCandidates[Random.Range(0, remainingOldCandidates.Count)];
-                    TryAddSpecificProjectileOffer(forcedOld);
-                }
+                forcedNewAdded = TryAddSpecificProjectileOffer(forcedNew);
             }
         }
 
-        bool mustIncludeNewPassive = MaxProjectileLimit > 0 && GetChosenUniquePassiveProjectileCount() >= 2 && GetChosenUniquePassiveProjectileCount() < MaxProjectileLimit;
-        if (mustIncludeNewPassive && cards.Count < targetCount)
+        float remainingNewPickWeight = 0.5f;
+        if (forcedNewAdded && targetCount > 1)
         {
-            List<ProjectileCards> newPassiveCandidates = eligibleCards
-                .Where(c => c != null && c.projectileSystem == ProjectileCards.ProjectileSystemType.Passive && !chosenPassiveProjectileCardNames.Contains(c.cardName))
-                .ToList();
-
-            if (newPassiveCandidates.Count > 0)
-            {
-                CardRarity rollRarity = GetRandomRarity();
-                if (excludeCommon && rollRarity == CardRarity.Common)
-                {
-                    rollRarity = CardRarity.Uncommon;
-                }
-
-                CardRarity searchRarity = rollRarity;
-                ProjectileCards forcedCard = null;
-                while (forcedCard == null)
-                {
-                    List<ProjectileCards> rarityEligible = newPassiveCandidates.Where(c => c != null && c.rarity <= searchRarity).ToList();
-                    if (rarityEligible.Count > 0)
-                    {
-                        forcedCard = rarityEligible[Random.Range(0, rarityEligible.Count)];
-                        break;
-                    }
-
-                    if (searchRarity > CardRarity.Common)
-                    {
-                        searchRarity = searchRarity - 1;
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-
-                if (forcedCard == null)
-                {
-                    forcedCard = newPassiveCandidates[Random.Range(0, newPassiveCandidates.Count)];
-                    searchRarity = rollRarity;
-                }
-
-                CardRarity assignedRarity = searchRarity;
-                if (excludeCommon && assignedRarity == CardRarity.Common)
-                {
-                    assignedRarity = CardRarity.Uncommon;
-                }
-                if (assignedRarity < forcedCard.rarity)
-                {
-                    assignedRarity = forcedCard.rarity;
-                }
-
-                bool isMineCard = enableMineElementSelection && forcedCard.projectileType == ProjectileCards.ProjectileType.FireMine && forcedCard.alternateProjectilePrefab != null;
-                ProjectileCards runtimeCopy = Instantiate(forcedCard);
-
-                if (isMineCard && mineElementChoiceMade && forcedCard.alternateProjectilePrefab != null)
-                {
-                    if (mineUsesAlternateElement)
-                    {
-                        runtimeCopy.projectilePrefab = forcedCard.alternateProjectilePrefab;
-                    }
-                }
-
-                runtimeCopy.rarity = assignedRarity;
-                runtimeCopy.OnRarityAssigned();
-
-                usedProjectileCards.Add(forcedCard);
-                pickedProjectileCards.Add(forcedCard);
-                CombinedCard combinedCard = new CombinedCard(null, null, assignedRarity) { projectileCard = runtimeCopy };
-                cards.Add(combinedCard);
-            }
+            remainingNewPickWeight = Mathf.Clamp01((targetCount - 2f) / (2f * (targetCount - 1f)));
         }
 
         while (cards.Count < targetCount && attempts < maxAttempts)
@@ -2796,11 +3043,16 @@ public class CardSelectionManager : MonoBehaviour
             attempts++;
 
             CardRarity assignedRarity;
-            ProjectileCards projCard = GetRandomProjectileCard(usedProjectileCards, out assignedRarity);
+            ProjectileCards projCard = GetRandomProjectileCard(usedProjectileCards, usedProjectileTypes, out assignedRarity, remainingNewPickWeight);
             if (projCard == null)
             {
                 // No more unique projectile cards available for this selection via the main path
                 break;
+            }
+
+            if (usedProjectileTypes.Contains(projCard.projectileType))
+            {
+                continue;
             }
 
             if (!string.IsNullOrEmpty(projCard.cardName) && usedProjectileCardNames.Contains(projCard.cardName))
@@ -2829,6 +3081,7 @@ public class CardSelectionManager : MonoBehaviour
             runtimeCopy.OnRarityAssigned();
 
             usedProjectileCards.Add(projCard);
+            usedProjectileTypes.Add(projCard.projectileType);
             if (!string.IsNullOrEmpty(projCard.cardName))
             {
                 usedProjectileCardNames.Add(projCard.cardName);
@@ -2848,7 +3101,7 @@ public class CardSelectionManager : MonoBehaviour
             Debug.LogWarning($"[CardSelectionManager] Projectile selection under-filled by main path: target={targetCount}, got={cards.Count}. Using fallback to fill remaining slots.");
 
             List<ProjectileCards> remainingCandidates = eligibleCards
-                .Where(c => c != null && c.spawnChance > 0f && !usedProjectileCards.Contains(c))
+                .Where(c => c != null && c.spawnChance > 0f && !usedProjectileCards.Contains(c) && !usedProjectileTypes.Contains(c.projectileType))
                 .ToList();
 
             int safety = 0;
@@ -2886,6 +3139,7 @@ public class CardSelectionManager : MonoBehaviour
                 runtimeCopy.OnRarityAssigned();
 
                 usedProjectileCards.Add(projCard);
+                usedProjectileTypes.Add(projCard.projectileType);
                 if (!string.IsNullOrEmpty(projCard.cardName))
                 {
                     usedProjectileCardNames.Add(projCard.cardName);
@@ -3060,6 +3314,10 @@ public class CardSelectionManager : MonoBehaviour
             Time.timeScale = 0f;
         }
 
+        currentSelectionIsLevelUpStage = false;
+        currentSelectionIsCoreStage = false;
+        currentSelectionExcludeCommon = false;
+
         if (cardSelectionUI != null)
         {
             cardSelectionUI.SetActive(false);
@@ -3176,6 +3434,10 @@ public class CardSelectionManager : MonoBehaviour
         {
             Time.timeScale = 0f;
         }
+
+        currentSelectionIsLevelUpStage = false;
+        currentSelectionIsCoreStage = false;
+        currentSelectionExcludeCommon = false;
 
         cardSelectionUI.SetActive(true);
         isSelectionActive = true;
@@ -3449,110 +3711,6 @@ public class CardSelectionManager : MonoBehaviour
         }
     }
 
-    // Replace your existing GetRarityForSoulLevel(int soulLevel) with this entire method.
-
-    private static readonly int[][] SoulLevelFavourOdds = new int[][]
-    {
-    // SoulLevel 1..5
-    new[] {100, 0, 0, 0, 0, 0},
-    new[] {100, 0, 0, 0, 0, 0},
-    new[] {100, 0, 0, 0, 0, 0},
-    new[] {100, 0, 0, 0, 0, 0},
-    new[] {100, 0, 0, 0, 0, 0},
-
-    // 6..15
-    new[] {95, 5, 0, 0, 0, 0},
-    new[] {90, 10, 0, 0, 0, 0},
-    new[] {85, 15, 0, 0, 0, 0},
-    new[] {80, 20, 0, 0, 0, 0},
-    new[] {75, 25, 0, 0, 0, 0},
-    new[] {65, 35, 0, 0, 0, 0},
-    new[] {55, 45, 0, 0, 0, 0},
-    new[] {45, 55, 0, 0, 0, 0},
-    new[] {35, 65, 0, 0, 0, 0},
-    new[] {25, 75, 0, 0, 0, 0},
-
-    // 16..23
-    new[] {15, 80, 5, 0, 0, 0},
-    new[] {5, 85, 10, 0, 0, 0},
-    new[] {5, 80, 15, 0, 0, 0},
-    new[] {5, 75, 20, 0, 0, 0},
-    new[] {5, 70, 25, 0, 0, 0},
-    new[] {5, 65, 30, 0, 0, 0},
-    new[] {5, 60, 35, 0, 0, 0},
-    new[] {5, 55, 40, 0, 0, 0},
-
-    // 24..27
-    new[] {0, 50, 50, 0, 0, 0},
-    new[] {0, 40, 60, 0, 0, 0},
-    new[] {0, 30, 70, 0, 0, 0},
-    new[] {0, 20, 80, 0, 0, 0},
-
-    // 28..35
-    new[] {0, 10, 80, 5, 0, 0},
-    new[] {0, 5, 80, 10, 0, 0},
-    new[] {0, 5, 75, 15, 0, 0},
-    new[] {0, 5, 70, 20, 0, 0},
-    new[] {0, 5, 65, 25, 0, 0},
-    new[] {0, 5, 60, 30, 0, 0},
-    new[] {0, 5, 55, 35, 0, 0},
-    new[] {0, 5, 50, 40, 0, 0},
-
-    // 36..39
-    new[] {0, 0, 45, 50, 0, 0},
-    new[] {0, 0, 40, 60, 0, 0},
-    new[] {0, 0, 30, 70, 0, 0},
-    };
-
-    private CardRarity GetRarityForSoulLevel(int soulLevel)
-    {
-        // SoulLevel is 1-based.
-        if (soulLevel < 1) soulLevel = 1;
-
-        int index = soulLevel - 1;
-
-        // Clamp to last row for testing, as requested.
-        if (index >= SoulLevelFavourOdds.Length)
-        {
-            index = SoulLevelFavourOdds.Length - 1;
-        }
-
-        int[] row = SoulLevelFavourOdds[index];
-
-        int common = Mathf.Max(0, row.Length > 0 ? row[0] : 0);
-        int uncommon = Mathf.Max(0, row.Length > 1 ? row[1] : 0);
-        int rare = Mathf.Max(0, row.Length > 2 ? row[2] : 0);
-        int epic = Mathf.Max(0, row.Length > 3 ? row[3] : 0);
-        int legendary = Mathf.Max(0, row.Length > 4 ? row[4] : 0);
-        int mythic = Mathf.Max(0, row.Length > 5 ? row[5] : 0);
-
-        int total = common + uncommon + rare + epic + legendary + mythic;
-        if (total <= 0)
-        {
-            return CardRarity.Common;
-        }
-
-        int roll = Random.Range(0, total);
-        int cumulative = 0;
-
-        cumulative += common;
-        if (roll < cumulative) return CardRarity.Common;
-
-        cumulative += uncommon;
-        if (roll < cumulative) return CardRarity.Uncommon;
-
-        cumulative += rare;
-        if (roll < cumulative) return CardRarity.Rare;
-
-        cumulative += epic;
-        if (roll < cumulative) return CardRarity.Epic;
-
-        cumulative += legendary;
-        if (roll < cumulative) return CardRarity.Legendary;
-
-        return CardRarity.Mythic;
-    }
-
     public void ShowSoulFavourCardsForSoulLevel(int soulLevel, int count)
     {
         if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
@@ -3575,11 +3733,28 @@ public class CardSelectionManager : MonoBehaviour
         List<BaseCard> result = new List<BaseCard>();
         HashSet<FavourCards> usedCards = new HashSet<FavourCards>();
 
+        CardRarity stageRarity = CardRarity.Common;
+
+        FavourRarityManager favourRarityManager = FavourRarityManager.Instance;
+        if (favourRarityManager == null)
+        {
+            favourRarityManager = FindObjectOfType<FavourRarityManager>();
+        }
+
+        if (favourRarityManager == null)
+        {
+            GameObject go = new GameObject("FavourRarityManager");
+            favourRarityManager = go.AddComponent<FavourRarityManager>();
+        }
+
+        if (favourRarityManager != null)
+        {
+            stageRarity = favourRarityManager.GetNextFavourRarity();
+        }
+
         for (int i = 0; i < targetCount; i++)
         {
-            CardRarity targetRarity = GetRarityForSoulLevel(soulLevel);
-
-            FavourCards baseCard = GetRandomFavourCardOfRarity(targetRarity, usedCards);
+            FavourCards baseCard = GetRandomFavourCardOfRarity(stageRarity, usedCards);
             if (baseCard == null)
             {
                 break;

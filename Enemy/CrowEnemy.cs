@@ -49,12 +49,14 @@ public class CrowEnemy : MonoBehaviour
     private StatusController statusController;
     private IDamageable playerDamageable;
     private bool isDead;
+    private bool isPlayerDead;
     private bool isAttacking;
     private bool attackOnCooldown;
     private bool hasDealtDamageThisAttack = false; // Prevent multiple damage in single attack
     private Coroutine attackRoutine;
     private Vector2 knockbackVelocity = Vector2.zero;
     private float knockbackEndTime = 0f;
+    private float baseAnimatorSpeed = 1f;
 
     private int attackActionToken = 0;
 
@@ -66,6 +68,7 @@ public class CrowEnemy : MonoBehaviour
         if (rb == null) rb = GetComponent<Rigidbody2D>();
         if (animator == null) animator = GetComponent<Animator>();
         if (capsuleCollider == null) capsuleCollider = GetComponent<CapsuleCollider2D>();
+        baseAnimatorSpeed = animator != null ? animator.speed : 1f;
         health = GetComponent<EnemyHealth>();
         statusController = GetComponent<StatusController>();
 
@@ -99,6 +102,11 @@ public class CrowEnemy : MonoBehaviour
         {
             damageInstancesPerAttackV2 = damageInstancesPerAttack;
         }
+    }
+
+    private void ApplyInitialSpriteFlip()
+    {
+        if (spriteRenderer == null) return;
 
         float referenceX = transform.position.x;
         if (AdvancedPlayerController.Instance != null)
@@ -124,7 +132,11 @@ public class CrowEnemy : MonoBehaviour
         attackActionToken++;
     }
 
-    void OnEnable() => health.OnDeath += HandleDeath;
+    void OnEnable()
+    {
+        ApplyInitialSpriteFlip();
+        health.OnDeath += HandleDeath;
+    }
 
     void OnDisable()
     {
@@ -139,7 +151,7 @@ public class CrowEnemy : MonoBehaviour
 
     void Update()
     {
-        if (isDead) return;
+        if (isDead || isPlayerDead) return;
 
         if (IsStaticFrozen())
         {
@@ -166,6 +178,9 @@ public class CrowEnemy : MonoBehaviour
 
     void OnPlayerDeath()
     {
+        if (isPlayerDead) return;
+        isPlayerDead = true;
+
         // Stop all movement and attacks when player dies
         rb.velocity = Vector2.zero;
         if (attackRoutine != null)
@@ -175,6 +190,7 @@ public class CrowEnemy : MonoBehaviour
         }
         isAttacking = false;
         attackOnCooldown = false;
+        animator.speed = baseAnimatorSpeed;
         animator.SetBool("attack", false);
         animator.SetBool("moving", false);
         animator.SetBool("idle", true);
@@ -186,7 +202,7 @@ public class CrowEnemy : MonoBehaviour
     /// </summary>
     public void ApplyKnockback(Vector2 direction, float force)
     {
-        if (isDead) return;
+        if (isDead || isPlayerDead) return;
         
         knockbackVelocity = direction.normalized * force * knockbackIntensity;
         knockbackEndTime = Time.time + knockbackDuration;
@@ -204,7 +220,7 @@ public class CrowEnemy : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (isDead)
+        if (isDead || isPlayerDead)
         {
             rb.velocity = Vector2.zero;
             return;

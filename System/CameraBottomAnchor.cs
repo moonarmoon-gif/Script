@@ -10,6 +10,9 @@ public class CameraBottomAnchor : MonoBehaviour
     [Header("Anchor Settings")]
     [Tooltip("The world Y position where the bottom edge should stay anchored")]
     [SerializeField] private float anchoredBottomY = -1.21f;
+
+    [Header("Default Camera Size")]
+    public float DefaultCameraSize = 12f;
     
     [Tooltip("Enable to set anchored bottom Y to current bottom edge on start")]
     [SerializeField] private bool useCurrentBottomOnStart = true;

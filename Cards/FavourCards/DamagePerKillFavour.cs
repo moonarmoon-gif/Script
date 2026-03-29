@@ -39,7 +39,7 @@ public class DamagePerKillFavour : FavourEffect
         }
 
         currentStacks = 0;
-        lastStackTime = Time.time;
+        lastStackTime = GameStateManager.PauseSafeTime;
     }
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)
@@ -55,7 +55,7 @@ public class DamagePerKillFavour : FavourEffect
             return;
         }
 
-        float now = Time.time;
+        float now = GameStateManager.PauseSafeTime;
 
         if (now - lastStackTime > stackResetTimer)
         {
@@ -88,7 +88,7 @@ public class DamagePerKillFavour : FavourEffect
             return;
         }
 
-        if (Time.time - lastStackTime > stackResetTimer)
+        if (GameStateManager.PauseSafeTime - lastStackTime > stackResetTimer)
         {
             ResetStacks();
         }

@@ -23,7 +23,13 @@ public class PlayerMana : MonoBehaviour
         get => Mathf.Max(0, Mathf.RoundToInt(maxMana));
         set
         {
+            float oldMax = maxMana;
             maxMana = Mathf.Max(0, value);
+            float delta = maxMana - oldMax;
+            if (delta > 0f)
+            {
+                currentMana += delta;
+            }
             currentMana = Mathf.Clamp(currentMana, 0f, maxMana);
             RaiseChanged();
         }
@@ -122,8 +128,18 @@ public class PlayerMana : MonoBehaviour
 
     public void SetMaxMana(int newMax, bool refill)
     {
+        float oldMax = maxMana;
         maxMana = Mathf.Max(0, newMax);
-        if (refill) currentMana = maxMana;
+        float delta = maxMana - oldMax;
+
+        if (refill)
+        {
+            currentMana = maxMana;
+        }
+        else if (delta > 0f)
+        {
+            currentMana += delta;
+        }
         currentMana = Mathf.Clamp(currentMana, 0f, maxMana);
         RaiseChanged();
     }

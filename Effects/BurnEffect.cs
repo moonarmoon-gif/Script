@@ -11,12 +11,9 @@ public class BurnEffect : MonoBehaviour
     [Range(0f, 100f)]
     public float burnChance = 30f;
 
-    [Tooltip("Burn stacks granted per successful hit (1-4). 4 total stacks enable Immolation on death.")]
+    [Tooltip("Burn stacks granted per successful hit (1-4). 4 total stacks enable Blaze on death.")]
     [Range(1, 4)]
     public int burnStacksPerHit = 1;
-
-    [Tooltip("Damage multiplier per tick (1.0 = 100% of base damage)")]
-    public float burnDamageMultiplier = 1.0f;
 
     [Tooltip("How long burn lasts (seconds)")]
     public float burnDuration = 2f;
@@ -139,7 +136,13 @@ public class BurnEffect : MonoBehaviour
             return false;
         }
 
-        float damagePerTick = Mathf.Max(1f, baseDamage * burnDamageMultiplier);
+        float tickMultiplier = 1f;
+        if (StatusControllerManager.Instance != null)
+        {
+            tickMultiplier = StatusControllerManager.Instance.BurnTickDamageMultiplier;
+        }
+
+        float damagePerTick = Mathf.Max(1f, baseDamage * tickMultiplier);
         float duration = burnDuration;
 
         if (stats != null)
@@ -175,9 +178,13 @@ public class BurnEffect : MonoBehaviour
             statusController = ownerGO.AddComponent<StatusController>();
         }
 
+        int burnStacksBefore = statusController.GetStacks(StatusId.Burn);
         statusController.AddStatus(StatusId.Burn, burnStacksPerHit, duration, damagePerTick, sourceCard);
+        int burnStacksAfter = statusController.GetStacks(StatusId.Burn);
 
-        if (DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
+        bool triggeredBlaze = burnStacksBefore < 4 && burnStacksAfter >= 4 && statusController.HasStatus(StatusId.Immolation);
+
+        if (DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups && burnStacksAfter > burnStacksBefore && !triggeredBlaze)
         {
             Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(ownerGO, ownerGO.transform.position);
             DamageNumberManager.Instance.ShowBurn(anchor);
@@ -472,6 +479,15 @@ public class BurnEffect : MonoBehaviour
             if (instance != null)
             {
                 instance.transform.localScale *= Mathf.Max(0f, sizeMultiplier);
+
+                if (StatusControllerManager.Instance != null)
+                {
+                    float lifetimeSeconds = StatusControllerManager.Instance.ImmolationOnApplyEffectDuration;
+                    if (lifetimeSeconds > 0f)
+                    {
+                        PauseSafeSelfDestruct.Schedule(instance, lifetimeSeconds);
+                    }
+                }
             }
         }
     }

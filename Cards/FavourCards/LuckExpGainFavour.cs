@@ -29,7 +29,7 @@ public class LuckExpGainFavour : FavourEffect
 
         stacks = 1;
         playerStats.luck += LuckGain;
-        playerStats.experienceMultiplier += ExpGain;
+        playerStats.experienceMultiplier += ExpGain * 100f;
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -46,7 +46,7 @@ public class LuckExpGainFavour : FavourEffect
 
         stacks++;
         playerStats.luck += LuckGain;
-        playerStats.experienceMultiplier += ExpGain;
+        playerStats.experienceMultiplier += ExpGain * 100f;
     }
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)
@@ -60,6 +60,6 @@ public class LuckExpGainFavour : FavourEffect
         float totalExp = stacks * ExpGain;
 
         playerStats.luck -= totalLuck;
-        playerStats.experienceMultiplier -= totalExp;
+        playerStats.experienceMultiplier -= totalExp * 100f;
     }
 }

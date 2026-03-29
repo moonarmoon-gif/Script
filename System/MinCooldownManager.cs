@@ -6,6 +6,7 @@ public class MinCooldownManager : MonoBehaviour
     public static MinCooldownManager Instance { get; private set; }
 
     [Header("Minimum Cooldowns (seconds)")]
+    public float FavourInterval = 30f;
     public float FireMine = 0.1f;
     public float FrostMine = 0.1f;
     public float Collapse = 0.1f;
@@ -27,6 +28,8 @@ public class MinCooldownManager : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+
+            FavourInterval = Mathf.Max(30f, FavourInterval);
         }
         else
         {

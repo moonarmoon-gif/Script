@@ -90,6 +90,12 @@ public class PredeterminedStatusRoll : MonoBehaviour
                     effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
                 }
             }
+
+            ProjectileStatusChanceAdditiveBonus additiveBonus = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+            if (additiveBonus != null)
+            {
+                effectiveChance += Mathf.Max(0f, additiveBonus.burnBonusPercent);
+            }
             effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
 
             float roll = Random.Range(0f, 100f);
@@ -115,6 +121,12 @@ public class PredeterminedStatusRoll : MonoBehaviour
                     effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
                 }
             }
+
+            ProjectileStatusChanceAdditiveBonus additiveBonus = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+            if (additiveBonus != null)
+            {
+                effectiveChance += Mathf.Max(0f, additiveBonus.slowBonusPercent);
+            }
             effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
 
             float roll = Random.Range(0f, 100f);
@@ -136,6 +148,12 @@ public class PredeterminedStatusRoll : MonoBehaviour
                 {
                     effectiveChance += Mathf.Max(0f, stats.activeProjectileStatusEffectChanceBonus);
                 }
+            }
+
+            ProjectileStatusChanceAdditiveBonus additiveBonus = GetComponent<ProjectileStatusChanceAdditiveBonus>();
+            if (additiveBonus != null)
+            {
+                effectiveChance += Mathf.Max(0f, additiveBonus.staticBonusPercent);
             }
             effectiveChance = Mathf.Clamp(effectiveChance, 0f, 100f);
 

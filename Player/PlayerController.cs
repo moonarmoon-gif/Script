@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
+using UnityEngine.EventSystems;
 using System.Collections; // Added for IEnumerator
 
 public class PlayerController : MonoBehaviour
@@ -179,47 +180,19 @@ public class PlayerController : MonoBehaviour
         isDead = true;
         rb.velocity = Vector2.zero;
         enabled = false;
-
-        // Start the restart coroutine
-        StartCoroutine(WaitForRestart());
     }
 
-    private IEnumerator WaitForRestart()
+    public void ResetAfterDeath()
     {
-        // Wait 1 second after death
-        yield return new WaitForSeconds(1f);
+        StopAllCoroutines();
+        isDead = false;
 
-        // Wait for screen press (mouse click or touch)
-        while (!Input.GetMouseButtonDown(0) && Input.touchCount == 0)
+        if (rb != null)
         {
-            yield return null;
+            rb.velocity = Vector2.zero;
         }
 
-        // Reload the current scene
-        if (GameStateManager.Instance != null)
-        {
-            GameStateManager.Instance.ResetRunState();
-        }
-
-        FavourEffect.ResetPickCounts();
-
-        if (EnemyScalingSystem.Instance != null)
-        {
-            EnemyScalingSystem.Instance.ResetScaling();
-        }
-
-        if (ProjectileCardLevelSystem.Instance != null)
-        {
-            ProjectileCardLevelSystem.Instance.ResetAllLevels();
-        }
-
-        if (ProjectileCardModifiers.Instance != null)
-        {
-            ProjectileCardModifiers.Instance.ResetRunState();
-        }
-
-        HolyShield.ResetRunState();
-        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+        enabled = true;
     }
 
     void OnDestroy()

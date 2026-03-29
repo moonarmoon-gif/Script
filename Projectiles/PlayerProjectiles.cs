@@ -291,6 +291,22 @@ public class PlayerProjectiles : MonoBehaviour
             cachedPlayerStats = colliderToIgnore.GetComponent<PlayerStats>();
         }
 
+        float effectiveCooldown = finalCooldown;
+        if (cachedPlayerStats != null)
+        {
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
+            if (MinCooldownManager.Instance != null && card != null)
+            {
+                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+            }
+            else
+            {
+                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+            }
+        }
+
         damage = finalDamage;
         baseDamageAfterCards = damage;
 
@@ -303,7 +319,7 @@ public class PlayerProjectiles : MonoBehaviour
             {
                 if (lastFireTimes.ContainsKey(prefabKey))
                 {
-                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < finalCooldown)
+                    if (GameStateManager.PauseSafeTime - lastFireTimes[prefabKey] < effectiveCooldown)
                     {
                         Debug.Log($"FireBolt ({prefabKey}) on cooldown");
                         Destroy(gameObject);

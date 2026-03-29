@@ -23,7 +23,7 @@ public abstract class FavourEffect : ScriptableObject, IFavourPickLimit
     [Header("Pick Limit")]
     [Tooltip("Maximum number of times this favour can be picked in a run. 0 = no limit.")]
     [SerializeField]
-    private int maxPickLimit = 0;
+    protected int maxPickLimit = 0;
 
     private static readonly System.Collections.Generic.Dictionary<FavourEffect, int> _pickCounts
         = new System.Collections.Generic.Dictionary<FavourEffect, int>();

@@ -49,7 +49,7 @@ public class ManaRegenOnKillFavour : FavourEffect
         // Enhanced: increase mana regen by the same base amount per extra copy
         stacks++;
 
-        if (currentAppliedBonus > 0f && Time.time < buffEndTime)
+        if (currentAppliedBonus > 0f && GameStateManager.PauseSafeTime < buffEndTime)
         {
             ApplyRegenBonus();
         }
@@ -63,7 +63,7 @@ public class ManaRegenOnKillFavour : FavourEffect
         }
 
         ApplyRegenBonus();
-        buffEndTime = Time.time + Mathf.Max(0f, Duration);
+        buffEndTime = GameStateManager.PauseSafeTime + Mathf.Max(0f, Duration);
     }
 
     public override void OnUpdate(GameObject player, FavourEffectManager manager, float deltaTime)
@@ -73,7 +73,7 @@ public class ManaRegenOnKillFavour : FavourEffect
             return;
         }
 
-        if (currentAppliedBonus > 0f && Time.time >= buffEndTime)
+        if (currentAppliedBonus > 0f && GameStateManager.PauseSafeTime >= buffEndTime)
         {
             RemoveRegenBonus();
         }

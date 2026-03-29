@@ -14,6 +14,8 @@ public class EnemyScalingSystem : MonoBehaviour
     [Tooltip("Base HEALTH increase percentage per interval (5 = 5% increase).")]
     [SerializeField] private float healthIncreasePercent = 5f;
 
+    public float HealthMultiplicativeReductionPerInterval = 0.5f;
+
     [Tooltip("Extra HEALTH increase percentage added on top of HealthIncreasePercent for each successive tier (0 = flat).")]
     [SerializeField] private float additionalHealthIncreasePercent = 0f;
 
@@ -111,7 +113,12 @@ public class EnemyScalingSystem : MonoBehaviour
             // Health uses a ramping step: base + additional * tierIndex.
             int tierIndex = Mathf.Max(0, scalingTier - 1);
             float phaseAdditionalHealthPercent = GetAdditionalHealthIncreasePercentForCurrentScaling();
-            float effectiveHealthPercent = healthIncreasePercent + phaseAdditionalHealthPercent * tierIndex;
+            float baseHealthPercent = healthIncreasePercent;
+            if (useHealthMultiplicativeScaling)
+            {
+                baseHealthPercent = Mathf.Max(0f, healthIncreasePercent - Mathf.Max(0f, HealthMultiplicativeReductionPerInterval) * tierIndex);
+            }
+            float effectiveHealthPercent = Mathf.Max(0f, baseHealthPercent + phaseAdditionalHealthPercent * tierIndex);
             float healthStep = effectiveHealthPercent / 100f;
             float expStep = expIncreasePercent / 100f;
             float damageStep = damageIncreasePercent / 100f;
@@ -343,7 +350,12 @@ public class EnemyScalingSystem : MonoBehaviour
 
         int tierIndex = Mathf.Max(0, scalingTier - 1);
         float phaseAdditionalHealthPercent = GetAdditionalHealthIncreasePercentForCurrentScaling();
-        float effectiveHealthPercent = healthIncreasePercent + phaseAdditionalHealthPercent * tierIndex;
+        float baseHealthPercent = healthIncreasePercent;
+        if (useHealthMultiplicativeScaling)
+        {
+            baseHealthPercent = Mathf.Max(0f, healthIncreasePercent - Mathf.Max(0f, HealthMultiplicativeReductionPerInterval) * tierIndex);
+        }
+        float effectiveHealthPercent = Mathf.Max(0f, baseHealthPercent + phaseAdditionalHealthPercent * tierIndex);
         float healthStep = effectiveHealthPercent / 100f;
 
         if (healthStep <= 0f)

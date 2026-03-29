@@ -10,6 +10,8 @@ public class ProjectileCards : BaseCard
 
     [Header("Projectile System (Active/Passive)")]
     public ProjectileSystemType projectileSystem = ProjectileSystemType.Passive;
+    [Range(1, 3)]
+    public int ActiveCardPosition = 1;
 
     [Header("Projectile Prefab")]
     [Tooltip("The projectile prefab to spawn")]

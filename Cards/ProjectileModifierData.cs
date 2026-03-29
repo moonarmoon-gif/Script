@@ -262,7 +262,7 @@ public class ProjectileModifierData
                 stats.projectileLifetimeBonus += value; // Raw value in seconds
                 break;
             case ModifierType.CooldownReduction:
-                stats.projectileCooldownReduction += value / 100f;
+                stats.Cooldown -= Mathf.Max(0f, value);
                 break;
             case ModifierType.ManaCostReduction:
                 stats.projectileManaCostReduction += value / 100f;

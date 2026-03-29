@@ -1,9 +1,18 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
 public class StatusControllerManager : MonoBehaviour
 {
     public static StatusControllerManager Instance { get; private set; }
+
+    [System.Serializable]
+    public sealed class FreezeOnApplyOffsetSizeEntry
+    {
+        public string EnemyName;
+        public Vector2 Offset;
+        public Vector2 Scale = Vector2.one;
+    }
 
     [Header("Vulnerable")]
     [SerializeField] private float vulnerableBonusPercent = 25f;
@@ -58,6 +67,8 @@ public class StatusControllerManager : MonoBehaviour
     private float bleedDurationSeconds = 5f;
     [SerializeField, Tooltip("Percent increase to healing while Blessing status is active.")]
     private float blessingHealingIncreasePercent = 50f;
+    [Tooltip("Extra percent increase applied to ALL healing while Blessing status is active (e.g., 100 = +100%).")]
+    public float BlessingExtraHealing = 100f;
     [SerializeField, Tooltip("Duration in seconds for Blessing status.")]
     private float blessingDurationSeconds = 5f;
 
@@ -79,6 +90,10 @@ public class StatusControllerManager : MonoBehaviour
 
     [SerializeField, Tooltip("Percent movement speed reduction per stack of BURDEN on enemies.")]
     private float enemyBurdenMoveSpeedPercentPerStack = 1f;
+
+    [FormerlySerializedAs("enemySlowMoveSpeedPercentPerStack")]
+    [Tooltip("Percent movement speed reduction per stack of SLOW on enemies.")]
+    public float SlowStrengthPerStack = 20f;
 
     [Header("Burden")]
     public float SlowPerStack = 1f;
@@ -116,19 +131,35 @@ public class StatusControllerManager : MonoBehaviour
     [SerializeField, Tooltip("Percent increase to lightning damage taken per stack of SHOCKED.")]
     private float shockedLightningDamageTakenPercentPerStack = 1f;
 
-    [Header("Freeze VFX")]
+    [Header("Freeze")]
     [SerializeField] private GameObject freezeOnApplyEffectPrefab;
     [SerializeField] private GameObject freezeOnDeathEffectPrefab;
     [SerializeField] private float freezeOnApplyEffectSizeMultiplier = 1f;
     [SerializeField] private float freezeOnDeathEffectSizeMultiplier = 1f;
+    [SerializeField] private float freezeOnDeathEffectDuration = 1f;
 
-    [Header("Immolation")]
-    [SerializeField, Tooltip("Radius used for IMMOLATION explosion around a dying enemy.")]
-    private float immolationRadius = 3f;
-    [SerializeField] private GameObject immolationOnApplyEffectPrefab;
-    [SerializeField] private GameObject immolationOnDeathEffectPrefab;
-    [SerializeField] private float immolationOnApplyEffectSizeMultiplier = 1f;
-    [SerializeField] private float immolationOnDeathEffectSizeMultiplier = 1f;
+    [FormerlySerializedAs("FreezeOnApplyOffsetSize")]
+    public List<FreezeOnApplyOffsetSizeEntry> FreezeOffsetSize = new List<FreezeOnApplyOffsetSizeEntry>();
+
+    [Header("Blaze")]
+    [FormerlySerializedAs("immolationRadius")]
+    [SerializeField, Tooltip("Radius used for BLAZE explosion around a dying enemy.")]
+    private float blazeRadius = 3f;
+    [FormerlySerializedAs("immolationOnApplyEffectPrefab")]
+    [SerializeField] private GameObject blazeOnApplyEffectPrefab;
+    [FormerlySerializedAs("immolationOnDeathEffectPrefab")]
+    [SerializeField] private GameObject blazeOnDeathEffectPrefab;
+    [FormerlySerializedAs("immolationOnApplyEffectSizeMultiplier")]
+    [SerializeField] private float blazeOnApplyEffectSizeMultiplier = 1f;
+    [FormerlySerializedAs("immolationOnDeathEffectSizeMultiplier")]
+    [SerializeField] private float blazeOnDeathEffectSizeMultiplier = 1f;
+    [FormerlySerializedAs("immolationOnApplyEffectDuration")]
+    [SerializeField] private float blazeOnApplyEffectDuration = 1f;
+    [FormerlySerializedAs("immolationOnDeathEffectDuration")]
+    [SerializeField] private float blazeOnDeathEffectDuration = 1f;
+
+    [FormerlySerializedAs("Offset")]
+    [SerializeField] private Vector2 blazeOnDeathOffset = Vector2.zero;
 
     [Header("Hatred")]
     [SerializeField, Tooltip("Bonus percent damage per HATRED stack for EACH debuff type currently affecting this unit.")]
@@ -158,6 +189,9 @@ public class StatusControllerManager : MonoBehaviour
     [SerializeField, Tooltip("Global burn tick interval in seconds. All burn systems must obey this value.")]
     private float burnTickIntervalSeconds = 0.25f;
 
+    [SerializeField, Tooltip("Base burn tick damage multiplier applied to hit damage when calculating burn tick damage.")]
+    private float burnTickDamageMultiplier = 1f;
+
     [SerializeField, Range(0f, 10f)]
     public float damageRoundingThreshold = 5.5f;
 
@@ -165,6 +199,8 @@ public class StatusControllerManager : MonoBehaviour
     {
         get { return Mathf.Max(0.01f, burnTickIntervalSeconds); }
     }
+
+    public float BurnTickDamageMultiplier => Mathf.Max(0f, burnTickDamageMultiplier);
 
     public float DamageRoundingThreshold => Mathf.Clamp(damageRoundingThreshold, 0f, 10f);
 
@@ -196,12 +232,14 @@ public class StatusControllerManager : MonoBehaviour
     public float BleedHealingReductionPercent => Mathf.Max(0f, bleedHealingReductionPercent);
     public float BleedDurationSeconds => Mathf.Max(0f, bleedDurationSeconds);
     public float BlessingHealingIncreasePercent => Mathf.Max(0f, blessingHealingIncreasePercent);
+    public float BlessingExtraHealingPercent => Mathf.Max(0f, BlessingExtraHealing);
     public float BlessingDurationSeconds => Mathf.Max(0f, blessingDurationSeconds);
     public float FirstStrikeBonusPercent => Mathf.Max(0f, firstStrikeBonusPercent);
     public float PlayerSlowPercentPerStack => Mathf.Max(0f, playerSlowPercentPerStack);
     public float AmnesiaChancePerStackPercent => Mathf.Max(0f, amnesiaChancePerStackPercent);
     public float EnemyHasteMoveSpeedPercentPerStack => Mathf.Max(0f, enemyHasteMoveSpeedPercentPerStack);
     public float EnemyBurdenMoveSpeedPercentPerStack => Mathf.Max(0f, SlowPerStack);
+    public float EnemySlowMoveSpeedPercentPerStack => Mathf.Max(0f, SlowStrengthPerStack);
     public float MassPerStack => Mathf.Max(0f, massPerStack);
     public float CritPerStack => Mathf.Max(0f, critPerStack);
     public float LethargyAttackCooldownSecondsPerStack => Mathf.Max(0f, lethargyAttackCooldownSecondsPerStack);
@@ -216,12 +254,60 @@ public class StatusControllerManager : MonoBehaviour
     public GameObject FreezeOnDeathEffectPrefab => freezeOnDeathEffectPrefab;
     public float FreezeOnApplyEffectSizeMultiplier => Mathf.Max(0f, freezeOnApplyEffectSizeMultiplier);
     public float FreezeOnDeathEffectSizeMultiplier => Mathf.Max(0f, freezeOnDeathEffectSizeMultiplier);
+    public float FreezeOnDeathEffectDuration => Mathf.Max(0f, freezeOnDeathEffectDuration);
 
-    public float ImmolationRadius => Mathf.Max(0f, immolationRadius);
-    public GameObject ImmolationOnApplyEffectPrefab => immolationOnApplyEffectPrefab;
-    public GameObject ImmolationOnDeathEffectPrefab => immolationOnDeathEffectPrefab;
-    public float ImmolationOnApplyEffectSizeMultiplier => Mathf.Max(0f, immolationOnApplyEffectSizeMultiplier);
-    public float ImmolationOnDeathEffectSizeMultiplier => Mathf.Max(0f, immolationOnDeathEffectSizeMultiplier);
+    public float BlazeRadius => Mathf.Max(0f, blazeRadius);
+    public GameObject BlazeOnApplyEffectPrefab => blazeOnApplyEffectPrefab;
+    public GameObject BlazeOnDeathEffectPrefab => blazeOnDeathEffectPrefab;
+    public float BlazeOnApplyEffectSizeMultiplier => Mathf.Max(0f, blazeOnApplyEffectSizeMultiplier);
+    public float BlazeOnDeathEffectSizeMultiplier => Mathf.Max(0f, blazeOnDeathEffectSizeMultiplier);
+    public float BlazeOnApplyEffectDuration => Mathf.Max(0f, blazeOnApplyEffectDuration);
+    public float BlazeOnDeathEffectDuration => Mathf.Max(0f, blazeOnDeathEffectDuration);
+    public Vector2 BlazeOnDeathOffset => blazeOnDeathOffset;
+
+    public float ImmolationRadius => BlazeRadius;
+    public GameObject ImmolationOnApplyEffectPrefab => BlazeOnApplyEffectPrefab;
+    public GameObject ImmolationOnDeathEffectPrefab => BlazeOnDeathEffectPrefab;
+    public float ImmolationOnApplyEffectSizeMultiplier => BlazeOnApplyEffectSizeMultiplier;
+    public float ImmolationOnDeathEffectSizeMultiplier => BlazeOnDeathEffectSizeMultiplier;
+    public float ImmolationOnApplyEffectDuration => BlazeOnApplyEffectDuration;
+    public float ImmolationOnDeathEffectDuration => BlazeOnDeathEffectDuration;
+    public Vector2 ImmolationOnDeathOffset => BlazeOnDeathOffset;
+
+    public bool TryGetFreezeOffsetSize(string enemyName, out Vector2 offset, out Vector2 scale)
+    {
+        offset = Vector2.zero;
+        scale = Vector2.one;
+
+        if (string.IsNullOrWhiteSpace(enemyName) || FreezeOffsetSize == null || FreezeOffsetSize.Count == 0)
+        {
+            return false;
+        }
+
+        string trimmed = enemyName.Replace("(Clone)", "").Trim();
+        for (int i = 0; i < FreezeOffsetSize.Count; i++)
+        {
+            FreezeOnApplyOffsetSizeEntry entry = FreezeOffsetSize[i];
+            if (entry == null || string.IsNullOrWhiteSpace(entry.EnemyName))
+            {
+                continue;
+            }
+
+            if (string.Equals(entry.EnemyName.Trim(), trimmed, System.StringComparison.OrdinalIgnoreCase))
+            {
+                offset = entry.Offset;
+                scale = entry.Scale;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool TryGetFreezeOnApplyOffsetSize(string enemyName, out Vector2 offset, out Vector2 scale)
+    {
+        return TryGetFreezeOffsetSize(enemyName, out offset, out scale);
+    }
 
     public float HatredBonusPercentPerDebuffPerStack => Mathf.Max(0f, hatredBonusPercentPerDebuffPerStack);
     public float FocusBonusPercentPerStack => Mathf.Max(0f, focusBonusPercentPerStack);

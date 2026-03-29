@@ -1550,6 +1550,33 @@ public class NorcthexEnemy : MonoBehaviour
             shadowRenderer = spriteFlipOffset.shadowTransform.GetComponent<SpriteRenderer>();
         }
 
+        List<SpriteRenderer> extraShadowRenderers = null;
+        List<Color> extraShadowStartColors = null;
+        if (fadeDuration > 0f)
+        {
+            SpriteRenderer[] childRenderers = GetComponentsInChildren<SpriteRenderer>(true);
+            if (childRenderers != null && childRenderers.Length > 0)
+            {
+                for (int i = 0; i < childRenderers.Length; i++)
+                {
+                    SpriteRenderer r = childRenderers[i];
+                    if (r == null || r == spriteRenderer || r == shadowRenderer)
+                    {
+                        continue;
+                    }
+
+                    string n = r.gameObject != null ? r.gameObject.name : null;
+                    if (!string.IsNullOrEmpty(n) && n.IndexOf("shadow", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        extraShadowRenderers ??= new List<SpriteRenderer>();
+                        extraShadowStartColors ??= new List<Color>();
+                        extraShadowRenderers.Add(r);
+                        extraShadowStartColors.Add(r.color);
+                    }
+                }
+            }
+        }
+
         if (fadeDuration > 0f && (spriteRenderer != null || shadowRenderer != null))
         {
             Color startColor = spriteRenderer != null ? spriteRenderer.color : default;
@@ -1576,6 +1603,22 @@ public class NorcthexEnemy : MonoBehaviour
                     Color c = shadowStartColor;
                     c.a = Mathf.Lerp(shadowStartColor.a, 0f, t);
                     shadowRenderer.color = c;
+                }
+
+                if (extraShadowRenderers != null && extraShadowStartColors != null)
+                {
+                    for (int i = 0; i < extraShadowRenderers.Count; i++)
+                    {
+                        SpriteRenderer r = extraShadowRenderers[i];
+                        if (r == null)
+                        {
+                            continue;
+                        }
+
+                        Color c = extraShadowStartColors[i];
+                        c.a = Mathf.Lerp(extraShadowStartColors[i].a, 0f, t);
+                        r.color = c;
+                    }
                 }
                 yield return null;
             }

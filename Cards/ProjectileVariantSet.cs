@@ -14,7 +14,7 @@ public class ProjectileVariantSet : ScriptableObject
     [System.Serializable]
     public class VariantInfo
     {
-        [Tooltip("1-based variant index (1-3). This will be used internally to identify the variant.")]
+        [Tooltip("1-based variant index (1-4). This will be used internally to identify the variant.")]
         public int variantIndex = 1;
 
         [Tooltip("Display name for this variant in the selection UI.")]
@@ -46,6 +46,6 @@ public class ProjectileVariantSet : ScriptableObject
         public float descriptionOutlineWidth = 1f;
     }
 
-    [Tooltip("List of available variants for this projectile (1-3 entries expected).")]
+    [Tooltip("List of available variants for this projectile (1-4 entries expected).")]
     public VariantInfo[] variants;
 }

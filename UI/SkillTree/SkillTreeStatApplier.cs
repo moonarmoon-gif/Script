@@ -54,8 +54,8 @@ public class SkillTreeStatApplier : MonoBehaviour
         {
             playerStats.baseAttack = playerStats.baseAttack - lastAttackFlat;
             playerStats.manaRegenPerSecond = playerStats.manaRegenPerSecond - lastManaRegenFlat;
-            playerStats.attackSpeedPercent = playerStats.attackSpeedPercent - lastAttackSpeedPercent;
-            playerStats.damageMultiplier = playerStats.damageMultiplier - (lastDamageMultiplierPercent / 100f);
+            playerStats.AttackSpeedBonus = playerStats.AttackSpeedBonus - lastAttackSpeedPercent;
+            playerStats.damageMultiplier = playerStats.damageMultiplier - lastDamageMultiplierPercent;
         }
 
         if (playerHealth != null)
@@ -144,8 +144,8 @@ public class SkillTreeStatApplier : MonoBehaviour
         {
             playerStats.baseAttack = playerStats.baseAttack + attackFlat;
             playerStats.manaRegenPerSecond = playerStats.manaRegenPerSecond + manaRegenFlat;
-            playerStats.attackSpeedPercent = playerStats.attackSpeedPercent + attackSpeedPercent;
-            playerStats.damageMultiplier = playerStats.damageMultiplier + (damageMultiplierPercent / 100f);
+            playerStats.AttackSpeedBonus = playerStats.AttackSpeedBonus + attackSpeedPercent;
+            playerStats.damageMultiplier = playerStats.damageMultiplier + damageMultiplierPercent;
         }
 
         if (playerHealth != null)

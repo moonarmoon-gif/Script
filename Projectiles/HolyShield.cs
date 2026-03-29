@@ -7,9 +7,7 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
     [SerializeField] private float maxHealth = 100f;
 
     [Header("Enhanced Variant 3")]
-    public float BonusHealth = 200f;
-    public float DecreaseRegenDelayBy = 5f;
-    public float ReduceRespawnDelayBy = 15f;
+    public float BonusHealthPercent = 50f;
 
     [Header("Spawn Offset")]
     [SerializeField] private Vector2 spawnOffset = Vector2.zero;
@@ -187,10 +185,12 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
             healthMult = 1f;
         }
 
-        float newMaxHealth = (baseMaxHealth * healthMult) + modifiers.shieldHealthBonus;
+        float baseHealth = (baseMaxHealth * healthMult) + modifiers.shieldHealthBonus;
+        float newMaxHealth = baseHealth;
         if ((activeVariantMask & 4) != 0)
         {
-            newMaxHealth += BonusHealth;
+            float p = Mathf.Max(0f, BonusHealthPercent) / 100f;
+            newMaxHealth = baseHealth * (1f + p);
         }
         if (newMaxHealth < 1f)
         {
@@ -218,12 +218,7 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
             transform.localScale = baseScale;
         }
 
-        float regenBase = baseRegenDelay;
-        if ((activeVariantMask & 4) != 0)
-        {
-            regenBase = Mathf.Max(0f, regenBase - DecreaseRegenDelayBy);
-        }
-        regenDelay = regenBase;
+        regenDelay = baseRegenDelay;
     }
 
     /// <summary>
@@ -277,10 +272,13 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
 
         if (wantsVariant3 != hadVariant3)
         {
-            float delta = wantsVariant3 ? BonusHealth : -BonusHealth;
-            if (Mathf.Abs(delta) > 0.001f)
+            float p = Mathf.Max(0f, BonusHealthPercent) / 100f;
+
+            if (wantsVariant3)
             {
-                maxHealth = Mathf.Max(1f, maxHealth + delta);
+                float newMax = maxHealth * (1f + p);
+                float delta = newMax - maxHealth;
+                maxHealth = Mathf.Max(1f, newMax);
                 if (!isBroken)
                 {
                     currentHealth = Mathf.Clamp(currentHealth + delta, 0f, maxHealth);
@@ -290,14 +288,23 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
                     currentHealth = Mathf.Clamp(currentHealth, 0f, maxHealth);
                 }
             }
+            else
+            {
+                float baseHealth = p > 0f ? (maxHealth / (1f + p)) : maxHealth;
+                float delta = maxHealth - baseHealth;
+                maxHealth = Mathf.Max(1f, baseHealth);
+                if (!isBroken)
+                {
+                    currentHealth = Mathf.Clamp(currentHealth - delta, 0f, maxHealth);
+                }
+                else
+                {
+                    currentHealth = Mathf.Clamp(currentHealth, 0f, maxHealth);
+                }
+            }
         }
 
-        float regenBase = baseRegenDelay;
-        if (wantsVariant3)
-        {
-            regenBase = Mathf.Max(0f, regenBase - DecreaseRegenDelayBy);
-        }
-        regenDelay = regenBase;
+        regenDelay = baseRegenDelay;
 
         activeVariantMask = newMask;
     }
@@ -406,18 +413,12 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
 
     private void DestroyReflectShield()
     {
-        if (ReflectShield.ActiveShield != null)
-        {
-            Destroy(ReflectShield.ActiveShield.gameObject);
-        }
+        ReflectShield.ResetRunState();
     }
 
     private void DestroyNullifyShield()
     {
-        if (NullifyShield.ActiveShield != null)
-        {
-            Destroy(NullifyShield.ActiveShield.gameObject);
-        }
+        NullifyShield.ResetRunState();
     }
 
     public void TakeDamage(float amount, Vector3 hitPoint, Vector3 hitNormal)
@@ -649,14 +650,6 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
         }
 
         float baseRespawn = baseRespawnDelay;
-        if (card != null && ProjectileCardLevelSystem.Instance != null)
-        {
-            int mask = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
-            if ((mask & 4) != 0)
-            {
-                baseRespawn = Mathf.Max(0.1f, baseRespawnDelay - ReduceRespawnDelayBy);
-            }
-        }
 
         float effectiveRespawnDelay = ComputeEffectiveCooldownSeconds(baseRespawn, card, modifiers);
         if (MinCooldownManager.Instance != null)
@@ -714,9 +707,10 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
         {
             stats = ownerCollider.GetComponent<PlayerStats>();
         }
-        if (stats != null && stats.projectileCooldownReduction > 0f)
+        if (stats != null)
         {
-            value = value / (1f + Mathf.Max(0f, stats.projectileCooldownReduction));
+            float multiplier = Mathf.Max(0f, stats.Cooldown) / 100f;
+            value = value * multiplier;
         }
 
         if (MinCooldownManager.Instance != null)

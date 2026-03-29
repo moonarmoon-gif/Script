@@ -12,6 +12,11 @@ public class EnemyTauntAttackHelper : MonoBehaviour
     /// </summary>
     public bool DealDamageToTarget(float damage, Vector3 hitPoint, Vector3 hitNormal)
     {
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            return false;
+        }
+
         // Try to get the actual taunt GameObject from CinderbloomTauntTarget
         GameObject tauntTarget = FindTauntTarget();
         
@@ -55,6 +60,11 @@ public class EnemyTauntAttackHelper : MonoBehaviour
     /// </summary>
     public Transform GetAttackTarget()
     {
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            return null;
+        }
+
         // Try to get the actual taunt GameObject
         GameObject tauntTarget = FindTauntTarget();
         
@@ -95,6 +105,11 @@ public class EnemyTauntAttackHelper : MonoBehaviour
     /// </summary>
     private GameObject FindTauntTarget()
     {
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            return null;
+        }
+
         // Get the taunt position
         Vector3 targetPos = CinderbloomTauntTarget.GetTargetPositionForEnemy(gameObject);
         

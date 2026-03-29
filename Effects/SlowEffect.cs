@@ -148,12 +148,16 @@ public class SlowEffect : MonoBehaviour
             stacksToAdd = Mathf.Max(stacksToAdd, adjustedStacks);
         }
 
+        int slowStacksBefore = statusController.GetStacks(StatusId.Slow);
         statusController.AddStatus(StatusId.Slow, stacksToAdd, duration, 0f, sourceCard);
+        int slowStacksAfter = statusController.GetStacks(StatusId.Slow);
+
+        bool triggeredFreeze = slowStacksBefore < 4 && slowStacksAfter >= 4 && statusController.HasStatus(StatusId.Freeze);
 
         // Show SLOW status popup at the enemy's collider anchor so it stays
         // visually locked to the correct sprite even if the enemy dies
         // immediately after the status is applied.
-        if (DamageNumberManager.Instance != null)
+        if (DamageNumberManager.Instance != null && slowStacksAfter > slowStacksBefore && !triggeredFreeze)
         {
             Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(ownerGO, ownerGO.transform.position);
             DamageNumberManager.Instance.ShowSlow(anchor);
@@ -243,7 +247,12 @@ public class SlowStatus : MonoBehaviour
             isSlowed = true;
             slowStacks = Mathf.Clamp(stacksPerHit, 1, 4);
 
-            slowStrength = Mathf.Clamp01(slowStacks / 4f);
+            float perStack = 25f;
+            if (StatusControllerManager.Instance != null)
+            {
+                perStack = StatusControllerManager.Instance.SlowStrengthPerStack;
+            }
+            slowStrength = Mathf.Clamp01((perStack * slowStacks) / 100f);
 
             StoreOriginalSpeed();
             ApplySpeedReduction();
@@ -263,7 +272,12 @@ public class SlowStatus : MonoBehaviour
         else
         {
             slowStacks = Mathf.Clamp(slowStacks + stacksPerHit, 1, 4);
-            slowStrength = Mathf.Clamp01(slowStacks / 4f);
+            float perStack = 25f;
+            if (StatusControllerManager.Instance != null)
+            {
+                perStack = StatusControllerManager.Instance.SlowStrengthPerStack;
+            }
+            slowStrength = Mathf.Clamp01((perStack * slowStacks) / 100f);
             // Refresh duration when reapplying slow
             remainingDuration = Mathf.Max(remainingDuration, duration);
             Debug.Log($"<color=cyan>❄️ Slow REFRESHED! Strength: {slowStrength * 100f:F0}%, Stacks={slowStacks}, Duration: {remainingDuration:F1}s</color>");

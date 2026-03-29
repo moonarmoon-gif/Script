@@ -409,8 +409,9 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
                 center = electroBall.transform.position + (Vector3)electroBall.ExplosionRadiusOffset;
                 center.z = electroBall.transform.position.z;
 
-                fillColor = new Color(1f, 1f, 0.6f, 0.25f);
-                wireColor = new Color(1f, 1f, 0.6f, 0.85f);
+                float alphaMult = Mathf.Clamp01(electroBall.RuntimeGizmoAlphaMultiplier);
+                fillColor = new Color(1f, 1f, 0.6f, 0.25f * alphaMult);
+                wireColor = new Color(1f, 1f, 0.6f, 0.85f * alphaMult);
                 drawFill = true;
                 return radius > 0f;
             }
@@ -440,8 +441,9 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
                 center = basePos + (Vector3)off;
                 center.z = nuclearStrike.transform.position.z;
 
-                fillColor = new Color(1f, 0f, 0f, 0.3f);
-                wireColor = new Color(1f, 0f, 0f, 0.8f);
+                float alphaMult = Mathf.Clamp01(nuclearStrike.RuntimeGizmoAlphaMultiplier);
+                fillColor = new Color(1f, 0f, 0f, 0.3f * alphaMult);
+                wireColor = new Color(1f, 0f, 0f, 0.8f * alphaMult);
                 drawFill = true;
                 return radius > 0f;
             }
@@ -461,8 +463,9 @@ public class RuntimeProjectileRadiusGizmo : MonoBehaviour
                 center = thunderBird.transform.position + (Vector3)off;
                 center.z = thunderBird.transform.position.z;
 
-                fillColor = new Color(1f, 1f, 0f, 0.25f);
-                wireColor = new Color(1f, 1f, 0f, 0.9f);
+                float alphaMult = Mathf.Clamp01(thunderBird.RuntimeGizmoAlphaMultiplier);
+                fillColor = new Color(1f, 1f, 0f, 0.25f * alphaMult);
+                wireColor = new Color(1f, 1f, 0f, 0.9f * alphaMult);
                 drawFill = true;
                 return radius > 0f;
             }

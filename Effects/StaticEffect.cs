@@ -477,6 +477,11 @@ public class StaticStatus : MonoBehaviour
             return false;
         }
 
+        if (enemyHealth != null && !enemyHealth.IsAlive)
+        {
+            return true;
+        }
+
         bool isDying = false;
         try
         {

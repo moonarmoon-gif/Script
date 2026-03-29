@@ -4,6 +4,9 @@ using UnityEngine;
 public class SlowDurationFavour : FavourEffect
 {
     [Header("Slow Duration Settings")]
+    [Tooltip("Bonus slow duration granted when this favour is first selected, in seconds.")]
+    public float SlowDuration = 1f;
+
     [Tooltip("Bonus slow duration per card in seconds.")]
     public float BonusSlowDuration = 1f;
 
@@ -28,7 +31,7 @@ public class SlowDurationFavour : FavourEffect
         }
 
         stacks = 1;
-        playerStats.slowDurationBonus += BonusSlowDuration;
+        playerStats.slowDurationBonus += SlowDuration;
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -54,7 +57,7 @@ public class SlowDurationFavour : FavourEffect
             return;
         }
 
-        float total = BonusSlowDuration * stacks;
+        float total = SlowDuration + BonusSlowDuration * Mathf.Max(0, stacks - 1);
         playerStats.slowDurationBonus = Mathf.Max(0f, playerStats.slowDurationBonus - total);
     }
 }

@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using UnityEngine.SceneManagement;
 
 public class HealthUI : MonoBehaviour
 {
@@ -21,28 +22,67 @@ public class HealthUI : MonoBehaviour
 
     private void OnEnable()
     {
-        if (source != null)
-        {
-            source.OnHealthChanged += Refresh;
-            InitializeUI();
-        }
-        else
-        {
-            Debug.LogWarning("HealthUI: No PlayerHealth source assigned!");
-        }
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+        SceneManager.sceneLoaded += HandleSceneLoaded;
+        ResolveAndBindSource();
     }
 
     private void OnDisable()
     {
-        if (source != null)
-        {
-            source.OnHealthChanged -= Refresh;
-        }
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+        UnbindSource();
     }
 
     private void Start()
     {
         InitializeUI();
+    }
+
+    private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        ResolveAndBindSource();
+    }
+
+    private void ResolveAndBindSource()
+    {
+        PlayerHealth resolved = source;
+
+        if (resolved == null && AdvancedPlayerController.Instance != null)
+        {
+            resolved = AdvancedPlayerController.Instance.GetComponent<PlayerHealth>();
+        }
+
+        if (resolved == null)
+        {
+            resolved = FindObjectOfType<PlayerHealth>(true);
+        }
+
+        if (resolved == null)
+        {
+            Debug.LogWarning("HealthUI: No PlayerHealth source assigned!");
+            return;
+        }
+
+        if (source == resolved)
+        {
+            source.OnHealthChanged -= Refresh;
+            source.OnHealthChanged += Refresh;
+            InitializeUI();
+            return;
+        }
+
+        UnbindSource();
+        source = resolved;
+        source.OnHealthChanged += Refresh;
+        InitializeUI();
+    }
+
+    private void UnbindSource()
+    {
+        if (source != null)
+        {
+            source.OnHealthChanged -= Refresh;
+        }
     }
 
     private void InitializeUI()

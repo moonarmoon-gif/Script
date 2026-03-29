@@ -36,6 +36,18 @@ public class EnemySpawner : MonoBehaviour
     [Tooltip("Child transform marking maximum spawn position (top-right)")]
     public Transform maxPos;
 
+    public Transform AltMinPos;
+
+    public Transform AltMaxPos;
+
+    [System.Serializable]
+    public sealed class EnemyForAltSpawnEntry
+    {
+        public string EnemyName;
+    }
+
+    public List<EnemyForAltSpawnEntry> EnemyForAltSpawn = new List<EnemyForAltSpawnEntry>();
+
     [Tooltip("Use camera-based spawning if minPos/maxPos not assigned")]
     public bool useCameraSpawning = true;
 
@@ -382,7 +394,7 @@ public class EnemySpawner : MonoBehaviour
             return;
         }
 
-        Vector2 spawnPosition = GetSpawnPosition();
+        Vector2 spawnPosition = GetSpawnPositionForEnemy(wave.enemyPrefab, wave.BossEnemy);
         GameObject spawnedEnemy = Instantiate(wave.enemyPrefab, spawnPosition, Quaternion.identity);
 
         CardRarity rarity = wave.BossEnemy ? CardRarity.Boss : CardRarity.Common;
@@ -1096,14 +1108,64 @@ public class EnemySpawner : MonoBehaviour
         cameraResizeRoutine = null;
     }
 
+    private bool ShouldUseAltSpawnBounds(string enemyName, bool isBoss)
+    {
+        if (isBoss)
+        {
+            return false;
+        }
+
+        if (AltMinPos == null || AltMaxPos == null)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(enemyName) || EnemyForAltSpawn == null || EnemyForAltSpawn.Count == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < EnemyForAltSpawn.Count; i++)
+        {
+            EnemyForAltSpawnEntry entry = EnemyForAltSpawn[i];
+            if (entry == null || string.IsNullOrWhiteSpace(entry.EnemyName))
+            {
+                continue;
+            }
+
+            if (System.String.Equals(entry.EnemyName.Trim(), enemyName.Trim(), System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private Vector2 GetSpawnPositionForEnemy(GameObject enemyPrefab, bool isBoss)
+    {
+        string enemyName = enemyPrefab != null ? enemyPrefab.name : null;
+        if (ShouldUseAltSpawnBounds(enemyName, isBoss))
+        {
+            return GetSpawnPosition(AltMinPos, AltMaxPos);
+        }
+
+        return GetSpawnPosition(minPos, maxPos);
+    }
+
     private Vector2 GetSpawnPosition()
     {
-        if (minPos != null && maxPos != null)
+        return GetSpawnPosition(minPos, maxPos);
+    }
+
+    private Vector2 GetSpawnPosition(Transform min, Transform max)
+    {
+        if (min != null && max != null)
         {
-            float minX = minPos.position.x;
-            float maxX = maxPos.position.x;
-            float minY = minPos.position.y;
-            float maxY = maxPos.position.y;
+            float minX = min.position.x;
+            float maxX = max.position.x;
+            float minY = min.position.y;
+            float maxY = max.position.y;
 
             float randomSide = Random.Range(0f, 100f);
             bool shouldSpawnOpposite = false;

@@ -288,10 +288,11 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
         cachedPlayerStats = FindObjectOfType<PlayerStats>();
 
         float effectiveCooldown = finalCooldown;
-        if (cachedPlayerStats != null && cachedPlayerStats.projectileCooldownReduction > 0f)
+        if (cachedPlayerStats != null)
         {
-            float totalCdr = Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction);
-            effectiveCooldown = finalCooldown / (1f + totalCdr);
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
             if (MinCooldownManager.Instance != null && card != null)
             {
                 effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);

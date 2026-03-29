@@ -100,7 +100,7 @@ public class CriticalAttackSpeedFavour : FavourEffect
             {
                 // Increase attack speed percent for ACTIVE projectiles only;
                 // passive projectile cooldowns should not be affected.
-                playerStats.attackSpeedPercent += perStackAttackSpeed * deltaStacks;
+                playerStats.AttackSpeedBonus += perStackAttackSpeed * deltaStacks;
             }
 
             currentStacks = newStacks;
@@ -115,7 +115,7 @@ public class CriticalAttackSpeedFavour : FavourEffect
         {
             float perStackAttackSpeed = Mathf.Max(0f, AttackSpeedIncrement);
             float total = perStackAttackSpeed * currentStacks;
-            playerStats.attackSpeedPercent = playerStats.attackSpeedPercent - total;
+            playerStats.AttackSpeedBonus = playerStats.AttackSpeedBonus - total;
         }
 
         currentStacks = 0;

@@ -21,6 +21,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     [SerializeField] private float explosionRadius = 5f;
     [Tooltip("Offset for explosion detection area in X and Y coordinates")]
     [SerializeField] private Vector2 explosionRadiusOffset = Vector2.zero;
+    [Range(0f, 1f)] public float RuntimeGizmoAlphaMultiplier = 1f;
     [SerializeField] private float damage = 100f;
     [SerializeField] private LayerMask enemyLayer;
     [SerializeField] private ProjectileType projectileType = ProjectileType.Nuclear;
@@ -59,6 +60,9 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     private float baseExplosionRadius;
     private float baseDamage;
     private Vector3 baseScale;
+    private Vector2 baseExplosionRadiusOffset;
+
+    public float ExplosionRadiusToSizeIncreasePercentPerRadius = 100f;
 
     [Header("Visual Effects")]
     [SerializeField] private GameObject explosionEffectPrefab;
@@ -313,6 +317,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         baseExplosionRadius = explosionRadius;
         baseDamage = damage;
         baseScale = transform.localScale;
+        baseExplosionRadiusOffset = explosionRadiusOffset;
 
         // Get or add audio source
         _audioSource = GetComponent<AudioSource>();
@@ -509,6 +514,22 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         float explosionRadiusAfterSize = explosionRadius;
         explosionRadius = (explosionRadius + modifiers.explosionRadiusBonus) * modifiers.explosionRadiusMultiplier;
 
+        if (!hasVariant2Context)
+        {
+            float radiusIncrease = explosionRadius - baseExplosionRadius;
+            if (radiusIncrease > 0f)
+            {
+                explosionRadiusOffset.y = baseExplosionRadiusOffset.y + radiusIncrease;
+
+                float percentPerRadius = Mathf.Max(0f, ExplosionRadiusToSizeIncreasePercentPerRadius);
+                float sizeMultiplierFromRadius = 1f + (radiusIncrease * (percentPerRadius / 100f));
+                if (sizeMultiplierFromRadius > 0f && !Mathf.Approximately(sizeMultiplierFromRadius, 1f))
+                {
+                    transform.localScale *= sizeMultiplierFromRadius;
+                }
+            }
+        }
+
         Debug.Log($"<color=red>NuclearStrike Explosion Radius:</color>");
         Debug.Log($"<color=red>  Original: {originalExplosionRadius:F2}</color>");
         Debug.Log($"<color=red>  After Size: {explosionRadiusAfterSize:F2}</color>");
@@ -526,10 +547,11 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         }
 
         float effectiveCooldown = finalCooldown;
-        if (cachedPlayerStats != null && cachedPlayerStats.projectileCooldownReduction > 0f)
+        if (cachedPlayerStats != null)
         {
-            float totalCdr = Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction);
-            effectiveCooldown = finalCooldown / (1f + totalCdr);
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown = finalCooldown * multiplier;
+
             if (MinCooldownManager.Instance != null && card != null)
             {
                 effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
@@ -1056,7 +1078,6 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                 burnEffect = gameObject.AddComponent<BurnEffect>();
                 burnEffect.burnChance = sourceBurn.burnChance;
                 burnEffect.burnStacksPerHit = sourceBurn.burnStacksPerHit;
-                burnEffect.burnDamageMultiplier = sourceBurn.burnDamageMultiplier;
                 burnEffect.burnDuration = sourceBurn.burnDuration;
                 burnEffect.burnVFXPrefab = sourceBurn.burnVFXPrefab;
                 burnEffect.burnVFXOffsetLeft = sourceBurn.burnVFXOffsetLeft;

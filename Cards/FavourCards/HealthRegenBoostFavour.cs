@@ -31,7 +31,7 @@ public class HealthRegenBoostFavour : FavourEffect
         }
 
         stacks = 1;
-        lastRealDamageTime = Time.time;
+        lastRealDamageTime = GameStateManager.PauseSafeTime;
         boostActive = false;
         currentAppliedBonus = 0f;
     }
@@ -62,7 +62,7 @@ public class HealthRegenBoostFavour : FavourEffect
             return;
         }
 
-        lastRealDamageTime = Time.time;
+        lastRealDamageTime = GameStateManager.PauseSafeTime;
 
         if (boostActive)
         {
@@ -77,7 +77,7 @@ public class HealthRegenBoostFavour : FavourEffect
             return;
         }
 
-        if (!boostActive && Time.time - lastRealDamageTime >= RegenTimer)
+        if (!boostActive && GameStateManager.PauseSafeTime - lastRealDamageTime >= RegenTimer)
         {
             ApplyBoost();
         }

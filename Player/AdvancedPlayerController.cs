@@ -35,6 +35,9 @@ public class AdvancedPlayerController : MonoBehaviour
     [Tooltip("Enhanced version of Icicle (IceLancer) - auto-swaps when enhanced")]
     [SerializeField] private GameObject icicleEnhancedPrefab;
 
+    [SerializeField] private GameObject leftDiagonalProjectile;
+    [SerializeField] private GameObject rightDiagonalProjectile;
+
     [Header("Auto-Fire Settings for Set 1")]
     [Tooltip("Enable auto-firing for Projectile Pair Set 1")]
     public bool enableAutoFire = true;
@@ -45,7 +48,7 @@ public class AdvancedPlayerController : MonoBehaviour
     private float lastAutoFireTime = -999f;
 
     [Header("Auto-Fire Status Skip Settings")]
-    [Tooltip("If an enemy is farther than this range AND matches certain status conditions (burn-doomed / slow / freeze / poison-doomed), auto-fire will ignore them as targets (unless Immolation is present or they are a boss).")]
+    [Tooltip("If an enemy is farther than this range AND matches certain status conditions (burn-doomed / slow / freeze / poison-doomed), auto-fire will ignore them as targets (unless Blaze is present or they are a boss).")]
     public float StatusRange = 7f;
 
     [Tooltip("If an enemy is farther than StatusRange and poison alone will kill it within this many seconds, auto-fire will ignore it as a target (non-boss only).")]
@@ -142,8 +145,6 @@ public class AdvancedPlayerController : MonoBehaviour
         public float predictedHitDamageLowerBound;
         public ProjectileType projectileType;
 
-        // Store the firing projectile's burn tuning so prediction doesn't rely on active prefab
-        public float burnDamageMultiplier;
         public float burnDurationSeconds;
     }
 
@@ -156,12 +157,83 @@ public class AdvancedPlayerController : MonoBehaviour
     {
         move.Enable();
         fire.Enable();
+
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+        SceneManager.sceneLoaded += HandleSceneLoaded;
+
+        EnsureCameraReference();
     }
 
     private void OnDisable()
     {
         move.Disable();
         fire.Disable();
+
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+    }
+
+    private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        EnsureCameraReference();
+        EnsureAutoFireAreaPoints(scene, true);
+    }
+
+    private void EnsureAutoFireAreaPoints()
+    {
+        EnsureAutoFireAreaPoints(SceneManager.GetActiveScene(), false);
+    }
+
+    private void EnsureAutoFireAreaPoints(Scene targetScene, bool force)
+    {
+        Scene active = targetScene.IsValid() ? targetScene : SceneManager.GetActiveScene();
+        if (!active.IsValid() || active.name != "Game")
+        {
+            return;
+        }
+
+        if (!force)
+        {
+            if (autoFirePointA != null && autoFirePointA.gameObject.scene != active) autoFirePointA = null;
+            if (autoFirePointB != null && autoFirePointB.gameObject.scene != active) autoFirePointB = null;
+            if (autoFirePointC != null && autoFirePointC.gameObject.scene != active) autoFirePointC = null;
+            if (autoFirePointD != null && autoFirePointD.gameObject.scene != active) autoFirePointD = null;
+        }
+        else
+        {
+            autoFirePointA = null;
+            autoFirePointB = null;
+            autoFirePointC = null;
+            autoFirePointD = null;
+        }
+
+        if (autoFirePointA != null && autoFirePointB != null && autoFirePointC != null && autoFirePointD != null)
+        {
+            return;
+        }
+
+        GameObject a = GameObject.Find("AutoFire_PointA");
+        GameObject b = GameObject.Find("AutoFire_PointB");
+        GameObject c = GameObject.Find("AutoFire_PointC");
+        GameObject d = GameObject.Find("AutoFire_PointD");
+
+        if (autoFirePointA == null && a != null) autoFirePointA = a.transform;
+        if (autoFirePointB == null && b != null) autoFirePointB = b.transform;
+        if (autoFirePointC == null && c != null) autoFirePointC = c.transform;
+        if (autoFirePointD == null && d != null) autoFirePointD = d.transform;
+    }
+
+    private void EnsureCameraReference()
+    {
+        if (cam != null)
+        {
+            return;
+        }
+
+        cam = Camera.main;
+        if (cam == null)
+        {
+            cam = FindObjectOfType<Camera>(true);
+        }
     }
 
     private void Awake()
@@ -214,6 +286,8 @@ public class AdvancedPlayerController : MonoBehaviour
         {
             projectileModifierApplier = gameObject.AddComponent<ProjectileModifierApplier>();
         }
+
+        EnsureCameraReference();
     }
 
     void Start()
@@ -242,7 +316,7 @@ public class AdvancedPlayerController : MonoBehaviour
 
     void Update()
     {
-        if (isDead) return;
+        if (isDead || (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)) return;
 
         if (CardSelectionManager.Instance != null && CardSelectionManager.Instance.IsSelectionActive())
         {
@@ -293,7 +367,7 @@ public class AdvancedPlayerController : MonoBehaviour
         {
             if (!IsPointerOverUI())
             {
-                if (!RuntimeProjectileRadiusGizmoManager.WasClickHandledThisFrame)
+                if (!EnemyStatUIManager.WasClickHandledThisFrame && !RuntimeProjectileRadiusGizmoManager.WasClickHandledThisFrame)
                 {
                     FireProjectile();
                 }
@@ -353,6 +427,7 @@ public class AdvancedPlayerController : MonoBehaviour
         if (pendingPredictions.Count == 0) return;
 
         float now = GameStateManager.PauseSafeTime;
+
         bool changed = false;
 
         for (int i = pendingPredictions.Count - 1; i >= 0; i--)
@@ -451,6 +526,16 @@ public class AdvancedPlayerController : MonoBehaviour
         return totalLowerBound >= hpNow;
     }
 
+    private bool IsConservativelyBlazeDoomed(EnemyHealth enemyHealth, StatusController statusController, float incomingHitDamageLowerBound)
+    {
+        if (statusController == null || !statusController.HasStatus(StatusId.Immolation))
+        {
+            return false;
+        }
+
+        return IsConservativelyBurnDoomed(enemyHealth, statusController, incomingHitDamageLowerBound);
+    }
+
     private bool ShouldIgnoreTargetByStatusRules(EnemyHealth enemyHealth, float distToPlayer)
     {
         if (enemyHealth == null)
@@ -472,10 +557,7 @@ public class AdvancedPlayerController : MonoBehaviour
         }
 
         StatusController sc = FindEnemyStatusController(enemyHealth);
-        if (sc != null && sc.HasStatus(StatusId.Immolation))
-        {
-            return false;
-        }
+        bool hasBlaze = sc != null && sc.HasStatus(StatusId.Immolation);
 
         int slowStacks = sc != null ? sc.GetStacks(StatusId.Slow) : 0;
         int freezeStacks = sc != null ? sc.GetStacks(StatusId.Freeze) : 0;
@@ -490,14 +572,30 @@ public class AdvancedPlayerController : MonoBehaviour
         }
 
         bool doomedByBurn = false;
+        bool doomedByBlaze = false;
+
         if (sc != null && sc.GetStacks(StatusId.Burn) > 0)
         {
-            doomedByBurn = IsConservativelyBurnDoomed(enemyHealth, sc, incomingHitDamage);
+            if (hasBlaze)
+            {
+                doomedByBlaze = IsConservativelyBlazeDoomed(enemyHealth, sc, incomingHitDamage);
+            }
+            else
+            {
+                doomedByBurn = IsConservativelyBurnDoomed(enemyHealth, sc, incomingHitDamage);
+            }
         }
 
-        if (!doomedByBurn && incomingBurn > 0 && incomingHitDamage >= enemyHealth.CurrentHealth)
+        if (!doomedByBurn && !doomedByBlaze && incomingBurn > 0 && incomingHitDamage >= enemyHealth.CurrentHealth)
         {
-            doomedByBurn = true;
+            if (hasBlaze)
+            {
+                doomedByBlaze = true;
+            }
+            else
+            {
+                doomedByBurn = true;
+            }
         }
 
         bool doomedByPoison = false;
@@ -510,7 +608,7 @@ public class AdvancedPlayerController : MonoBehaviour
             }
         }
 
-        return doomedByBurn || doomedByPoison;
+        return doomedByBurn || doomedByBlaze || doomedByPoison;
     }
 
     private void HandleSwipe(Vector2 swipeDirection)
@@ -521,10 +619,6 @@ public class AdvancedPlayerController : MonoBehaviour
     {
         sidesSwapped = !sidesSwapped;
     }
-
-    [Header("Directional Swipe Projectiles")]
-    public GameObject leftDiagonalProjectile;
-    public GameObject rightDiagonalProjectile;
 
     private void HandleDiagonalSwipe(bool isLeftDiagonal, Vector2 swipeDirection, Vector2 startPos, Vector2 endPos)
     {
@@ -540,7 +634,7 @@ public class AdvancedPlayerController : MonoBehaviour
 
     void FireProjectile()
     {
-        if (isDead || playerMana == null) return;
+        if (isDead || (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead) || playerMana == null) return;
 
         if (GameStateManager.PauseSafeTime - lastFireTime < minFireInterval)
         {
@@ -553,7 +647,7 @@ public class AdvancedPlayerController : MonoBehaviour
 
     void FireProjectileAtScreenPosition(Vector2 screenPosition)
     {
-        if (isDead || playerMana == null)
+        if (isDead || (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead) || playerMana == null)
         {
             return;
         }
@@ -681,6 +775,11 @@ public class AdvancedPlayerController : MonoBehaviour
 
     private void TryAutoFire()
     {
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            return;
+        }
+
         if (activeProjectileCard == null || activeProjectileCard.projectilePrefab == null)
         {
             Debug.LogWarning("<color=yellow>Auto-fire: Active projectile card or its prefab is not assigned!</color>");
@@ -765,6 +864,11 @@ public class AdvancedPlayerController : MonoBehaviour
         {
             Debug.LogWarning("<color=yellow>Auto-fire: Active projectile card has no projectile prefab assigned!</color>");
             return;
+        }
+
+        if (autoFirePointA == null || autoFirePointB == null || autoFirePointC == null || autoFirePointD == null)
+        {
+            EnsureAutoFireAreaPoints();
         }
 
         if (autoFirePointA == null || autoFirePointB == null || autoFirePointC == null || autoFirePointD == null)
@@ -1025,27 +1129,35 @@ public class AdvancedPlayerController : MonoBehaviour
         {
             projectile.Launch(direction, playerCollider, playerMana);
             RegisterGuaranteedDamage(target, projectileObj, isFire);
+            RegisterIncomingStatusPrediction(projectileObj, target);
         }
         else if (fireBall != null)
         {
             fireBall.Launch(direction, playerCollider, playerMana);
             RegisterGuaranteedDamage(target, projectileObj, isFire);
+            RegisterIncomingStatusPrediction(projectileObj, target);
         }
         else if (fireTalon != null)
         {
             Vector2 talonOffset = fireTalon.GetSpawnOffset(direction);
             projectileObj.transform.position += (Vector3)talonOffset;
             fireTalon.Launch(direction, playerCollider, playerMana);
+            RegisterGuaranteedDamage(target, projectileObj, isFire);
+            RegisterIncomingStatusPrediction(projectileObj, target);
         }
         else if (iceTalon != null)
         {
             Vector2 talonOffset = iceTalon.GetSpawnOffset(direction);
             projectileObj.transform.position += (Vector3)talonOffset;
             iceTalon.Launch(direction, playerCollider, playerMana);
+            RegisterGuaranteedDamage(target, projectileObj, isFire);
+            RegisterIncomingStatusPrediction(projectileObj, target);
         }
         else if (thunderDisc != null)
         {
             thunderDisc.Launch(direction, playerCollider, playerMana);
+            RegisterGuaranteedDamage(target, projectileObj, isFire);
+            RegisterIncomingStatusPrediction(projectileObj, target);
         }
         else
         {
@@ -1064,9 +1176,18 @@ public class AdvancedPlayerController : MonoBehaviour
 
         PlayerProjectiles pp = projectileObj.GetComponent<PlayerProjectiles>();
         FireBall fb = projectileObj.GetComponent<FireBall>();
-        if (pp == null && fb == null) return fallback;
+        ThunderDisc td = projectileObj.GetComponent<ThunderDisc>();
+        ProjectileFireTalon ft = projectileObj.GetComponent<ProjectileFireTalon>();
+        ProjectileIceTalon it = projectileObj.GetComponent<ProjectileIceTalon>();
+        if (pp == null && fb == null && td == null && ft == null && it == null) return fallback;
 
-        float speed = Mathf.Max(0.01f, pp != null ? pp.GetProjectileSpeed() : fb.GetProjectileSpeed());
+        float speed = 0f;
+        if (pp != null) speed = pp.GetProjectileSpeed();
+        else if (fb != null) speed = fb.GetProjectileSpeed();
+        else if (td != null) speed = td.GetProjectileSpeed();
+        else if (ft != null) speed = ft.GetProjectileSpeed();
+        else if (it != null) speed = it.GetProjectileSpeed();
+        speed = Mathf.Max(0.01f, speed);
 
         Vector2 targetPos;
         Collider2D enemyCollider = target.GetComponent<Collider2D>() ?? target.GetComponentInParent<Collider2D>();
@@ -1097,6 +1218,9 @@ public class AdvancedPlayerController : MonoBehaviour
         BurnEffect burn = projectileObj.GetComponent<BurnEffect>();
         PlayerProjectiles pp = projectileObj.GetComponent<PlayerProjectiles>();
         FireBall fb = projectileObj.GetComponent<FireBall>();
+        ThunderDisc td = projectileObj.GetComponent<ThunderDisc>();
+        ProjectileFireTalon ft = projectileObj.GetComponent<ProjectileFireTalon>();
+        ProjectileIceTalon it = projectileObj.GetComponent<ProjectileIceTalon>();
 
         bool willSlow = slow != null;
         int slowStacks = willSlow ? Mathf.Clamp(slow.slowStacksPerHit, 1, 4) : 0;
@@ -1121,9 +1245,8 @@ public class AdvancedPlayerController : MonoBehaviour
             burnStacksPerHit = burnStacks,
 
             predictedHitDamageLowerBound = predictedHitDamageLowerBound,
-            projectileType = pp != null ? pp.ProjectileElement : (fb != null ? fb.ProjectileElement : ProjectileType.Fire),
+            projectileType = pp != null ? pp.ProjectileElement : (fb != null ? fb.ProjectileElement : (td != null ? td.ProjectileElement : (ft != null ? ft.ProjectileElement : (it != null ? it.ProjectileElement : ProjectileType.Fire)))),
 
-            burnDamageMultiplier = burn != null ? burn.burnDamageMultiplier : 0f,
             burnDurationSeconds = burn != null ? burn.burnDuration : 0f
         };
 
@@ -1157,6 +1280,9 @@ public class AdvancedPlayerController : MonoBehaviour
 
         PlayerProjectiles pp = projectileObj.GetComponent<PlayerProjectiles>();
         FireBall fb = projectileObj.GetComponent<FireBall>();
+        ThunderDisc td = projectileObj.GetComponent<ThunderDisc>();
+        ProjectileFireTalon ft = projectileObj.GetComponent<ProjectileFireTalon>();
+        ProjectileIceTalon it = projectileObj.GetComponent<ProjectileIceTalon>();
         if (pp != null)
         {
             rawProjectileDamage = pp.GetCurrentDamage();
@@ -1165,6 +1291,21 @@ public class AdvancedPlayerController : MonoBehaviour
         else if (fb != null)
         {
             rawProjectileDamage = fb.GetCurrentDamage();
+            damageAlreadyIncludesStats = false;
+        }
+        else if (td != null)
+        {
+            rawProjectileDamage = td.GetCurrentDamage();
+            damageAlreadyIncludesStats = false;
+        }
+        else if (ft != null)
+        {
+            rawProjectileDamage = ft.GetCurrentDamage();
+            damageAlreadyIncludesStats = false;
+        }
+        else if (it != null)
+        {
+            rawProjectileDamage = it.GetCurrentDamage();
             damageAlreadyIncludesStats = false;
         }
 
@@ -1177,7 +1318,7 @@ public class AdvancedPlayerController : MonoBehaviour
             float damageAfterStats = (rawProjectileDamage
                     + playerStats.projectileFlatDamage
                     + playerStats.flatDamage)
-                    * playerStats.damageMultiplier
+                    * (playerStats.damageMultiplier / 100f)
                     * playerStats.favourDamageMultiplier
                     * playerStats.projectileDamageMultiplier;
             predictedDamage = Mathf.Max(0f, damageAfterStats);
@@ -1213,32 +1354,30 @@ public class AdvancedPlayerController : MonoBehaviour
             }
         }
 
-        // Base duration comes from the active projectile card when set,
-        // otherwise fall back to the global default.
         float baseDuration = defaultDoomedSkipDuration;
         if (activeProjectileCard != null && activeProjectileCard.doomedSkipDuration > 0f)
         {
             baseDuration = activeProjectileCard.doomedSkipDuration;
         }
 
-        // If we have no active card or no exchange rate, just return the base value.
+        if (activeProjectileCard != null && activeProjectileCard.projectileSystem != ProjectileCards.ProjectileSystemType.Active)
+        {
+            return baseDuration;
+        }
+
         if (activeProjectileCard == null || doomedSkipDurationPerSpeed <= 0f || ProjectileCardModifiers.Instance == null)
         {
             return baseDuration;
         }
 
-        // Use the card's current speedIncrease modifier as the "+speed" value
-        // that shrinks doomedSkipDuration. Example: baseDuration=3s,
-        // speedIncrease=+10, exchangeRate=0.1s → 3 - (10*0.1) = 2s.
         CardModifierStats modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(activeProjectileCard);
-        float speedIncrease = Mathf.Max(0f, modifiers.speedIncrease);
-
-        if (speedIncrease <= 0f)
+        float additionalSpeed = Mathf.Max(0f, modifiers.speedIncrease);
+        if (additionalSpeed <= 0f)
         {
             return baseDuration;
         }
 
-        float reduction = speedIncrease * doomedSkipDurationPerSpeed;
+        float reduction = additionalSpeed * doomedSkipDurationPerSpeed;
         float minDuration = 0.1f;
         return Mathf.Max(minDuration, baseDuration - reduction);
     }
@@ -1316,6 +1455,9 @@ public class AdvancedPlayerController : MonoBehaviour
 
         PlayerProjectiles pp = projectileObj.GetComponent<PlayerProjectiles>();
         FireBall fb = projectileObj.GetComponent<FireBall>();
+        ThunderDisc td = projectileObj.GetComponent<ThunderDisc>();
+        ProjectileFireTalon ft = projectileObj.GetComponent<ProjectileFireTalon>();
+        ProjectileIceTalon it = projectileObj.GetComponent<ProjectileIceTalon>();
         if (pp != null)
         {
             rawProjectileDamage = pp.GetCurrentDamage();
@@ -1324,6 +1466,21 @@ public class AdvancedPlayerController : MonoBehaviour
         else if (fb != null)
         {
             rawProjectileDamage = fb.GetCurrentDamage();
+            damageAlreadyIncludesStats = false;
+        }
+        else if (td != null)
+        {
+            rawProjectileDamage = td.GetCurrentDamage();
+            damageAlreadyIncludesStats = false;
+        }
+        else if (ft != null)
+        {
+            rawProjectileDamage = ft.GetCurrentDamage();
+            damageAlreadyIncludesStats = false;
+        }
+        else if (it != null)
+        {
+            rawProjectileDamage = it.GetCurrentDamage();
             damageAlreadyIncludesStats = false;
         }
 
@@ -1339,7 +1496,7 @@ public class AdvancedPlayerController : MonoBehaviour
             float damageAfterStats = (rawProjectileDamage
                     + playerStats.projectileFlatDamage
                     + playerStats.flatDamage)
-                    * playerStats.damageMultiplier
+                    * (playerStats.damageMultiplier / 100f)
                     * playerStats.favourDamageMultiplier
                     * playerStats.projectileDamageMultiplier;
             predictedDamage = Mathf.Max(0f, damageAfterStats);
@@ -1357,6 +1514,29 @@ public class AdvancedPlayerController : MonoBehaviour
             {
                 GameObject enemyGO = enemyHealth.gameObject;
                 predictedDamage = favourManager.PreviewBeforeDealDamage(enemyGO, predictedDamage);
+            }
+        }
+
+        if (predictedDamage > 0f && playerStats != null && enemyHealth != null && !enemyHealth.HasTakenDamage)
+        {
+            StatusController statusController = playerStats.GetComponent<StatusController>();
+            if (statusController != null)
+            {
+                int firstStrikeStacks = statusController.GetStacks(StatusId.FirstStrike);
+                if (firstStrikeStacks > 0)
+                {
+                    float bonusPerStack = 10f;
+                    if (StatusControllerManager.Instance != null)
+                    {
+                        bonusPerStack = StatusControllerManager.Instance.FirstStrikeBonusPercent;
+                    }
+
+                    float totalBonusPercent = Mathf.Max(0f, bonusPerStack * firstStrikeStacks);
+                    if (totalBonusPercent > 0f)
+                    {
+                        predictedDamage *= 1f + totalBonusPercent / 100f;
+                    }
+                }
             }
         }
 
@@ -1446,7 +1626,18 @@ public class AdvancedPlayerController : MonoBehaviour
         isDead = true;
         rb.velocity = Vector2.zero;
         enabled = false;
-        StartCoroutine(WaitForRestart());
+    }
+
+    public void ResetAfterDeath()
+    {
+        isDead = false;
+
+        if (rb != null)
+        {
+            rb.velocity = Vector2.zero;
+        }
+
+        enabled = true;
     }
 
     private void OnDrawGizmosSelected()
@@ -1467,50 +1658,6 @@ public class AdvancedPlayerController : MonoBehaviour
             Gizmos.DrawLine(c, d);
             Gizmos.DrawLine(d, a);
         }
-    }
-
-    private IEnumerator WaitForRestart()
-    {
-        yield return GameStateManager.WaitForPauseSafeSeconds(1f);
-
-        while (true)
-        {
-            bool mouseClicked = Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
-            bool touchPressed = Touchscreen.current != null && Touchscreen.current.primaryTouch.press.wasPressedThisFrame;
-
-            if (mouseClicked || touchPressed)
-            {
-                break;
-            }
-            yield return null;
-        }
-
-        if (GameStateManager.Instance != null)
-        {
-            GameStateManager.Instance.ResetRunState();
-        }
-
-        FavourEffect.ResetPickCounts();
-
-        if (EnemyScalingSystem.Instance != null)
-        {
-            EnemyScalingSystem.Instance.ResetScaling();
-        }
-
-        if (ProjectileCardLevelSystem.Instance != null)
-        {
-            ProjectileCardLevelSystem.Instance.ResetAllLevels();
-        }
-
-        if (ProjectileCardModifiers.Instance != null)
-        {
-            ProjectileCardModifiers.Instance.ResetRunState();
-        }
-
-        HolyShield.ResetRunState();
-        ReflectShield.ResetRunState();
-        NullifyShield.ResetRunState();
-        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
     }
 
     private void SpawnDiagonalProjectile(Vector2 screenPosition, GameObject projectilePrefab)
@@ -1547,7 +1694,7 @@ public class AdvancedPlayerController : MonoBehaviour
             playerStats = GetComponent<PlayerStats>();
         }
 
-        float attackSpeedFromStats = playerStats != null ? playerStats.attackSpeedPercent : 0f;
+        float attackSpeedFromStats = playerStats != null ? playerStats.AttackSpeedBonus : 0f;
 
         float attackSpeedFromAcceleration = 0f;
         StatusController statusController = GetComponent<StatusController>();
@@ -1571,10 +1718,10 @@ public class AdvancedPlayerController : MonoBehaviour
         float interval = baseInterval / denominator;
 
         float finalInterval = interval;
-        if (playerStats != null && playerStats.projectileCooldownReduction > 0f)
+        if (playerStats != null)
         {
-            float totalCdr = Mathf.Max(0f, playerStats.projectileCooldownReduction);
-            finalInterval = interval / (1f + totalCdr);
+            float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
+            finalInterval = interval * multiplier;
         }
 
         float minInterval = 1f / 60f;

@@ -1,38 +1,43 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [CreateAssetMenu(fileName = "StatusDecayFavour", menuName = "Favour Effects/Status Decay")] 
 public class StatusDecayFavour : FavourEffect
 {
     [Header("Status Decay Settings")]
-    [Tooltip("Decay stacks granted the first time an enemy receives each tracked status effect.")]
-    public int DecayStacksPerStatus = 5;
+    [FormerlySerializedAs("DecayStacksPerStatus")]
+    [Tooltip("Decay stacks granted each time an enemy receives a tracked elemental status effect.")]
+    public int DecayStacks = 5;
+
+    [Tooltip("Maximum total Decay stacks this favour can apply to a single enemy per run.")]
+    public int MaxDecayStacks = 10;
 
     [Header("Enhanced")]
-    [Tooltip("Additional Decay stacks granted per tracked status when enhanced.")]
-    public int BonusDecayStacks = 5;
+    [FormerlySerializedAs("BonusDecayStacks")]
+    [Tooltip("Additional maximum Decay stacks per enemy granted when this favour is enhanced.")]
+    public int BonusMaxDecayStacks = 5;
 
-    private int currentDecayStacksPerStatus;
+    private int currentDecayStacks;
+    private int currentMaxDecayStacks;
 
-    // Tracks which status IDs have already triggered Decay for each enemy.
-    // Key: enemy instance ID, Value: set of StatusIds that have already
-    // awarded Decay to that enemy.
-    private readonly Dictionary<int, HashSet<StatusId>> triggeredPerEnemy = new Dictionary<int, HashSet<StatusId>>();
+    private readonly Dictionary<int, int> appliedDecayPerEnemy = new Dictionary<int, int>();
 
     public override void OnApply(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        currentDecayStacksPerStatus = Mathf.Max(0, DecayStacksPerStatus);
-        triggeredPerEnemy.Clear();
+        currentDecayStacks = Mathf.Max(0, DecayStacks);
+        currentMaxDecayStacks = Mathf.Max(0, MaxDecayStacks);
+        appliedDecayPerEnemy.Clear();
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
     {
-        currentDecayStacksPerStatus += Mathf.Max(0, BonusDecayStacks);
+        currentMaxDecayStacks += Mathf.Max(0, BonusMaxDecayStacks);
     }
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)
     {
-        triggeredPerEnemy.Clear();
+        appliedDecayPerEnemy.Clear();
     }
 
     public override void OnStatusApplied(GameObject player, GameObject enemy, StatusId statusId, FavourEffectManager manager)
@@ -47,25 +52,25 @@ public class StatusDecayFavour : FavourEffect
             return;
         }
 
-        if (currentDecayStacksPerStatus <= 0)
+        if (currentDecayStacks <= 0 || currentMaxDecayStacks <= 0)
         {
             return;
         }
 
         int key = enemy.GetInstanceID();
-        if (!triggeredPerEnemy.TryGetValue(key, out var set))
-        {
-            set = new HashSet<StatusId>();
-            triggeredPerEnemy[key] = set;
-        }
-
-        // Only grant Decay once per enemy per tracked status type.
-        if (set.Contains(statusId))
+        int appliedSoFar = 0;
+        appliedDecayPerEnemy.TryGetValue(key, out appliedSoFar);
+        int room = currentMaxDecayStacks - appliedSoFar;
+        if (room <= 0)
         {
             return;
         }
 
-        set.Add(statusId);
+        int toAdd = Mathf.Min(room, currentDecayStacks);
+        if (toAdd <= 0)
+        {
+            return;
+        }
 
         StatusController statusController = enemy.GetComponent<StatusController>() ?? enemy.GetComponentInParent<StatusController>();
         if (statusController == null)
@@ -73,7 +78,8 @@ public class StatusDecayFavour : FavourEffect
             return;
         }
 
-        statusController.AddStatus(StatusId.Decay, currentDecayStacksPerStatus, -1f);
+        statusController.AddStatus(StatusId.Decay, toAdd, -1f);
+        appliedDecayPerEnemy[key] = appliedSoFar + toAdd;
     }
 
     private static bool IsTrackedStatus(StatusId id)
@@ -81,8 +87,10 @@ public class StatusDecayFavour : FavourEffect
         switch (id)
         {
             case StatusId.Burn:
+            case StatusId.Scorched:
             case StatusId.Immolation:
             case StatusId.Slow:
+            case StatusId.Frostbite:
             case StatusId.Freeze:
             case StatusId.Static:
             case StatusId.StaticReapply:

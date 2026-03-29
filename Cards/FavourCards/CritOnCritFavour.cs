@@ -77,7 +77,7 @@ public class CritOnCritFavour : FavourEffect
             return;
         }
 
-        float now = Time.time;
+        float now = GameStateManager.PauseSafeTime;
         for (int i = stackExpiryTimes.Count - 1; i >= 0; i--)
         {
             if (now >= stackExpiryTimes[i])
@@ -107,7 +107,7 @@ public class CritOnCritFavour : FavourEffect
             return;
         }
 
-        float now = Time.time;
+        float now = GameStateManager.PauseSafeTime;
 
         for (int i = stackExpiryTimes.Count - 1; i >= 0; i--)
         {
