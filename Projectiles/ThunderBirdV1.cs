@@ -19,9 +19,6 @@ public class ThunderBirdV1 : MonoBehaviour
     [Tooltip("Size multiplier for Enhanced Variant 1 (Dual Thunder). Applies on top of normal size modifiers.")]
     [SerializeField] private float variant1SizeMultiplier = 1f;
 
-    [Header("Offscreen Destruction Grace Period")]
-    [SerializeField] private float variant1GracePeriod = 10f;
-
     private ThunderBird bird;
 
     private static bool hasPendingPair = false;
@@ -68,11 +65,6 @@ public class ThunderBirdV1 : MonoBehaviour
     public float GetSizeMultiplier()
     {
         return isActive ? variant1SizeMultiplier : 1f;
-    }
-
-    public float GetGracePeriod(float baseGracePeriod)
-    {
-        return isActive ? variant1GracePeriod : baseGracePeriod;
     }
 
     public bool TryApplyVariant1SpawnPosition(Vector3 requestedSpawnPosition)

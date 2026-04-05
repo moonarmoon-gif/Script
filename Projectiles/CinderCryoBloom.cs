@@ -255,7 +255,7 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
         
         // Apply card modifiers using new RAW value system
         float finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease + enhancedLifetimeAdd; // RAW seconds + enhanced
-        float finalCooldown = Mathf.Max(0.1f, baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f)); // % from base
+        float finalCooldown = Mathf.Max(0.1f, baseCooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         int finalManaCost = Mathf.Max(1, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
         damage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier * enhancedDamageMult;
         
@@ -290,8 +290,9 @@ public class CinderCryoBloom : MonoBehaviour, IDamageable, IInstantModifiable
         float effectiveCooldown = finalCooldown;
         if (cachedPlayerStats != null)
         {
+            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
             float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown = finalCooldown * multiplier;
+            effectiveCooldown *= multiplier;
 
             if (MinCooldownManager.Instance != null && card != null)
             {

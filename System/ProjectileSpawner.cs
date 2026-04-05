@@ -68,6 +68,14 @@ public class ProjectileSpawner : MonoBehaviour
 
             if (playerStats != null)
             {
+                if (ProjectileCardModifiers.Instance != null)
+                {
+                    CardModifierStats modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
+                    interval = Mathf.Max(0.01f, interval - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
+                }
+
+                interval = Mathf.Max(0.01f, interval - Mathf.Max(0f, playerStats.projectileCooldownReduction));
+
                 float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
                 interval *= multiplier;
             }
@@ -147,10 +155,18 @@ public class ProjectileSpawner : MonoBehaviour
         float baseInterval = card.runtimeSpawnInterval > 0f ? card.runtimeSpawnInterval : card.spawnInterval;
         float finalInterval = baseInterval;
 
+        if (ProjectileCardModifiers.Instance != null)
+        {
+            CardModifierStats modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
+            finalInterval = Mathf.Max(0.01f, finalInterval - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
+        }
+
         if (playerStats != null)
         {
+            finalInterval = Mathf.Max(0.01f, finalInterval - Mathf.Max(0f, playerStats.projectileCooldownReduction));
+
             float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
-            finalInterval = baseInterval * multiplier;
+            finalInterval *= multiplier;
         }
 
         if (MinCooldownManager.Instance != null)
@@ -385,10 +401,18 @@ public class ProjectileSpawner : MonoBehaviour
 
                 float finalInterval = interval;
 
+                if (ProjectileCardModifiers.Instance != null)
+                {
+                    CardModifierStats modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(data.card);
+                    finalInterval = Mathf.Max(0.01f, finalInterval - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
+                }
+
                 if (playerStats != null)
                 {
+                    finalInterval = Mathf.Max(0.01f, finalInterval - Mathf.Max(0f, playerStats.projectileCooldownReduction));
+
                     float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
-                    finalInterval = interval * multiplier;
+                    finalInterval *= multiplier;
                 }
 
                 if (MinCooldownManager.Instance != null)
@@ -497,6 +521,24 @@ public class ProjectileSpawner : MonoBehaviour
             float reductionFactor = Mathf.Clamp01(1f - card.enhancedFirstSpawnReduction);
             float reducedInterval = baseInterval * reductionFactor;
 
+            if (ProjectileCardModifiers.Instance != null)
+            {
+                CardModifierStats modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
+                reducedInterval = Mathf.Max(0.01f, reducedInterval - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
+            }
+
+            if (playerStats == null)
+            {
+                playerStats = GetComponent<PlayerStats>();
+            }
+
+            if (playerStats != null)
+            {
+                reducedInterval = Mathf.Max(0.01f, reducedInterval - Mathf.Max(0f, playerStats.projectileCooldownReduction));
+                float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
+                reducedInterval *= multiplier;
+            }
+
             data.nextSpawnTime = GameStateManager.PauseSafeTime + reducedInterval;
             Debug.Log($"<color=gold>{card.cardName} ENHANCED FIRST SPAWN: scheduling next spawn in {reducedInterval:F2}s (base {baseInterval:F2}s, reduction {card.enhancedFirstSpawnReduction * 100f:F0}%)</color>");
             return;
@@ -523,33 +565,7 @@ public class ProjectileSpawner : MonoBehaviour
             // Base count is 1, modifiers ADD to this
             int mineProjectileCount = 1 + mineModifiers.projectileCount;
 
-            // CRITICAL: Add enhanced projectile count bonus for FireMine instantly,
-            // so the very first spawn after enhancement already uses the extra mines.
-            if (ProjectileCardLevelSystem.Instance != null)
-            {
-                int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(data.card);
-
-                // SAFETY: If the card has already reached the enhanced unlock level but
-                // GetEnhancedVariant still reports 0 for this frame, treat it as Variant 1
-                // so the very first enhanced spawn immediately gets the extra mine(s).
-                if (enhancedVariant == 0 && ProjectileCardLevelSystem.Instance.IsEnhancedUnlocked(data.card))
-                {
-                    enhancedVariant = 1;
-                    Debug.Log($"<color=yellow>[FireMine Safety] {data.card.cardName} is enhanced-unlocked but has variant 0; treating as Variant 1 for projectile count.</color>");
-                }
-
-                if (enhancedVariant > 0)
-                {
-                    int enhancedBonus = GetFireMineEnhancedProjectileBonus(fireMine, enhancedVariant);
-                    if (enhancedBonus > 0)
-                    {
-                        mineProjectileCount += enhancedBonus;
-                        Debug.Log($"<color=gold>FireMine ENHANCED TIER {enhancedVariant}: Adding {enhancedBonus} bonus mines → Total: {mineProjectileCount}</color>");
-                    }
-                }
-            }
-            
-            Debug.Log($"<color=cyan>Spawning {mineProjectileCount} FireMine(s) for {data.card.cardName} (base 1 + {mineModifiers.projectileCount} from modifiers + any enhanced bonus)</color>");
+            Debug.Log($"<color=cyan>Spawning {mineProjectileCount} FireMine(s) for {data.card.cardName} (base 1 + {mineModifiers.projectileCount} from modifiers)</color>");
             
             Collider2D PlayerCollider = GetComponent<Collider2D>();
             
@@ -1188,6 +1204,7 @@ public class ProjectileSpawner : MonoBehaviour
                 Quaternion leftRot = Quaternion.Euler(0f, 0f, leftZ);
                 GameObject leftProjectile = Instantiate(data.card.projectilePrefab, leftPos, leftRot);
                 leftProjectile.tag = "Projectile";
+
                 ProjectileCardModifiers.Instance.TagProjectileWithCard(leftProjectile, data.card);
 
                 ElectroBall leftElectroBall = leftProjectile.GetComponent<ElectroBall>();
@@ -1210,6 +1227,7 @@ public class ProjectileSpawner : MonoBehaviour
                 Quaternion rightRot = Quaternion.Euler(0f, 0f, rightZ);
                 GameObject rightProjectile = Instantiate(data.card.projectilePrefab, rightPos, rightRot);
                 rightProjectile.tag = "Projectile";
+
                 ProjectileCardModifiers.Instance.TagProjectileWithCard(rightProjectile, data.card);
 
                 ElectroBall rightElectroBall = rightProjectile.GetComponent<ElectroBall>();
@@ -1406,64 +1424,6 @@ public class ProjectileSpawner : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Get enhanced projectile count bonus for FireMine for a specific enhanced variant.
-    /// Prefers values configured on the base prefab. If those are zero, falls back to
-    /// reading the bonus from the corresponding enhanced tier prefab via reflection,
-    /// so designers can configure bonuses on either the base or enhanced prefabs.
-    /// </summary>
-    private int GetFireMineEnhancedProjectileBonus(FireMine basePrefab, int enhancedVariant)
-    {
-        if (basePrefab == null || enhancedVariant <= 0)
-        {
-            return 0;
-        }
-
-        int bonus = 0;
-
-        // First, try to read from the base FireMine prefab fields
-        if (enhancedVariant == 1)
-        {
-            bonus = basePrefab.enhancedProjectileCountBonus;
-        }
-        else if (enhancedVariant == 2)
-        {
-            bonus = basePrefab.enhancedTier2ProjectileCountBonus;
-        }
-
-        if (bonus > 0)
-        {
-            return bonus;
-        }
-
-        // Fallback: look up the enhanced tier prefab via reflection and read its bonus
-        GameObject variantPrefab = null;
-        string fieldName = enhancedVariant == 1 ? "enhancedTier1Prefab" : "enhancedTier2Prefab";
-        FieldInfo prefabField = typeof(FireMine).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-        if (prefabField != null)
-        {
-            variantPrefab = prefabField.GetValue(basePrefab) as GameObject;
-        }
-
-        if (variantPrefab != null)
-        {
-            FireMine variantMine = variantPrefab.GetComponent<FireMine>();
-            if (variantMine != null)
-            {
-                if (enhancedVariant == 1)
-                {
-                    bonus = variantMine.enhancedProjectileCountBonus;
-                }
-                else if (enhancedVariant == 2)
-                {
-                    bonus = variantMine.enhancedTier2ProjectileCountBonus;
-                }
-            }
-        }
-
-        return Mathf.Max(0, bonus);
-    }
-
     Vector2 GetSpawnDirection(ProjectileCards card)
     {
         
@@ -1532,7 +1492,19 @@ public class ProjectileSpawner : MonoBehaviour
         // (e.g., 2 beams every 6s -> one beam every 3s) even when cooldown
         // reduction is active.
         CardModifierStats modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(data.card);
-        float internalCooldown = baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f);
+        float internalCooldown = Mathf.Max(0.01f, baseCooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
+
+        if (playerStats == null)
+        {
+            playerStats = GetComponent<PlayerStats>();
+        }
+
+        if (playerStats != null)
+        {
+            internalCooldown = Mathf.Max(0.01f, internalCooldown - Mathf.Max(0f, playerStats.projectileCooldownReduction));
+            float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
+            internalCooldown *= multiplier;
+        }
         if (MinCooldownManager.Instance != null)
         {
             internalCooldown = MinCooldownManager.Instance.ClampCooldown(data.card, internalCooldown);
@@ -1829,6 +1801,12 @@ public class ProjectileSpawner : MonoBehaviour
             // Apply reduction
             float reducedInterval = baseInterval * (1f - reductionPercent);
 
+            if (ProjectileCardModifiers.Instance != null)
+            {
+                CardModifierStats modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(data.card);
+                reducedInterval = Mathf.Max(0.01f, reducedInterval - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
+            }
+
             if (playerStats == null)
             {
                 playerStats = GetComponent<PlayerStats>();
@@ -1836,6 +1814,7 @@ public class ProjectileSpawner : MonoBehaviour
 
             if (playerStats != null)
             {
+                reducedInterval = Mathf.Max(0.01f, reducedInterval - Mathf.Max(0f, playerStats.projectileCooldownReduction));
                 float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
                 reducedInterval *= multiplier;
             }

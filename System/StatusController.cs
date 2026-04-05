@@ -960,6 +960,18 @@ public class StatusController : MonoBehaviour
 
         float multiplier = Mathf.Max(0f, 1f - reductionPercent / 100f);
 
+        bool isPlayerOwner = GetComponent<PlayerHealth>() != null;
+        if (isPlayerOwner)
+        {
+            if (!HasStatus(StatusId.Weak))
+            {
+                return;
+            }
+
+            damage *= multiplier;
+            return;
+        }
+
         if (isContinuousProjectile)
         {
             float now = GameStateManager.PauseSafeTime;
@@ -1178,7 +1190,7 @@ public class StatusController : MonoBehaviour
                     break;
 
                 case StatusId.Armor:
-                    if (status.stacks > 0 && damage > 0f)
+                    if (!isPlayerOwner && status.stacks > 0 && damage > 0f)
                     {
                         float perStack = 1f;
                         if (StatusControllerManager.Instance != null)
@@ -1459,6 +1471,40 @@ public class StatusController : MonoBehaviour
         return GetMaxRemainingDuration(id);
     }
 
+    private float GetMaxRemainingDuration(StatusId id)
+    {
+        if (activeStatuses.Count == 0)
+        {
+            return 0f;
+        }
+
+        float max = 0f;
+        bool found = false;
+
+        for (int i = 0; i < activeStatuses.Count; i++)
+        {
+            ActiveStatus s = activeStatuses[i];
+            if (s.id != id)
+            {
+                continue;
+            }
+
+            found = true;
+
+            if (s.remainingDuration < 0f)
+            {
+                return -1f;
+            }
+
+            if (s.remainingDuration > max)
+            {
+                max = s.remainingDuration;
+            }
+        }
+
+        return found ? max : 0f;
+    }
+
     public float GetCurrentBurnTickDamage()
     {
         float total = 0f;
@@ -1678,69 +1724,61 @@ public class StatusController : MonoBehaviour
 
     private void ShowStatusApplied(StatusId id)
     {
-        if (DamageNumberManager.Instance == null)
+        if (DamageNumberManager.Instance == null || EnemyDamagePopupScope.SuppressPopups)
         {
             return;
         }
 
-        if (EnemyDamagePopupScope.SuppressPopups)
+        EnemyHealth enemyHealth = cachedEnemyHealth;
+        if (enemyHealth == null || !enemyHealth.IsAlive)
         {
             return;
         }
 
-        Vector3 pos = transform.position;
-        pos = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, pos);
+        Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(enemyHealth.gameObject, enemyHealth.transform.position);
 
         switch (id)
         {
-            case StatusId.Freeze:
-                DamageNumberManager.Instance.ShowFreeze(pos);
-                break;
-            case StatusId.Immolation:
-                DamageNumberManager.Instance.ShowBlaze(pos);
-                break;
-            case StatusId.Static:
-            case StatusId.StaticReapply:
-                DamageNumberManager.Instance.ShowStatic(pos);
-                break;
             case StatusId.Poison:
-                DamageNumberManager.Instance.ShowPoison(pos);
+                DamageNumberManager.Instance.ShowPoison(anchor);
+                break;
+            case StatusId.Bleed:
+                DamageNumberManager.Instance.ShowBleed(anchor);
                 break;
             case StatusId.Wound:
-                DamageNumberManager.Instance.ShowWound(pos);
+                DamageNumberManager.Instance.ShowWound(anchor);
                 break;
             case StatusId.Weak:
-                DamageNumberManager.Instance.ShowWeak(pos);
+                DamageNumberManager.Instance.ShowWeak(anchor);
+                break;
+            case StatusId.Burn:
+                DamageNumberManager.Instance.ShowBurn(anchor);
+                break;
+            case StatusId.Slow:
+                DamageNumberManager.Instance.ShowSlow(anchor);
+                break;
+            case StatusId.Freeze:
+                DamageNumberManager.Instance.ShowFreeze(anchor);
+                break;
+            case StatusId.Immolation:
+                DamageNumberManager.Instance.ShowBlaze(anchor);
+                break;
+            case StatusId.Static:
+                DamageNumberManager.Instance.ShowStatic(anchor);
+                break;
+            case StatusId.Nullify:
+                DamageNumberManager.Instance.ShowNullify(anchor);
+                break;
+            case StatusId.Reflect:
+                DamageNumberManager.Instance.ShowReflect(anchor);
+                break;
+            case StatusId.Immune:
+                DamageNumberManager.Instance.ShowImmune(anchor);
+                break;
+            case StatusId.Execute:
+                DamageNumberManager.Instance.ShowExecuted(anchor);
                 break;
         }
-    }
-
-    private float GetMaxRemainingDuration(StatusId id)
-    {
-        float max = 0f;
-        bool hasAny = false;
-
-        for (int i = 0; i < activeStatuses.Count; i++)
-        {
-            ActiveStatus s = activeStatuses[i];
-            if (s.id != id || s.stacks <= 0)
-            {
-                continue;
-            }
-
-            if (s.remainingDuration < 0f)
-            {
-                return -1f;
-            }
-
-            hasAny = true;
-            if (s.remainingDuration > max)
-            {
-                max = s.remainingDuration;
-            }
-        }
-
-        return hasAny ? max : 0f;
     }
 
     private void TryApplyFreezeFromSlow()
@@ -1750,19 +1788,12 @@ public class StatusController : MonoBehaviour
             return;
         }
 
-        int slowStacks = GetStacks(StatusId.Slow);
-        if (slowStacks < 4)
+        if (GetStacks(StatusId.Slow) < 4)
         {
             return;
         }
 
-        float duration = GetMaxRemainingDuration(StatusId.Slow);
-        if (duration == 0f)
-        {
-            return;
-        }
-
-        AddStatus(StatusId.Freeze, 1, duration);
+        AddStatus(StatusId.Freeze, 1, 2f);
     }
 
     private void TryApplyImmolationFromBurn(int previousBurnStacks)
@@ -1777,18 +1808,12 @@ public class StatusController : MonoBehaviour
             return;
         }
 
-        int burnStacks = GetStacks(StatusId.Burn);
-        if (burnStacks < 4)
+        if (GetStacks(StatusId.Burn) < 4)
         {
             return;
         }
 
         float duration = GetMaxRemainingDuration(StatusId.Burn);
-        if (duration == 0f)
-        {
-            return;
-        }
-
         AddStatus(StatusId.Immolation, 1, duration);
     }
 
@@ -1865,6 +1890,17 @@ public class StatusController : MonoBehaviour
                         break;
                 }
             }
+        }
+
+        if (id == StatusId.Weak && GetComponent<PlayerHealth>() != null)
+        {
+            float perStack = 1f;
+            if (StatusControllerManager.Instance != null)
+            {
+                perStack = StatusControllerManager.Instance.WeakDurationPerStack;
+            }
+
+            resolvedDuration = Mathf.Max(0f, perStack) * Mathf.Max(1, stacks);
         }
 
         bool useIndependentInstances = UsesIndependentDurationInstances(id, resolvedDuration);
@@ -2011,15 +2047,30 @@ public class StatusController : MonoBehaviour
         else
         {
             status.stacks += stacks;
+
             if (resolvedDuration >= 0f)
             {
-                if (status.remainingDuration < 0f)
+                if (id == StatusId.Weak && GetComponent<PlayerHealth>() != null)
                 {
-                    status.remainingDuration = resolvedDuration;
+                    if (status.remainingDuration < 0f)
+                    {
+                        status.remainingDuration = resolvedDuration;
+                    }
+                    else
+                    {
+                        status.remainingDuration += resolvedDuration;
+                    }
                 }
                 else
                 {
-                    status.remainingDuration = Mathf.Max(status.remainingDuration, resolvedDuration);
+                    if (status.remainingDuration < 0f)
+                    {
+                        status.remainingDuration = resolvedDuration;
+                    }
+                    else
+                    {
+                        status.remainingDuration = Mathf.Max(status.remainingDuration, resolvedDuration);
+                    }
                 }
             }
 

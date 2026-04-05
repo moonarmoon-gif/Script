@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections;
+using System.Collections.Generic;
 
 [RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(Collider2D))]
@@ -7,11 +8,10 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
 {
     [Header("Motion")]
     [SerializeField] private float speed = 15f;
-    [SerializeField] private float lifetimeSeconds = 5f;
 
     [Header("Offscreen Destruction")]
     [Tooltip("Bonus destroy boundary size (world units). If projectile goes outside the camera bounds plus this value, it is destroyed immediately.")]
-    public float DestroyCameraOffset = 0f;
+    public float DestroyCameraOffset = 5f;
 
     [Header("Spawn Offset - Left Side")]
     [Tooltip("Spawn offset when firing left at angle ABOVE 45 degrees")]
@@ -62,11 +62,12 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
     [Tooltip("Minimum angular separation (degrees) between Talon projectiles when using custom angles and multi-shot.")]
     public float minAngleSeparation = 0f;
 
+    public List<float> UltimateFiringAngles = new List<float>();
+
     private static System.Collections.Generic.Dictionary<string, float> lastFireTimes = new System.Collections.Generic.Dictionary<string, float>();
     private string prefabKey;
 
     private float baseSpeed;
-    private float baseLifetime;
     private float baseDamage;
     private Vector3 baseScale;
 
@@ -168,7 +169,7 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
     private void Awake()
     {
         _rigidbody2D = GetComponent<Rigidbody2D>();
-        baseSpeed = speed; baseLifetime = lifetimeSeconds; baseDamage = damage; baseScale = transform.localScale;
+        baseSpeed = speed; baseDamage = damage; baseScale = transform.localScale;
 
         _collider2D = GetComponent<Collider2D>();
         if (_collider2D == null)
@@ -378,13 +379,16 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
         int enhancedVariant = 0;
         bool hasVariant1 = false;
         bool hasVariant2 = false;
+        bool hasVariant3 = false;
         if (ProjectileCardLevelSystem.Instance != null && card != null)
         {
             enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
-            hasVariant1 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
-            hasVariant2 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
+            bool ultimateSelected = ProjectileCardLevelSystem.Instance.IsUltimateEnhancementSelected(card);
+            hasVariant1 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1) || ultimateSelected;
+            hasVariant2 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2) || ultimateSelected;
+            hasVariant3 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3) || ultimateSelected || enhancedVariant == 3;
 
-            if (enhancedVariant == 3)
+            if (hasVariant3)
             {
                 ProjectileStatusChanceAdditiveBonus additive = GetComponent<ProjectileStatusChanceAdditiveBonus>();
                 if (additive == null)
@@ -412,7 +416,6 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
 
         float baseSpeedLocal = speed + modifiers.speedIncrease;
         float finalSpeed = baseSpeedLocal + enhancedSpeedAdd;
-        float finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease;
 
         float baseCooldown = cooldown;
         if (card != null && card.runtimeSpawnInterval > 0f)
@@ -430,7 +433,7 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
             card.runtimeSpawnInterval = Mathf.Max(0.0001f, baseCooldown);
         }
 
-        float finalCooldown = baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f);
+        float finalCooldown = Mathf.Max(0.01f, baseCooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         if (MinCooldownManager.Instance != null)
         {
             finalCooldown = MinCooldownManager.Instance.ClampCooldown(card, finalCooldown);
@@ -464,8 +467,9 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
         float effectiveCooldown = finalCooldown;
         if (cachedPlayerStats != null)
         {
+            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
             float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown = finalCooldown * multiplier;
+            effectiveCooldown *= multiplier;
 
             if (MinCooldownManager.Instance != null && card != null)
             {
@@ -481,7 +485,6 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
 
         damage = finalDamage;
         speed = finalSpeed;
-        lifetimeSeconds = finalLifetime;
 
         bool bypassEnhancedFirstSpawnCooldown = false;
         if (!skipCooldownCheck && card != null && card.applyEnhancedFirstSpawnReduction && card.pendingEnhancedFirstSpawn)
@@ -568,7 +571,6 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
 
         piercing.SetMaxPierces(finalPierceCount);
 
-        PauseSafeSelfDestruct.Schedule(gameObject, finalLifetime);
         StartTrailEffects();
         StartTrailSfx();
     }
@@ -1044,12 +1046,6 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
                 _rigidbody2D.velocity = _rigidbody2D.velocity.normalized * speed;
             Debug.Log($"<color=lime>Speed:{baseSpeed:F2}+{mods.speedIncrease:F2}={speed:F2}</color>");
         }
-        float nl = baseLifetime + mods.lifetimeIncrease;
-        if (nl != lifetimeSeconds)
-        {
-            lifetimeSeconds = nl;
-            Debug.Log($"<color=lime>Lifetime:{baseLifetime:F2}+{mods.lifetimeIncrease:F2}={lifetimeSeconds:F2}</color>");
-        }
         float nd = (baseDamage + mods.damageFlat) * mods.damageMultiplier;
         if (nd != damage)
         {
@@ -1057,6 +1053,7 @@ public class ProjectileFireTalon : MonoBehaviour, IInstantModifiable
             baseDamageAfterCards = nd;
             Debug.Log($"<color=lime>Damage:({baseDamage:F2}+{mods.damageFlat:F2})*{mods.damageMultiplier:F2}x={damage:F2}</color>");
         }
+
         Vector3 newScale = baseScale * mods.sizeMultiplier;
         if (transform.localScale != newScale)
         {

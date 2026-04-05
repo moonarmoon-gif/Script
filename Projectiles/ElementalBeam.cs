@@ -903,7 +903,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=gold>Variant 2 Lifetime Exchange: Base modifier +{modifiers.lifetimeIncrease:F2}s * {variant2LifetimeExchangeRate:F2} = +{lifetimeModifier:F2}s (Final: {finalLifetime:F2}s)</color>");
         }
 
-        float finalCooldown = baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f);
+        float finalCooldown = Mathf.Max(0.01f, baseCooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         if (MinCooldownManager.Instance != null)
         {
             finalCooldown = MinCooldownManager.Instance.ClampCooldown(card, finalCooldown);
@@ -938,7 +938,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         // per instance in DamageRoutine/Variant 1 contact logic.
         baseDamageAfterCards = finalDamage;
 
-        Debug.Log($"<color=cyan>ElementalBeam Modifiers: Lifetime {baseLifetime:F2}s + {modifiers.lifetimeIncrease:F2}s = {finalLifetime:F2}s, Cooldown {baseCooldown:F2}s * {(1f - modifiers.cooldownReductionPercent / 100f):F2} = {finalCooldown:F2}s</color>");
+        Debug.Log($"<color=cyan>ElementalBeam Modifiers: Lifetime {baseLifetime:F2}s + {modifiers.lifetimeIncrease:F2}s = {finalLifetime:F2}s, Cooldown {baseCooldown:F2}s - {modifiers.cooldownReductionSeconds:F2}s = {finalCooldown:F2}s</color>");
 
         if (card != null && enhancedVariant == 2 && !isVariant12Stacked)
         {
@@ -1030,8 +1030,9 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         float effectiveCooldown = finalCooldown;
         if (cachedPlayerStats != null)
         {
+            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
             float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown = finalCooldown * multiplier;
+            effectiveCooldown *= multiplier;
 
             if (MinCooldownManager.Instance != null && card != null)
             {

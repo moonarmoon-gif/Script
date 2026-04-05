@@ -52,6 +52,8 @@ public class StatusControllerManager : MonoBehaviour
     [Header("Weak")]
     [SerializeField, Tooltip("Percent damage reduction applied by WEAK to the next damaging instance.")]
     private float weakDamageReductionPercent = 50f;
+    [SerializeField, Tooltip("Duration in seconds PER stack of WEAK on the Player.")]
+    private float weakDurationPerStack = 1f;
 
     [Header("Armor")]
     [SerializeField] private float armorFlatReductionPerStack = 1f;
@@ -227,6 +229,7 @@ public class StatusControllerManager : MonoBehaviour
     public float WoundFlatDamagePerStack => Mathf.Max(0f, woundFlatDamagePerStack);
     public float WoundDurationSeconds => Mathf.Max(0f, woundDurationSeconds);
     public float WeakDamageReductionPercent => Mathf.Max(0f, weakDamageReductionPercent);
+    public float WeakDurationPerStack => Mathf.Max(0f, weakDurationPerStack);
     public float ArmorFlatReductionPerStack => Mathf.Max(0f, armorFlatReductionPerStack);
     public float AbsorptionMaxHitPercent => Mathf.Max(0f, absorptionMaxHitPercent);
     public float BleedHealingReductionPercent => Mathf.Max(0f, bleedHealingReductionPercent);

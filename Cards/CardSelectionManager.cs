@@ -2361,7 +2361,7 @@ public class CardSelectionManager : MonoBehaviour
             return;
         }
 
-        int clampedTier = Mathf.Clamp(tier, 1, 4);
+        int clampedTier = Mathf.Max(1, tier);
         EnqueueVariantSelection(card, set, clampedTier);
     }
 
@@ -2403,7 +2403,7 @@ public class CardSelectionManager : MonoBehaviour
         processingVariantQueue = false;
     }
 
-    private ProjectileVariantSet GetVariantSetForCard(ProjectileCards card)
+    public ProjectileVariantSet GetVariantSetForCard(ProjectileCards card)
     {
         if (card == null || projectileVariantSets == null) return null;
 
@@ -2470,6 +2470,12 @@ public class CardSelectionManager : MonoBehaviour
         refreshAwardPendingForThisStage = false;
         isRefreshingCurrentStage = false;
 
+        bool isUltimateTier = false;
+        if (ProjectileCardLevelSystem.Instance != null)
+        {
+            isUltimateTier = ProjectileCardLevelSystem.Instance.IsUltimateTierSelection(card, tier);
+        }
+
         bool anyButtons = false;
 
         bool isMineProjectile = false;
@@ -2485,6 +2491,21 @@ public class CardSelectionManager : MonoBehaviour
         foreach (var info in set.variants)
         {
             if (info == null) continue;
+
+            if (info.variantIndex == 0)
+            {
+                if (!isUltimateTier)
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                if (isUltimateTier)
+                {
+                    continue;
+                }
+            }
 
             if (isMineProjectile)
             {

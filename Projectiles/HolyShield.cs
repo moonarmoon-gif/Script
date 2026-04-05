@@ -700,7 +700,7 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
             return 0f;
         }
 
-        float value = Mathf.Max(0.1f, baseSeconds * (1f - modifiers.cooldownReductionPercent / 100f));
+        float value = Mathf.Max(0.01f, baseSeconds - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
 
         PlayerStats stats = null;
         if (ownerCollider != null)
@@ -709,6 +709,7 @@ public class HolyShield : MonoBehaviour, IDamageable, IInstantModifiable
         }
         if (stats != null)
         {
+            value = Mathf.Max(0.01f, value - Mathf.Max(0f, stats.projectileCooldownReduction));
             float multiplier = Mathf.Max(0f, stats.Cooldown) / 100f;
             value = value * multiplier;
         }

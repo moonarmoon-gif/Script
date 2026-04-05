@@ -775,6 +775,11 @@ public class AdvancedPlayerController : MonoBehaviour
 
     private void TryAutoFire()
     {
+        if (!enableAutoFire)
+        {
+            return;
+        }
+
         if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
         {
             return;
@@ -1687,13 +1692,19 @@ public class AdvancedPlayerController : MonoBehaviour
             modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(activeProjectileCard);
         }
 
-        float attackSpeedFromCard = modifiers.attackSpeedPercent;
-
         if (playerStats == null)
         {
             playerStats = GetComponent<PlayerStats>();
         }
 
+        float reducedBaseInterval = baseInterval;
+        reducedBaseInterval = Mathf.Max(0.01f, reducedBaseInterval - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
+        if (playerStats != null)
+        {
+            reducedBaseInterval = Mathf.Max(0.01f, reducedBaseInterval - Mathf.Max(0f, playerStats.projectileCooldownReduction));
+        }
+
+        float attackSpeedFromCard = modifiers.attackSpeedPercent;
         float attackSpeedFromStats = playerStats != null ? playerStats.AttackSpeedBonus : 0f;
 
         float attackSpeedFromAcceleration = 0f;
@@ -1715,13 +1726,18 @@ public class AdvancedPlayerController : MonoBehaviour
         float totalAttackSpeedPercent = attackSpeedFromCard + attackSpeedFromStats + attackSpeedFromAcceleration;
         float denominator = 1f + (totalAttackSpeedPercent / 100f);
         denominator = Mathf.Max(0.0001f, denominator);
-        float interval = baseInterval / denominator;
+        float interval = reducedBaseInterval / denominator;
 
         float finalInterval = interval;
         if (playerStats != null)
         {
             float multiplier = Mathf.Max(0f, playerStats.Cooldown) / 100f;
             finalInterval = interval * multiplier;
+        }
+
+        if (MinCooldownManager.Instance != null)
+        {
+            finalInterval = MinCooldownManager.Instance.ClampCooldown(activeProjectileCard, finalInterval);
         }
 
         float minInterval = 1f / 60f;

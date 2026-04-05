@@ -8,11 +8,10 @@ public class FireBall : MonoBehaviour
 {
     [Header("Motion")]
     [SerializeField] private float speed = 15f;
-    [SerializeField] private float lifetimeSeconds = 5f;
 
     [Header("Offscreen Destruction")]
     [Tooltip("Bonus destroy boundary size (world units). If projectile goes outside the camera bounds plus this value, it is destroyed immediately.")]
-    public float DestroyCameraOffset = 0f;
+    public float DestroyCameraOffset = 5f;
 
     [Header("Spawn Offset - Left Side")]
     [Tooltip("Spawn offset when firing left at angle ABOVE 45 degrees")]
@@ -587,8 +586,7 @@ public class FireBall : MonoBehaviour
         }
 
         float finalSpeed = speed + modifiers.speedIncrease;
-        float finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease;
-        float finalCooldown = Mathf.Max(0.1f, cooldown * (1f - modifiers.cooldownReductionPercent / 100f));
+        float finalCooldown = Mathf.Max(0.1f, cooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         int finalManaCost = Mathf.Max(0, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
         float finalDamage = damage + modifiers.damageFlat;
 
@@ -598,7 +596,7 @@ public class FireBall : MonoBehaviour
             ColliderScaler.ScaleCollider(_collider2D, modifiers.sizeMultiplier, colliderSizeOffset);
         }
 
-        Debug.Log($"<color=cyan>PlayerProjectile Modifiers Applied: Speed=+{modifiers.speedIncrease:F2}, Size={modifiers.sizeMultiplier:F2}x, DamageFlat=+{modifiers.damageFlat:F1}, Lifetime=+{modifiers.lifetimeIncrease:F2}s</color>");
+        Debug.Log($"<color=cyan>PlayerProjectile Modifiers Applied: Speed=+{modifiers.speedIncrease:F2}, Size={modifiers.sizeMultiplier:F2}x, DamageFlat=+{modifiers.damageFlat:F1}</color>");
 
         cachedPlayerStats = null;
         if (colliderToIgnore != null)
@@ -614,8 +612,9 @@ public class FireBall : MonoBehaviour
         float effectiveCooldown = finalCooldown;
         if (cachedPlayerStats != null)
         {
+            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
             float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown = finalCooldown * multiplier;
+            effectiveCooldown *= multiplier;
 
             if (MinCooldownManager.Instance != null && card != null)
             {
@@ -700,7 +699,6 @@ public class FireBall : MonoBehaviour
             transform.rotation = Quaternion.Euler(0f, 0f, finalAngle);
         }
 
-        PauseSafeSelfDestruct.Schedule(gameObject, finalLifetime);
         StartTrailSfx();
 
         if (fireBiteWillApply && !fireBiteHasLockedTarget)

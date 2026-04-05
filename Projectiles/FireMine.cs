@@ -91,28 +91,10 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     [SerializeField] private GameObject enhancedTier1Prefab;
     [Tooltip("Enhanced prefab for Tier 2 (e.g., level 20) - will swap to this prefab at higher enhancement")]
     [SerializeField] private GameObject enhancedTier2Prefab;
+    [Tooltip("Enhanced prefab for Tier 3 (e.g., level 30) - will swap to this prefab at higher enhancement")]
+    [SerializeField] private GameObject enhancedTier3Prefab;
     [Tooltip("Level multiplier for tier thresholds (e.g., 2 means Tier 2 = Tier 1 level * 2)")]
     [SerializeField] private float tierLevelMultiplier = 2;
-
-    [Header("Enhanced Variant 1 - Mega Mine")]
-    [Tooltip("Size increase for Enhanced Variant 1 (0.25 = +25%)")]
-    [SerializeField] private float enhancedSizeIncrease = 0.25f;
-    [Tooltip("Lifetime bonus for Enhanced Variant 1 (in seconds)")]
-    [SerializeField] private float enhancedLifetimeBonus = 30f;
-    [Tooltip("Cooldown reduction for Enhanced Variant 1 (0.25 = 25% reduction)")]
-    [SerializeField] private float enhancedCooldownReduction = 0.25f;
-    [Tooltip("Additional projectile count for Enhanced Variant 1 (e.g., 1 = spawn 1 extra)")]
-    [SerializeField] public int enhancedProjectileCountBonus = 1;
-
-    [Header("Enhanced Variant 2 - Ultra Mine")]
-    [Tooltip("Size increase for Enhanced Variant 2 (0.5 = +50%)")]
-    [SerializeField] private float enhancedTier2SizeIncrease = 0.5f;
-    [Tooltip("Lifetime bonus for Enhanced Variant 2 (in seconds)")]
-    [SerializeField] private float enhancedTier2LifetimeBonus = 60f;
-    [Tooltip("Cooldown reduction for Enhanced Variant 2 (0.4 = 40% reduction)")]
-    [SerializeField] private float enhancedTier2CooldownReduction = 0.4f;
-    [Tooltip("Additional projectile count for Enhanced Variant 2 (e.g., 2 = spawn 2 extra)")]
-    [SerializeField] public int enhancedTier2ProjectileCountBonus = 2;
 
     [Header("Enhanced Variant Base Cooldowns")]
     [Tooltip("Base cooldown used when FireMine is in Enhanced Variant 1 (Mega Mine). If 0, falls back to ProjectileCards.runtimeSpawnInterval or script cooldown.")]
@@ -120,6 +102,9 @@ public class FireMine : MonoBehaviour, IInstantModifiable
 
     [Tooltip("Base cooldown used when FireMine is in Enhanced Variant 2 (Ultra Mine). If 0, falls back to ProjectileCards.runtimeSpawnInterval or script cooldown.")]
     [SerializeField] private float variant2BaseCooldown = 0f;
+
+    [Tooltip("Base cooldown used when FireMine is in Enhanced Variant 3. If 0, falls back to ProjectileCards.runtimeSpawnInterval or script cooldown.")]
+    [SerializeField] private float variant3BaseCooldown = 0f;
 
     private Rigidbody2D _rigidbody2D;
     private Collider2D _collider2D;
@@ -131,7 +116,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
     private Coroutine armingSequenceCoroutine = null;
 
     // Enhanced system
-    private int enhancedVariant = 0; // 0 = basic, 1 = mega mine, 2-3 = future variants
+    private int enhancedVariant = 0; // 0 = basic, 1-3 = enhanced tiers
     private float explosionRadiusForEffect = 0f; // Store radius BEFORE modifiers for effect scaling
 
     // Instance-based cooldown tracking
@@ -506,15 +491,19 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             // Check if we should swap to a higher tier prefab
             GameObject targetPrefab = null;
             int targetTier = 0;
+            int tierReached = unlockLevel > 0 ? Mathf.Clamp(currentLevel / unlockLevel, 0, 4) : 0;
 
-            // Tier 2: level >= unlockLevel * tierLevelMultiplier (e.g., level 20 if unlock is 10)
-            if (enhancedTier2Prefab != null && currentLevel >= unlockLevel * tierLevelMultiplier)
+            if (enhancedTier3Prefab != null && tierReached >= 3)
+            {
+                targetPrefab = enhancedTier3Prefab;
+                targetTier = 3;
+            }
+            else if (enhancedTier2Prefab != null && tierReached >= 2)
             {
                 targetPrefab = enhancedTier2Prefab;
                 targetTier = 2;
             }
-            // Tier 1: level >= unlockLevel (e.g., level 10)
-            else if (enhancedTier1Prefab != null && currentLevel >= unlockLevel)
+            else if (enhancedTier1Prefab != null && tierReached >= 1)
             {
                 targetPrefab = enhancedTier1Prefab;
                 targetTier = 1;
@@ -549,37 +538,8 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             Debug.Log($"<color=gold>FireMine ({card.cardName}) Enhanced Variant: {enhancedVariant}, Level: {currentLevel}/{unlockLevel}</color>");
         }
 
-        // Apply enhanced variant modifiers BEFORE card modifiers
-        float enhancedSizeMult = 1f;
-        float enhancedLifetimeAdd = 0f;
-        float enhancedCooldownRed = 0f;
-        int enhancedProjectileBonus = 0;
-
-        if (enhancedVariant == 1)
-        {
-            enhancedSizeMult = 1f + enhancedSizeIncrease; // e.g., 1.25 for +25%
-            enhancedLifetimeAdd = enhancedLifetimeBonus;
-            enhancedCooldownRed = enhancedCooldownReduction;
-
-            // Store enhanced projectile count bonus (don't modify modifiers directly!)
-            enhancedProjectileBonus = enhancedProjectileCountBonus;
-
-            Debug.Log($"<color=gold>Enhanced Tier 1 Mega Mine: Size x{enhancedSizeMult}, Lifetime +{enhancedLifetimeAdd}s, Cooldown -{enhancedCooldownRed * 100}%, Additional Projectiles +{enhancedProjectileBonus}</color>");
-        }
-        else if (enhancedVariant == 2)
-        {
-            enhancedSizeMult = 1f + enhancedTier2SizeIncrease; // e.g., 1.5 for +50%
-            enhancedLifetimeAdd = enhancedTier2LifetimeBonus;
-            enhancedCooldownRed = enhancedTier2CooldownReduction;
-
-            // Store enhanced projectile count bonus (don't modify modifiers directly!)
-            enhancedProjectileBonus = enhancedTier2ProjectileCountBonus;
-
-            Debug.Log($"<color=gold>Enhanced Tier 2 Ultra Mine: Size x{enhancedSizeMult}, Lifetime +{enhancedLifetimeAdd}s, Cooldown -{enhancedCooldownRed * 100}%, Additional Projectiles +{enhancedProjectileBonus}</color>");
-        }
-
         // Apply card modifiers using new RAW value system
-        finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease + enhancedLifetimeAdd; // RAW seconds + enhanced
+        finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease; // RAW seconds
 
         // CRITICAL: Use ProjectileCards spawnInterval if available, otherwise use script cooldown
         float baseCooldown;
@@ -606,6 +566,11 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             baseCooldown = variant2BaseCooldown;
             Debug.Log($"<color=gold>FireMine Variant 2: Using variant2BaseCooldown = {variant2BaseCooldown:F2}s as base cooldown</color>");
         }
+        else if (enhancedVariant == 3 && variant3BaseCooldown > 0f)
+        {
+            baseCooldown = variant3BaseCooldown;
+            Debug.Log($"<color=gold>FireMine Variant 3: Using variant3BaseCooldown = {variant3BaseCooldown:F2}s as base cooldown</color>");
+        }
 
         // Sync card runtime interval with the resolved BASE cooldown so that
         // ProjectileSpawner and any other systems use the same canonical interval.
@@ -614,9 +579,8 @@ public class FireMine : MonoBehaviour, IInstantModifiable
             card.runtimeSpawnInterval = Mathf.Max(0.1f, baseCooldown);
         }
 
-        // Apply cooldown reduction: BOTH card modifiers AND enhanced, calculated from BASE
-        float totalCooldownReduction = (modifiers.cooldownReductionPercent / 100f) + enhancedCooldownRed;
-        finalCooldown = baseCooldown * (1f - totalCooldownReduction);
+        // Apply cooldown reduction: calculated from BASE
+        finalCooldown = Mathf.Max(0.01f, baseCooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         if (MinCooldownManager.Instance != null)
         {
             finalCooldown = MinCooldownManager.Instance.ClampCooldown(card, finalCooldown);
@@ -625,7 +589,7 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         {
             finalCooldown = Mathf.Max(0.1f, finalCooldown);
         }
-        Debug.Log($"<color=orange>FireMine Cooldown: Base={baseCooldown:F2}s, Card Reduction={modifiers.cooldownReductionPercent:F1}%, Enhanced Reduction={enhancedCooldownRed * 100f:F1}%, Total Reduction={totalCooldownReduction * 100f:F1}%, Final={finalCooldown:F2}s</color>");
+        Debug.Log($"<color=orange>FireMine Cooldown: Base={baseCooldown:F2}s, Card Reduction={modifiers.cooldownReductionSeconds:F2}s, Final={finalCooldown:F2}s</color>");
 
         finalManaCost = Mathf.Max(1, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
         damage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
@@ -633,13 +597,12 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         // Reset explosion radius to base before applying size and modifiers
         explosionRadius = baseExplosionRadius;
 
-        // Apply size multiplier (card + enhanced)
-        float totalSizeMultiplier = modifiers.sizeMultiplier * enhancedSizeMult;
+        // Apply size multiplier
+        float totalSizeMultiplier = modifiers.sizeMultiplier;
 
         Debug.Log($"<color=orange>═══════════════════════════════════════════════════════</color>");
         Debug.Log($"<color=orange>FireMine SCALING:</color>");
         Debug.Log($"<color=orange>  Card Size Multiplier: {modifiers.sizeMultiplier:F2}x</color>");
-        Debug.Log($"<color=orange>  Enhanced Size Multiplier: {enhancedSizeMult:F2}x</color>");
         Debug.Log($"<color=orange>  Total Size Multiplier: {totalSizeMultiplier:F2}x</color>");
 
         // Store original values for logging
@@ -718,10 +681,11 @@ public class FireMine : MonoBehaviour, IInstantModifiable
         baseDamageAfterCards = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
 
         float effectiveCooldown = finalCooldown;
-        if (cachedPlayerStats != null && cachedPlayerStats.projectileCooldownReduction > 0f)
+        if (cachedPlayerStats != null)
         {
-            float totalCdr = Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction);
-            effectiveCooldown = finalCooldown / (1f + totalCdr);
+            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
+            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+            effectiveCooldown *= multiplier;
             if (MinCooldownManager.Instance != null && card != null)
             {
                 effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);

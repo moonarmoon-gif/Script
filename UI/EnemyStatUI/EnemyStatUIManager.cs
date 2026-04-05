@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
 
 [DefaultExecutionOrder(-120)]
 public class EnemyStatUIManager : MonoBehaviour
@@ -48,6 +49,60 @@ public class EnemyStatUIManager : MonoBehaviour
 
     private Camera worldCamera;
     private bool lastSelectionActive;
+
+    private bool IsPointerOverInteractiveUI(Vector2 screenPosition)
+    {
+        if (EventSystem.current == null)
+        {
+            return false;
+        }
+
+        PointerEventData eventData = new PointerEventData(EventSystem.current);
+        eventData.position = screenPosition;
+
+        List<RaycastResult> results = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(eventData, results);
+
+        for (int i = 0; i < results.Count; i++)
+        {
+            GameObject go = results[i].gameObject;
+            if (go == null)
+            {
+                continue;
+            }
+
+            if (go.GetComponentInParent<Selectable>() != null)
+            {
+                return true;
+            }
+
+            GameObject clickHandler = ExecuteEvents.GetEventHandler<IPointerClickHandler>(go);
+            if (clickHandler != null)
+            {
+                return true;
+            }
+
+            GameObject beginDragHandler = ExecuteEvents.GetEventHandler<IBeginDragHandler>(go);
+            if (beginDragHandler != null)
+            {
+                return true;
+            }
+
+            GameObject dragHandler = ExecuteEvents.GetEventHandler<IDragHandler>(go);
+            if (dragHandler != null)
+            {
+                return true;
+            }
+
+            GameObject endDragHandler = ExecuteEvents.GetEventHandler<IEndDragHandler>(go);
+            if (endDragHandler != null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     public Vector2 PanelOffsetPixels => panelOffsetPixels;
     public Vector2 FlipPanelOffsetPixels
@@ -205,23 +260,14 @@ public class EnemyStatUIManager : MonoBehaviour
             return;
         }
 
-        if (EventSystem.current != null)
+        if (RuntimeProjectileRadiusGizmoManager.WasClickHandledThisFrame)
         {
-            bool isOverUi = EventSystem.current.IsPointerOverGameObject();
-            if (!isOverUi && Touchscreen.current != null)
-            {
-                var touch = Touchscreen.current.primaryTouch;
-                if (touch != null)
-                {
-                    int touchId = touch.touchId.ReadValue();
-                    isOverUi = EventSystem.current.IsPointerOverGameObject(touchId);
-                }
-            }
+            return;
+        }
 
-            if (isOverUi)
-            {
-                return;
-            }
+        if (IsPointerOverInteractiveUI(pointerPos))
+        {
+            return;
         }
 
         if (debugLogging)
@@ -328,10 +374,13 @@ public class EnemyStatUIManager : MonoBehaviour
         bool matched = false;
         while (t != null)
         {
-            if (t.name == clickHitboxObjectName)
+            if (!string.IsNullOrEmpty(t.name) && !string.IsNullOrEmpty(clickHitboxObjectName))
             {
-                matched = true;
-                break;
+                if (t.name.IndexOf(clickHitboxObjectName, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    matched = true;
+                    break;
+                }
             }
             t = t.parent;
         }

@@ -256,17 +256,59 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         // Check if player is dead - enemies are immune
         if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
         {
+            if (isStatusTickLocal)
+            {
+                StatusDamageScope.LastResolvedDamage = 0f;
+            }
+
+            if (!isStatusTickLocal)
+            {
+                bool isOnCameraNowImmune = IsOnCamera();
+                if (isOnCameraNowImmune && DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
+                {
+                    Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, hitPoint);
+                    DamageNumberManager.Instance.ShowImmune(anchor);
+                }
+            }
             return; // Immune to damage when player is dead
         }
 
         // Check if this enemy was made immune due to player death
         if (immuneToPlayerDeath)
         {
+            if (isStatusTickLocal)
+            {
+                StatusDamageScope.LastResolvedDamage = 0f;
+            }
+
+            if (!isStatusTickLocal)
+            {
+                bool isOnCameraNowImmune = IsOnCamera();
+                if (isOnCameraNowImmune && DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
+                {
+                    Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, hitPoint);
+                    DamageNumberManager.Instance.ShowImmune(anchor);
+                }
+            }
             return; // Immune to damage
         }
 
         if (immuneToBossMenace)
         {
+            if (isStatusTickLocal)
+            {
+                StatusDamageScope.LastResolvedDamage = 0f;
+            }
+
+            if (!isStatusTickLocal)
+            {
+                bool isOnCameraNowImmune = IsOnCamera();
+                if (isOnCameraNowImmune && DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
+                {
+                    Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, hitPoint);
+                    DamageNumberManager.Instance.ShowImmune(anchor);
+                }
+            }
             return;
         }
 

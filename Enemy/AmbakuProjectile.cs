@@ -393,7 +393,15 @@ public class AmbakuProjectile : MonoBehaviour
                 }
             }
 
-            cachedHitbox.ApplyDamage(damage, hitPoint, hitNormal);
+            PlayerHealth playerHealthTarget = cachedHitbox.GetComponentInParent<PlayerHealth>();
+            if (playerHealthTarget != null && isInTimedDamageMode)
+            {
+                playerHealthTarget.TakeDamageBypassInvulnerability(damage, hitPoint, hitNormal);
+            }
+            else
+            {
+                cachedHitbox.ApplyDamage(damage, hitPoint, hitNormal);
+            }
             return true;
         }
 
@@ -409,7 +417,14 @@ public class AmbakuProjectile : MonoBehaviour
                 PlayerHealth.RegisterPendingAttacker(owner);
             }
 
-            cachedPlayerHealth.TakeDamage(damage, hitPoint, hitNormal);
+            if (isInTimedDamageMode)
+            {
+                cachedPlayerHealth.TakeDamageBypassInvulnerability(damage, hitPoint, hitNormal);
+            }
+            else
+            {
+                cachedPlayerHealth.TakeDamage(damage, hitPoint, hitNormal);
+            }
             return true;
         }
 

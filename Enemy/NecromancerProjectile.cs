@@ -7,11 +7,14 @@ public class NecromancerProjectile : MonoBehaviour
 {
     [Header("Projectile Settings")]
     public float speed = 8f;
-    public float lifetime = 5f;
     public bool rotateTowardsDirection = true;
     public float rotationSpeed = 720f;
 
     public bool destroyOnPlayerContact = true;
+
+    [Header("Offscreen Destruction")]
+    [Tooltip("Bonus destroy boundary size (world units). If projectile goes outside the camera bounds plus this value, it is destroyed immediately.")]
+    public float DestroyCameraOffset = 5f;
 
     public float[] DamageTimings;
 
@@ -31,7 +34,6 @@ public class NecromancerProjectile : MonoBehaviour
     private Collider2D projectileCollider;
     private Collider2D spawnerCollider;
     private GameObject owner;
-    private float spawnTime;
     private bool hasProcessedPlayerHit;
     private Coroutine timedDamageRoutine;
     private DamageableHitbox cachedHitbox;
@@ -44,11 +46,12 @@ public class NecromancerProjectile : MonoBehaviour
     // NEW: If owner has EnemyHealth and dies, projectile is destroyed and can never deal damage.
     private EnemyHealth ownerEnemyHealth;
 
+    private Camera mainCamera;
+
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
         projectileCollider = GetComponent<Collider2D>();
-        spawnTime = Time.time;
 
         if (rb != null)
         {
@@ -112,11 +115,39 @@ public class NecromancerProjectile : MonoBehaviour
 
     void Update()
     {
-        if (!isDestroying && Time.time - spawnTime >= lifetime)
+        if (!isDestroying && IsOutsideCameraBounds())
         {
             DestroyProjectile(false);
             return;
         }
+    }
+
+    private bool IsOutsideCameraBounds()
+    {
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+        }
+
+        if (mainCamera == null)
+        {
+            return false;
+        }
+
+        float halfHeight = mainCamera.orthographicSize;
+        float halfWidth = halfHeight * mainCamera.aspect;
+
+        Vector3 camPos = mainCamera.transform.position;
+        Vector3 pos = transform.position;
+
+        float offset = Mathf.Max(0f, DestroyCameraOffset);
+
+        float left = camPos.x - halfWidth - offset;
+        float right = camPos.x + halfWidth + offset;
+        float bottom = camPos.y - halfHeight - offset;
+        float top = camPos.y + halfHeight + offset;
+
+        return pos.x < left || pos.x > right || pos.y < bottom || pos.y > top;
     }
 
     void FixedUpdate()

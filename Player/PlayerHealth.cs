@@ -13,6 +13,7 @@ public class PlayerHealth : MonoBehaviour, IDamageable
     [Tooltip("When checked, player is immune to all forms of damage")]
     [SerializeField] public bool immune = false;
     private float lastDamageTime = -999f;
+    private bool bypassInvulnerabilityOnce;
     
     [Header("Health Regeneration")]
     [Tooltip("Time between health regeneration ticks (in seconds)")]
@@ -169,6 +170,9 @@ public class PlayerHealth : MonoBehaviour, IDamageable
     {
         if (!IsAlive) return;
 
+        bool bypassInvulnerability = bypassInvulnerabilityOnce;
+        bypassInvulnerabilityOnce = false;
+
         bool hadIncomingDamage = damage > 0f || pendingAttacker != null;
 
         float scaledDamage = damage;
@@ -296,7 +300,7 @@ public class PlayerHealth : MonoBehaviour, IDamageable
         }
 
         // Check invulnerability (before immune check so invuln frames still work)
-        if (Time.time - lastDamageTime < invulnerabilityDuration)
+        if (!bypassInvulnerability && Time.time - lastDamageTime < invulnerabilityDuration)
         {
             return;
         }
@@ -491,6 +495,14 @@ public class PlayerHealth : MonoBehaviour, IDamageable
             {
                 if (reducedToZeroByArmor)
                 {
+                    if (!isStatusTick && DamageNumberManager.Instance != null)
+                    {
+                        var damageType = woundAppliedToPlayerDamage
+                            ? DamageNumberManager.DamageType.Wound
+                            : DamageNumberManager.DamageType.Player;
+                        DamageNumberManager.Instance.ShowDamage(0f, hitPoint, damageType);
+                    }
+
                     if (favourManager != null)
                     {
                         favourManager.NotifyPlayerDamageFinalized(attacker, 0f, isStatusTick, isAoeDamage);
@@ -557,6 +569,12 @@ public class PlayerHealth : MonoBehaviour, IDamageable
         {
             Die();
         }
+    }
+
+    public void TakeDamageBypassInvulnerability(float damage, Vector3 hitPoint, Vector3 hitNormal)
+    {
+        bypassInvulnerabilityOnce = true;
+        TakeDamage(damage, hitPoint, hitNormal);
     }
 
     public void Damage(float amount)

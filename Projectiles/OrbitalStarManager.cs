@@ -2493,8 +2493,7 @@ public class OrbitalStarManager : MonoBehaviour
         shared.pierceCount = Mathf.RoundToInt(0.5f * (novaStats.pierceCount + dwarfStats.pierceCount));
         shared.pierceAccumulator = 0.5f * (novaStats.pierceAccumulator + dwarfStats.pierceAccumulator);
         shared.lifetimeIncrease = 0.5f * (novaStats.lifetimeIncrease + dwarfStats.lifetimeIncrease);
-        shared.cooldownReductionPercent = 0.5f * (novaStats.cooldownReductionPercent + dwarfStats.cooldownReductionPercent);
-        shared.cooldownMultiplier = 0.5f * (novaStats.cooldownMultiplier + dwarfStats.cooldownMultiplier);
+        shared.cooldownReductionSeconds = 0.5f * (novaStats.cooldownReductionSeconds + dwarfStats.cooldownReductionSeconds);
         shared.manaCostReduction = 0.5f * (novaStats.manaCostReduction + dwarfStats.manaCostReduction);
         shared.damageFlat = 0.5f * (novaStats.damageFlat + dwarfStats.damageFlat);
         shared.damageMultiplier = 0.5f * (novaStats.damageMultiplier + dwarfStats.damageMultiplier);
@@ -2536,9 +2535,9 @@ public class OrbitalStarManager : MonoBehaviour
 
         Debug.Log(
             $"<color=cyan>[OrbitalStarManager] Shared Star Modifiers</color> " +
-            $"Nova(speed={novaStats.speedIncrease:F2}, radius={novaStats.damageRadiusIncrease:F2}, cd%={novaStats.cooldownReductionPercent:F2}) | " +
-            $"Dwarf(speed={dwarfStats.speedIncrease:F2}, radius={dwarfStats.damageRadiusIncrease:F2}, cd%={dwarfStats.cooldownReductionPercent:F2}) | " +
-            $"Shared(speed={shared.speedIncrease:F2}, radius={shared.damageRadiusIncrease:F2}, cd%={shared.cooldownReductionPercent:F2})"
+            $"Nova(speed={novaStats.speedIncrease:F2}, radius={novaStats.damageRadiusIncrease:F2}, cd-={novaStats.cooldownReductionSeconds:F2}s) | " +
+            $"Dwarf(speed={dwarfStats.speedIncrease:F2}, radius={dwarfStats.damageRadiusIncrease:F2}, cd-={dwarfStats.cooldownReductionSeconds:F2}s) | " +
+            $"Shared(speed={shared.speedIncrease:F2}, radius={shared.damageRadiusIncrease:F2}, cd-={shared.cooldownReductionSeconds:F2}s)"
         );
     }
     

@@ -105,7 +105,7 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
         }
 
         float finalLifetime = baseLifetime + modifiers.lifetimeIncrease;
-        float finalCooldown = Mathf.Max(0.1f, cooldown * (1f - modifiers.cooldownReductionPercent / 100f));
+        float finalCooldown = Mathf.Max(0.1f, cooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         int finalManaCost = Mathf.Max(1, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
         float finalDamage = (baseDamage + modifiers.damageFlat) * modifiers.damageMultiplier;
 
@@ -123,8 +123,9 @@ public class ClawProjectile : MonoBehaviour, IInstantModifiable
         float effectiveCooldown = finalCooldown;
         if (cachedPlayerStats != null)
         {
+            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
             float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown = finalCooldown * multiplier;
+            effectiveCooldown *= multiplier;
 
             if (MinCooldownManager.Instance != null && card != null)
             {

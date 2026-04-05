@@ -123,8 +123,8 @@ public class ProjectileModifierData
                     desc = $"+{value:F1}s Lifetime";
                     break;
                 case ModifierType.CooldownReduction:
-                    // Show decimals for values < 1
-                    desc = value < 1f ? $"-{value:F2}% Cooldown" : $"-{value:F0}% Cooldown";
+                    // Flat seconds reduction
+                    desc = value < 1f ? $"-{value:F2}s Cooldown" : (value < 10f ? $"-{value:F1}s Cooldown" : $"-{value:F0}s Cooldown");
                     break;
                 case ModifierType.ManaCostReduction:
                     // Show decimals for values < 1
@@ -210,7 +210,7 @@ public class ProjectileModifierData
             case ModifierType.LifetimeIncrease:
                 return format.Replace("{value}", $"+{value:F1}s").Replace("{type}", "Lifetime");
             case ModifierType.CooldownReduction:
-                return format.Replace("{value}", value < 1f ? $"-{value:F2}%" : $"-{value:F0}%").Replace("{type}", "Cooldown");
+                return format.Replace("{value}", value < 1f ? $"-{value:F2}s" : (value < 10f ? $"-{value:F1}s" : $"-{value:F0}s")).Replace("{type}", "Cooldown");
             case ModifierType.ManaCostReduction:
                 return format.Replace("{value}", value < 1f ? $"-{value:F2}%" : $"-{value:F0}%").Replace("{type}", "Mana Cost");
             case ModifierType.DamageIncrease:
@@ -262,7 +262,7 @@ public class ProjectileModifierData
                 stats.projectileLifetimeBonus += value; // Raw value in seconds
                 break;
             case ModifierType.CooldownReduction:
-                stats.Cooldown -= Mathf.Max(0f, value);
+                stats.projectileCooldownReduction += Mathf.Max(0f, value);
                 break;
             case ModifierType.ManaCostReduction:
                 stats.projectileManaCostReduction += value / 100f;

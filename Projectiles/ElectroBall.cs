@@ -9,14 +9,13 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
 {
     [Header("Motion")]
     [SerializeField] private float speed = 15f;
-    [SerializeField] private float lifetimeSeconds = 5f;
 
     [Header("Rendering")]
     public int NewOrderInLayer = 1;
 
     [Header("Offscreen Destruction")]
     [Tooltip("Bonus destroy boundary size (world units). If projectile goes outside the camera bounds plus this value, it is destroyed immediately.")]
-    public float DestroyCameraOffset = 0f;
+    public float DestroyCameraOffset = 5f;
 
     [Header("Spawn Offset - Left Side")]
     [Tooltip("Spawn offset when firing left at angle ABOVE 45 degrees")]
@@ -100,7 +99,6 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
     private Camera mainCamera;
 
     private float baseSpeed;
-    private float baseLifetime;
     private float baseDamage;
     private float baseExplosionRadius;
     private Vector2 baseExplosionOffset;
@@ -152,7 +150,6 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         cachedStaticEffect = GetComponent<StaticEffect>();
 
         baseSpeed = speed;
-        baseLifetime = lifetimeSeconds;
         baseDamage = damage;
         baseExplosionRadius = ExplosionRadius;
         baseExplosionOffset = ExplosionRadiusOffset;
@@ -651,7 +648,7 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
             card.runtimeSpawnInterval = Mathf.Max(0.0001f, baseCooldown);
         }
 
-        float finalCooldown = baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f);
+        float finalCooldown = Mathf.Max(0.01f, baseCooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         if (MinCooldownManager.Instance != null)
         {
             finalCooldown = MinCooldownManager.Instance.ClampCooldown(card, finalCooldown);
@@ -662,7 +659,6 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         }
 
         float finalSpeed = speed + modifiers.speedIncrease;
-        float finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease;
         float finalDamage = damage + modifiers.damageFlat;
 
         float totalSizeMultiplier = modifiers.sizeMultiplier;
@@ -695,8 +691,9 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         float effectiveCooldown = finalCooldown;
         if (cachedPlayerStats != null)
         {
+            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
             float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown = finalCooldown * multiplier;
+            effectiveCooldown *= multiplier;
 
             if (MinCooldownManager.Instance != null && card != null)
             {
@@ -712,7 +709,6 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
 
         damage = finalDamage;
         speed = finalSpeed;
-        lifetimeSeconds = finalLifetime;
 
         prefabKey = "ElectroBall_" + projectileType;
 
@@ -770,8 +766,6 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
 
         rotateToVelocity = false;
         transform.rotation = Quaternion.identity;
-
-        PauseSafeSelfDestruct.Schedule(gameObject, finalLifetime);
     }
 
     private void OnTriggerEnter2D(Collider2D other)
@@ -1041,12 +1035,6 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
                     _rigidbody2D.velocity = v.normalized * speed;
                 }
             }
-        }
-
-        float nl = baseLifetime + mods.lifetimeIncrease;
-        if (nl != lifetimeSeconds)
-        {
-            lifetimeSeconds = nl;
         }
 
         float nd = baseDamage + mods.damageFlat;

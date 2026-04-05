@@ -12,6 +12,9 @@ public class ProjectileCardLevelSystem : MonoBehaviour
     [Header("Level Settings")]
     [Tooltip("Level required to unlock enhanced variants")]
     [SerializeField] private int enhancedUnlockLevel = 10;
+
+    [Tooltip("Additional levels required AFTER unlocking all normal variants to unlock the Ultimate enhancement option.")]
+    public int UltimateEnhancedUnlockLevel = 15;
     
     [Header("Level Gains by Rarity")]
     [SerializeField] private int commonLevelGain = 1;
@@ -44,6 +47,9 @@ public class ProjectileCardLevelSystem : MonoBehaviour
     
     // Track selected enhanced variant for each CARD NAME (1-3, 0 = none/basic)
     private Dictionary<string, int> selectedEnhancedVariants = new Dictionary<string, int>();
+
+    // Track whether the Ultimate enhancement is selected for each CARD NAME.
+    private Dictionary<string, bool> ultimateEnhancementsSelected = new Dictionary<string, bool>();
 
     // Track how many enhancement tiers have been REACHED (level / enhancedUnlockLevel)
     // for each card name. This lets us fire a variant selection exactly once per tier.
@@ -95,27 +101,104 @@ public class ProjectileCardLevelSystem : MonoBehaviour
         // Check if enhanced unlocked and AUTO-APPLY (with hook for variant selection)
         if (enhancedUnlockLevel > 0)
         {
-            int oldTier = oldLevel / enhancedUnlockLevel;
-            int newTier = newLevel / enhancedUnlockLevel;
-
-            int oldClampedTier = Mathf.Clamp(oldTier, 0, 4);
-            int newClampedTier = Mathf.Clamp(newTier, 0, 4);
-
-            if (newClampedTier > oldClampedTier)
+            int normalVariantCount = GetNormalVariantCountForCard(card);
+            if (normalVariantCount <= 0)
             {
-                int clampedTier = Mathf.Clamp(newTier, 1, 4);
-                cardTiers[cardKey] = clampedTier;
+                normalVariantCount = 3;
+            }
 
-                Debug.Log($"<color=gold>★★★ {cardKey} ENHANCED TIER {clampedTier} REACHED! (Level {newLevel}/{enhancedUnlockLevel}x{clampedTier}) ★★★</color>");
+            int oldTier = Mathf.Clamp(oldLevel / enhancedUnlockLevel, 0, normalVariantCount);
+            int newTier = Mathf.Clamp(newLevel / enhancedUnlockLevel, 0, normalVariantCount);
 
-                // Defer actual variant choice to CardSelectionManager (variant selection UI)
-                // so the player can pick which variant they want for this tier.
-                if (OnCardTierIncreased != null)
+            if (newTier > oldTier)
+            {
+                for (int t = oldTier + 1; t <= newTier; t++)
                 {
-                    OnCardTierIncreased(card, clampedTier);
+                    cardTiers[cardKey] = t;
+                    Debug.Log($"<color=gold>★★★ {cardKey} ENHANCED TIER {t} REACHED! (Level {newLevel}/{enhancedUnlockLevel}x{t}) ★★★</color>");
+
+                    if (OnCardTierIncreased != null)
+                    {
+                        OnCardTierIncreased(card, t);
+                    }
+                }
+            }
+
+            int ultimateTier = normalVariantCount + 1;
+            if (UltimateEnhancedUnlockLevel > 0 && CardHasUltimateVariant(card))
+            {
+                int unlockAt = (normalVariantCount * enhancedUnlockLevel) + UltimateEnhancedUnlockLevel;
+                bool oldUnlocked = oldLevel >= unlockAt;
+                bool newUnlocked = newLevel >= unlockAt;
+
+                if (!oldUnlocked && newUnlocked)
+                {
+                    Debug.Log($"<color=gold>★★★ {cardKey} ULTIMATE ENHANCEMENT UNLOCKED! (Level {newLevel}/{unlockAt}) ★★★</color>");
+                    if (OnCardTierIncreased != null)
+                    {
+                        OnCardTierIncreased(card, ultimateTier);
+                    }
                 }
             }
         }
+    }
+
+    private int GetNormalVariantCountForCard(ProjectileCards card)
+    {
+        if (card == null)
+        {
+            return 0;
+        }
+
+        if (CardSelectionManager.Instance == null)
+        {
+            return 0;
+        }
+
+        ProjectileVariantSet set = CardSelectionManager.Instance.GetVariantSetForCard(card);
+        if (set == null || set.variants == null)
+        {
+            return 0;
+        }
+
+        HashSet<int> indices = new HashSet<int>();
+        for (int i = 0; i < set.variants.Length; i++)
+        {
+            var info = set.variants[i];
+            if (info == null) continue;
+            if (info.variantIndex <= 0) continue;
+            indices.Add(info.variantIndex);
+        }
+
+        return indices.Count;
+    }
+
+    private bool CardHasUltimateVariant(ProjectileCards card)
+    {
+        if (card == null)
+        {
+            return false;
+        }
+
+        if (CardSelectionManager.Instance == null)
+        {
+            return false;
+        }
+
+        ProjectileVariantSet set = CardSelectionManager.Instance.GetVariantSetForCard(card);
+        if (set == null || set.variants == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < set.variants.Length; i++)
+        {
+            var info = set.variants[i];
+            if (info == null) continue;
+            if (info.variantIndex == 0) return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -155,6 +238,11 @@ public class ProjectileCardLevelSystem : MonoBehaviour
         if (card == null) return;
         
         string cardKey = card.cardName;
+
+        if (ultimateEnhancementsSelected.ContainsKey(cardKey))
+        {
+            ultimateEnhancementsSelected[cardKey] = false;
+        }
         int storedVariant = variantIndex;
         if (card.projectileType == ProjectileCards.ProjectileType.HolyShield)
         {
@@ -294,6 +382,49 @@ public class ProjectileCardLevelSystem : MonoBehaviour
         }
         return 0; // Default to basic/none
     }
+
+    public void SetUltimateEnhancementSelected(ProjectileCards card, bool selected)
+    {
+        if (card == null) return;
+
+        string cardKey = card.cardName;
+        ultimateEnhancementsSelected[cardKey] = selected;
+    }
+
+    public bool IsUltimateEnhancementSelected(ProjectileCards card)
+    {
+        if (card == null) return false;
+
+        string cardKey = card.cardName;
+        if (ultimateEnhancementsSelected.TryGetValue(cardKey, out bool selected))
+        {
+            return selected;
+        }
+        return false;
+    }
+
+    public bool IsUltimateTierSelection(ProjectileCards card, int tier)
+    {
+        if (card == null) return false;
+        if (enhancedUnlockLevel <= 0) return false;
+        if (UltimateEnhancedUnlockLevel <= 0) return false;
+        if (!CardHasUltimateVariant(card)) return false;
+
+        int normalVariantCount = GetNormalVariantCountForCard(card);
+        if (normalVariantCount <= 0)
+        {
+            normalVariantCount = 3;
+        }
+
+        int ultimateTier = normalVariantCount + 1;
+        if (tier != ultimateTier)
+        {
+            return false;
+        }
+
+        int unlockAt = (normalVariantCount * enhancedUnlockLevel) + UltimateEnhancedUnlockLevel;
+        return GetLevel(card) >= unlockAt;
+    }
     
     /// <summary>
     /// Check if a specific variant index (1-3) has EVER been chosen for this card.
@@ -367,6 +498,7 @@ public class ProjectileCardLevelSystem : MonoBehaviour
     {
         cardLevels.Clear();
         selectedEnhancedVariants.Clear();
+        ultimateEnhancementsSelected.Clear();
         chosenVariantHistory.Clear();
         Debug.Log("<color=yellow>All card levels reset!</color>");
     }

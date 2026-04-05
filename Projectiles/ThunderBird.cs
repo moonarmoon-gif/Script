@@ -8,8 +8,10 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 {
     [Header("Bird Settings")]
     [SerializeField] private float flySpeed = 8f;
-    [Tooltip("Time before bird is destroyed after spawning")]
-    [SerializeField] private float lifetimeSeconds = 10f;
+
+    [Header("Offscreen Destruction")]
+    [Tooltip("Bonus destroy boundary size (world units). If projectile goes outside the camera bounds plus this value, it is destroyed immediately.")]
+    public float DestroyCameraOffset = 5f;
 
     [Header("Strike Zone")]
     [Tooltip("Radius of the damage zone around the bird")]
@@ -67,7 +69,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
     private Animator _animator;
     private bool isMovingRight = true;
     private Camera mainCamera;
-    private float spawnTime;
 
     private HashSet<GameObject> damagedEnemies = new HashSet<GameObject>();
     private Dictionary<GameObject, float> pendingDamageEnemies = new Dictionary<GameObject, float>();
@@ -118,14 +119,10 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
     private float baseFlySpeed;
     private float baseStrikeZoneRadius;
-    private float baseLifetimeSeconds;
     private float baseDamage;
     private Vector3 baseScale;
     private PlayerStats cachedPlayerStats;
     private float baseDamageAfterCards;
-
-    [Header("Offscreen Destruction Grace Periods")]
-    public float baseGracePeriod = 10f;
 
     // Enhanced system
     private int enhancedVariant = 0;
@@ -354,7 +351,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         _rigidbody2D = GetComponent<Rigidbody2D>();
         _collider2D = GetComponent<Collider2D>();
         mainCamera = Camera.main;
-        spawnTime = Time.time;
 
         _audioSource = GetComponent<AudioSource>();
         if (_audioSource == null) _audioSource = gameObject.AddComponent<AudioSource>();
@@ -449,7 +445,6 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
         baseFlySpeed = flySpeed;
         baseStrikeZoneRadius = strikeZoneRadius;
-        baseLifetimeSeconds = lifetimeSeconds;
         baseDamage = damage;
         baseScale = transform.localScale;
 
@@ -505,8 +500,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
             baseCooldown *= v1CooldownMult;
         }
 
-        float finalLifetime = lifetimeSeconds + modifiers.lifetimeIncrease;
-        float finalCooldown = baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f);
+        float finalCooldown = Mathf.Max(0.01f, baseCooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         if (MinCooldownManager.Instance != null)
         {
             finalCooldown = MinCooldownManager.Instance.ClampCooldown(card, finalCooldown);
@@ -563,8 +557,9 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         float effectiveCooldown = finalCooldown;
         if (cachedPlayerStats != null)
         {
+            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
             float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown = finalCooldown * multiplier;
+            effectiveCooldown *= multiplier;
 
             if (MinCooldownManager.Instance != null && card != null)
             {
@@ -654,41 +649,24 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
             pre = gameObject.AddComponent<PredeterminedStatusRoll>();
         }
 
-        StartCoroutine(FlyRoutine(finalLifetime));
+        StartCoroutine(FlyRoutine());
         StartCoroutine(DamageDetectionRoutine());
     }
 
-    private IEnumerator FlyRoutine(float lifetime)
+    private IEnumerator FlyRoutine()
     {
-        float elapsedTime = 0f;
-
-        float gracePeriod = baseGracePeriod;
-        if (variant1Component != null && variant1Component.IsActive)
-        {
-            gracePeriod = variant1Component.GetGracePeriod(baseGracePeriod);
-        }
-
-        if (variant2Component != null && variant2Component.IsActive)
-        {
-            gracePeriod = Mathf.Max(gracePeriod, variant2Component.GetGracePeriod(baseGracePeriod));
-        }
-
-        while (elapsedTime < lifetime)
+        while (true)
         {
             Vector2 direction = isMovingRight ? Vector2.right : Vector2.left;
             _rigidbody2D.velocity = direction * flySpeed;
 
-            if (Time.time - spawnTime > gracePeriod && IsOffScreen())
+            if (IsOutsideCameraBounds())
             {
                 Destroy(gameObject);
                 yield break;
             }
-
-            elapsedTime += Time.deltaTime;
             yield return null;
         }
-
-        Destroy(gameObject);
     }
 
     private IEnumerator DamageDetectionRoutine()
@@ -731,8 +709,19 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                 bool alreadyDamaged = damagedEnemies.Contains(enemyRoot);
                 if (pendingDamageEnemies.ContainsKey(enemyRoot)) continue;
 
-                IDamageable damageable = enemyRoot.GetComponent<IDamageable>() ?? enemyRoot.GetComponentInParent<IDamageable>();
-                if (damageable == null || !damageable.IsAlive) continue;
+                IDamageable damageable;
+                EnemyHealth enemyHealth;
+                GameObject damageObject;
+                if (!TryGetCachedEnemyData(enemyRoot, out damageable, out enemyHealth, out damageObject) || damageable == null)
+                {
+                    pendingDamageEnemies.Remove(enemyRoot);
+                    continue;
+                }
+                if (!damageable.IsAlive)
+                {
+                    pendingDamageEnemies.Remove(enemyRoot);
+                    continue;
+                }
 
                 bool canRollVariant2 = isVariant2Active && variant2Component != null && variant2Component.IsActive && !variant2RolledEnemies.Contains(enemyRoot);
                 if (canRollVariant2)
@@ -754,7 +743,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
                 if (alreadyDamaged) continue;
 
-                pendingDamageEnemies[enemyRoot] = Time.time + damageDelay;
+                pendingDamageEnemies[enemyRoot] = GameStateManager.PauseSafeTime + damageDelay;
 
                 // Early strike VFX (follows collider, preserves per-enemy offsets, freezes on death)
                 if (strikeEffectTimingAdjustment > 0f && strikeEffectPrefab != null)
@@ -776,7 +765,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
             List<GameObject> enemiesToDamage = new List<GameObject>();
             foreach (var kvp in pendingDamageEnemies)
             {
-                if (Time.time >= kvp.Value) enemiesToDamage.Add(kvp.Key);
+                if (GameStateManager.PauseSafeTime >= kvp.Value) enemiesToDamage.Add(kvp.Key);
             }
 
             foreach (GameObject enemy in enemiesToDamage)
@@ -787,8 +776,15 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                     continue;
                 }
 
-                IDamageable damageable = enemy.GetComponent<IDamageable>() ?? enemy.GetComponentInParent<IDamageable>();
-                if (damageable == null || !damageable.IsAlive)
+                IDamageable damageable;
+                EnemyHealth enemyHealth;
+                GameObject damageObject;
+                if (!TryGetCachedEnemyData(enemy, out damageable, out enemyHealth, out damageObject) || damageable == null)
+                {
+                    pendingDamageEnemies.Remove(enemy);
+                    continue;
+                }
+                if (!damageable.IsAlive)
                 {
                     pendingDamageEnemies.Remove(enemy);
                     continue;
@@ -800,7 +796,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
                 float baseDamageForEnemy = baseDamageAfterCards > 0f ? baseDamageAfterCards : damage;
                 float finalDamage = baseDamageForEnemy;
 
-                GameObject enemyObj = enemy;
+                GameObject enemyObj = damageObject != null ? damageObject : enemy;
                 if (cachedPlayerStats != null)
                 {
                     finalDamage = PlayerDamageHelper.ComputeContinuousProjectileDamage(cachedPlayerStats, enemyObj, baseDamageForEnemy, gameObject);
@@ -877,7 +873,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
     private IEnumerator SpawnDelayedEffectFollowCollider(Collider2D followCollider, Vector3 positionAtSchedule, float delay, float sizeMultiplier)
     {
-        yield return new WaitForSeconds(delay);
+        yield return GameStateManager.WaitForPauseSafeSeconds(delay);
         if (strikeEffectPrefab == null || followCollider == null) yield break;
         SpawnStrikeEffectFollowing(followCollider, positionAtSchedule, sizeMultiplier);
     }
@@ -956,7 +952,7 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
 
             if (damageDelay > 0f)
             {
-                yield return new WaitForSeconds(damageDelay);
+                yield return GameStateManager.WaitForPauseSafeSeconds(damageDelay);
             }
 
             bool playedStrikeSound = false;
@@ -1112,15 +1108,32 @@ public class ThunderBird : MonoBehaviour, IInstantModifiable
         }
     }
 
-    private bool IsOffScreen()
+    private bool IsOutsideCameraBounds()
     {
-        if (minPos == null || maxPos == null) return false;
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+        }
 
-        float leftBoundary = minPos.position.x;
-        float rightBoundary = maxPos.position.x;
-        float x = transform.position.x;
+        if (mainCamera == null)
+        {
+            return false;
+        }
 
-        return isMovingRight ? x > rightBoundary : x < leftBoundary;
+        float halfHeight = mainCamera.orthographicSize;
+        float halfWidth = halfHeight * mainCamera.aspect;
+
+        Vector3 camPos = mainCamera.transform.position;
+        Vector3 pos = transform.position;
+
+        float offset = Mathf.Max(0f, DestroyCameraOffset);
+
+        float left = camPos.x - halfWidth - offset;
+        float right = camPos.x + halfWidth + offset;
+        float bottom = camPos.y - halfHeight - offset;
+        float top = camPos.y + halfHeight + offset;
+
+        return pos.x < left || pos.x > right || pos.y < bottom || pos.y > top;
     }
 
     public bool CheckBirdOverlap(Vector3 testPosition)

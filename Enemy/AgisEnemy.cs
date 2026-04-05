@@ -19,9 +19,14 @@ public class AgisEnemy : MonoBehaviour
     public float DeathDuration = 1f;
 
     public float PortalStartDuration = 1f;
-    public float PortalSpawnTimer = 1.25f;
+    public float PortalAnimationTimer = 1.25f;
     public float SpawnDelay = 0.25f;
     public float EnemySpawnInterval = 1f;
+
+    public float BuffDebuffMinTimer = 5f;
+    public float BuffDebuffMaxTimer = 10f;
+
+    public int PortalsSpawnedPerCast = 0;
 
     public GameObject PortalPrefab;
 
@@ -38,6 +43,17 @@ public class AgisEnemy : MonoBehaviour
         public Vector2 Offset;
     }
 
+    [System.Serializable]
+    public class GlobalStatusEffect
+    {
+        public StatusId statusId;
+        public int stacks;
+        public float durationSeconds;
+        public bool applyToPlayer;
+        public bool applyToAllEnemies;
+        public bool includeBossEnemies;
+    }
+
     public List<SummoningPortalEntry> SummoningPortals = new List<SummoningPortalEntry>();
 
     public List<EnemyWaveEntry> CommonEnemyWave = new List<EnemyWaveEntry>();
@@ -47,11 +63,36 @@ public class AgisEnemy : MonoBehaviour
     public List<EnemyWaveEntry> LegendaryEnemyWave = new List<EnemyWaveEntry>();
     public List<EnemyWaveEntry> MythicEnemyWave = new List<EnemyWaveEntry>();
 
+    public GlobalStatusEffect Attack2GlobalEffect = new GlobalStatusEffect();
+    public GlobalStatusEffect Attack4GlobalEffect = new GlobalStatusEffect();
+    public GlobalStatusEffect Attack5GlobalEffect = new GlobalStatusEffect();
+
     private Animator animator;
     private EnemyHealth enemyHealth;
     private EnemyCardSpawner enemyCardSpawner;
 
     private Coroutine startupRoutine;
+    private Coroutine buffDebuffRoutine;
+
+    private bool attackInProgress;
+    private Coroutine thresholdAttackRoutine;
+    private int queuedAttack3Count;
+    private bool threshold75Triggered;
+    private bool threshold50Triggered;
+    private bool threshold25Triggered;
+
+    private sealed class ActiveSummoningPortal
+    {
+        public GameObject portalInstance;
+        public Vector3 portalWorldPosition;
+        public bool invertOffsetX;
+        public EnemyWaveEntry enemyEntry;
+        public CardRarity rarity;
+    }
+
+    private readonly List<ActiveSummoningPortal> activePortals = new List<ActiveSummoningPortal>();
+    private CardRarity currentPortalRarity = CardRarity.Common;
+    private bool portalSummoningPaused;
 
     private void Awake()
     {
@@ -62,6 +103,7 @@ public class AgisEnemy : MonoBehaviour
         if (enemyHealth != null)
         {
             enemyHealth.OnDeath += HandleDeath;
+            enemyHealth.OnHealthChanged += HandleHealthChanged;
         }
 
         ApplySpawnPointOffset();
@@ -81,6 +123,7 @@ public class AgisEnemy : MonoBehaviour
         if (enemyHealth != null)
         {
             enemyHealth.OnDeath -= HandleDeath;
+            enemyHealth.OnHealthChanged -= HandleHealthChanged;
         }
     }
 
@@ -142,15 +185,433 @@ public class AgisEnemy : MonoBehaviour
             yield return null;
         }
 
-        StartCoroutine(PlayAttack1Routine());
+        yield return PlayAttack1SequenceRoutine();
 
-        float portalSpawnDelay = Mathf.Max(0f, PortalSpawnTimer);
+        if (buffDebuffRoutine != null)
+        {
+            StopCoroutine(buffDebuffRoutine);
+        }
+        buffDebuffRoutine = StartCoroutine(BuffDebuffAttackLoopRoutine());
+    }
+
+    private IEnumerator BuffDebuffAttackLoopRoutine()
+    {
+        while (enemyHealth != null && enemyHealth.IsAlive)
+        {
+            while (attackInProgress && enemyHealth != null && enemyHealth.IsAlive)
+            {
+                yield return null;
+            }
+
+            float min = Mathf.Max(0f, BuffDebuffMinTimer);
+            float max = Mathf.Max(min, BuffDebuffMaxTimer);
+            float delay = UnityEngine.Random.Range(min, max);
+            if (delay > 0f)
+            {
+                yield return GameStateManager.WaitForPauseSafeSeconds(delay);
+            }
+            else
+            {
+                yield return null;
+            }
+
+            if (enemyHealth == null || !enemyHealth.IsAlive)
+            {
+                yield break;
+            }
+
+            int roll = UnityEngine.Random.Range(0, 4);
+            switch (roll)
+            {
+                case 0:
+                    yield return PlayAttack1SequenceRoutine();
+                    break;
+                case 1:
+                    yield return PlayAttackRoutine("attack2", Mathf.Max(0f, Attack2Duration));
+                    break;
+                case 2:
+                    yield return PlayAttackRoutine("attack4", Mathf.Max(0f, Attack4Duration));
+                    break;
+                default:
+                    yield return PlayAttackRoutine("attack5", Mathf.Max(0f, Attack5Duration));
+                    break;
+            }
+        }
+    }
+
+    private IEnumerator PlayAttackRoutine(string attackParam, float duration)
+    {
+        if (duration <= 0f || animator == null)
+        {
+            yield break;
+        }
+
+        while (attackInProgress && enemyHealth != null && enemyHealth.IsAlive)
+        {
+            yield return null;
+        }
+
+        attackInProgress = true;
+
+        try
+        {
+            if (string.Equals(attackParam, "attack1", StringComparison.OrdinalIgnoreCase))
+            {
+                StartCoroutine(SpawnPortalAfterDelayRoutine());
+            }
+            else if (string.Equals(attackParam, "attack2", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyGlobalStatusEffect(Attack2GlobalEffect);
+            }
+            else if (string.Equals(attackParam, "attack4", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyGlobalStatusEffect(Attack4GlobalEffect);
+            }
+            else if (string.Equals(attackParam, "attack5", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyGlobalStatusEffect(Attack5GlobalEffect);
+            }
+
+            if (HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
+            {
+                animator.SetBool("idle", false);
+            }
+
+            if (HasAnimatorParameter(animator, attackParam, AnimatorControllerParameterType.Trigger))
+            {
+                animator.SetTrigger(attackParam);
+            }
+            else if (HasAnimatorParameter(animator, attackParam, AnimatorControllerParameterType.Bool))
+            {
+                animator.SetBool(attackParam, true);
+            }
+
+            yield return GameStateManager.WaitForPauseSafeSeconds(duration);
+
+            if (animator != null && HasAnimatorParameter(animator, attackParam, AnimatorControllerParameterType.Bool))
+            {
+                animator.SetBool(attackParam, false);
+            }
+
+            if (animator != null && HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
+            {
+                animator.SetBool("idle", true);
+            }
+        }
+        finally
+        {
+            attackInProgress = false;
+        }
+    }
+
+    private int GetAttack1RepeatCount()
+    {
+        return Mathf.Max(1, PortalsSpawnedPerCast);
+    }
+
+    private IEnumerator PlayAttack1SequenceRoutine()
+    {
+        int repeats = GetAttack1RepeatCount();
+        for (int i = 0; i < repeats; i++)
+        {
+            yield return PlayAttackRoutine("attack1", Mathf.Max(0f, Attack1Duration));
+        }
+    }
+
+    private List<EnemyWaveEntry> GetWaveForRarity(CardRarity rarity)
+    {
+        switch (rarity)
+        {
+            case CardRarity.Uncommon:
+                return UncommonEnemyWave;
+            case CardRarity.Rare:
+                return RareEnemyWave;
+            case CardRarity.Epic:
+                return EpicEnemyWave;
+            case CardRarity.Legendary:
+                return LegendaryEnemyWave;
+            case CardRarity.Mythic:
+                return MythicEnemyWave;
+            default:
+                return CommonEnemyWave;
+        }
+    }
+
+    private static List<EnemyWaveEntry> FilterValidWaveEntries(List<EnemyWaveEntry> waveEntries)
+    {
+        List<EnemyWaveEntry> enemies = new List<EnemyWaveEntry>();
+        if (waveEntries == null)
+        {
+            return enemies;
+        }
+
+        for (int i = 0; i < waveEntries.Count; i++)
+        {
+            EnemyWaveEntry entry = waveEntries[i];
+            if (entry == null) continue;
+            if (string.IsNullOrWhiteSpace(entry.EnemyName)) continue;
+            enemies.Add(entry);
+        }
+
+        return enemies;
+    }
+
+    private EnemyWaveEntry GetRandomEnemyEntryForCurrentRarity()
+    {
+        List<EnemyWaveEntry> enemies = FilterValidWaveEntries(GetWaveForRarity(currentPortalRarity));
+        if (enemies.Count == 0)
+        {
+            return null;
+        }
+
+        int idx = UnityEngine.Random.Range(0, enemies.Count);
+        return enemies[idx];
+    }
+
+    private void UpgradePortalRarity()
+    {
+        int current = (int)currentPortalRarity;
+        int next = Mathf.Clamp(current + 1, (int)CardRarity.Common, (int)CardRarity.Mythic);
+        currentPortalRarity = (CardRarity)next;
+
+        EnemyWaveEntry replacement = GetRandomEnemyEntryForCurrentRarity();
+        if (replacement == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < activePortals.Count; i++)
+        {
+            ActiveSummoningPortal portal = activePortals[i];
+            if (portal == null)
+            {
+                continue;
+            }
+
+            portal.rarity = currentPortalRarity;
+            portal.enemyEntry = GetRandomEnemyEntryForCurrentRarity();
+        }
+    }
+
+    private IEnumerator SpawnPortalAfterDelayRoutine()
+    {
+        float portalSpawnDelay = Mathf.Max(0f, PortalAnimationTimer);
         if (portalSpawnDelay > 0f)
         {
             yield return GameStateManager.WaitForPauseSafeSeconds(portalSpawnDelay);
         }
 
-        SpawnEnemyWave(CommonEnemyWave, CardRarity.Common);
+        if (enemyHealth == null || !enemyHealth.IsAlive)
+        {
+            yield break;
+        }
+
+        EnemyWaveEntry entry = GetRandomEnemyEntryForCurrentRarity();
+        if (entry == null)
+        {
+            yield break;
+        }
+
+        SpawnSinglePortal(entry, currentPortalRarity);
+    }
+
+    private void SpawnSinglePortal(EnemyWaveEntry entry, CardRarity rarity)
+    {
+        if (entry == null)
+        {
+            return;
+        }
+
+        if (SummoningPortals == null || SummoningPortals.Count == 0)
+        {
+            return;
+        }
+
+        List<SummoningPortalEntry> portalCandidates = new List<SummoningPortalEntry>();
+        for (int i = 0; i < SummoningPortals.Count; i++)
+        {
+            SummoningPortalEntry p = SummoningPortals[i];
+            if (p == null || p.PortalPosition == null) continue;
+            portalCandidates.Add(p);
+        }
+        if (portalCandidates.Count == 0)
+        {
+            return;
+        }
+
+        List<SummoningPortalEntry> selectedPortals = SelectPortalsWithSideSplit(portalCandidates, 1);
+        if (selectedPortals == null || selectedPortals.Count == 0)
+        {
+            return;
+        }
+
+        float referenceX = 0f;
+        if (AdvancedPlayerController.Instance != null)
+        {
+            referenceX = AdvancedPlayerController.Instance.transform.position.x;
+        }
+        else if (Camera.main != null)
+        {
+            referenceX = Camera.main.transform.position.x;
+        }
+
+        SummoningPortalEntry portal = selectedPortals[0];
+        if (portal == null || portal.PortalPosition == null)
+        {
+            return;
+        }
+
+        Vector3 spawnPos = portal.PortalPosition.position;
+        bool isRightSide = spawnPos.x > referenceX;
+
+        GameObject portalInstance = null;
+        if (PortalPrefab != null)
+        {
+            portalInstance = Instantiate(PortalPrefab, spawnPos, Quaternion.identity);
+            SpriteRenderer[] renderers = portalInstance.GetComponentsInChildren<SpriteRenderer>(true);
+            if (renderers != null)
+            {
+                for (int r = 0; r < renderers.Length; r++)
+                {
+                    if (renderers[r] != null)
+                    {
+                        renderers[r].flipX = isRightSide;
+                    }
+                }
+            }
+        }
+
+        ActiveSummoningPortal active = new ActiveSummoningPortal
+        {
+            portalInstance = portalInstance,
+            portalWorldPosition = spawnPos,
+            invertOffsetX = isRightSide,
+            enemyEntry = entry,
+            rarity = rarity
+        };
+        activePortals.Add(active);
+
+        StartCoroutine(SpawnFromPortalRoutine(active));
+    }
+
+    private void ApplyGlobalStatusEffect(GlobalStatusEffect effect)
+    {
+        if (effect == null) return;
+
+        int stacks = Mathf.Max(0, effect.stacks);
+        if (stacks <= 0) return;
+
+        float duration = effect.durationSeconds;
+
+        if (effect.applyToPlayer)
+        {
+            AdvancedPlayerController player = AdvancedPlayerController.Instance;
+            if (player == null)
+            {
+                player = FindObjectOfType<AdvancedPlayerController>();
+            }
+
+            if (player != null)
+            {
+                StatusController sc = player.GetComponent<StatusController>();
+                if (sc != null)
+                {
+                    sc.AddStatus(effect.statusId, stacks, duration);
+                }
+            }
+        }
+
+        if (effect.applyToAllEnemies)
+        {
+            EnemyHealth[] enemies = FindObjectsOfType<EnemyHealth>();
+            for (int i = 0; i < enemies.Length; i++)
+            {
+                EnemyHealth e = enemies[i];
+                if (e == null || !e.IsAlive) continue;
+
+                if (!effect.includeBossEnemies)
+                {
+                    EnemyCardTag tag = e.GetComponent<EnemyCardTag>() ?? e.GetComponentInParent<EnemyCardTag>();
+                    if (tag != null && tag.rarity == CardRarity.Boss)
+                    {
+                        continue;
+                    }
+                }
+
+                StatusController sc = e.GetComponent<StatusController>();
+                if (sc == null) continue;
+
+                sc.AddStatus(effect.statusId, stacks, duration);
+            }
+        }
+    }
+
+    private void HandleHealthChanged(float current, float max)
+    {
+        if (enemyHealth == null || !enemyHealth.IsAlive) return;
+
+        float ratio = max > 0f ? current / max : 0f;
+
+        if (!threshold75Triggered && ratio <= 0.75f)
+        {
+            threshold75Triggered = true;
+            queuedAttack3Count++;
+        }
+
+        if (!threshold50Triggered && ratio <= 0.50f)
+        {
+            threshold50Triggered = true;
+            queuedAttack3Count++;
+        }
+
+        if (!threshold25Triggered && ratio <= 0.25f)
+        {
+            threshold25Triggered = true;
+            queuedAttack3Count++;
+        }
+
+        if (queuedAttack3Count > 0 && thresholdAttackRoutine == null)
+        {
+            thresholdAttackRoutine = StartCoroutine(ThresholdAttack3Routine());
+        }
+    }
+
+    private IEnumerator ThresholdAttack3Routine()
+    {
+        while (enemyHealth != null && enemyHealth.IsAlive && queuedAttack3Count > 0)
+        {
+            while (attackInProgress && enemyHealth != null && enemyHealth.IsAlive)
+            {
+                yield return null;
+            }
+
+            if (enemyHealth == null || !enemyHealth.IsAlive)
+            {
+                break;
+            }
+
+            if (queuedAttack3Count <= 0)
+            {
+                break;
+            }
+
+            queuedAttack3Count--;
+
+            portalSummoningPaused = true;
+
+            enemyHealth.SetImmuneToBossMenace(true);
+            yield return PlayAttackRoutine("attack3", Mathf.Max(0f, Attack3Duration));
+            if (enemyHealth != null)
+            {
+                enemyHealth.SetImmuneToBossMenace(false);
+            }
+
+            UpgradePortalRarity();
+            portalSummoningPaused = false;
+            yield return null;
+        }
+
+        thresholdAttackRoutine = null;
     }
 
     private IEnumerator PlayAttack1Routine()
@@ -210,7 +671,7 @@ public class AgisEnemy : MonoBehaviour
         return false;
     }
 
-    private void SpawnEnemyWave(List<EnemyWaveEntry> waveEntries, CardRarity rarity)
+    private void SpawnEnemyWave(List<EnemyWaveEntry> waveEntries, CardRarity rarity, int desiredPortalCount = -1)
     {
         if (waveEntries == null || waveEntries.Count == 0) return;
         if (SummoningPortals == null || SummoningPortals.Count == 0) return;
@@ -232,7 +693,15 @@ public class AgisEnemy : MonoBehaviour
             portalCandidates.Add(p);
         }
 
-        int count = Mathf.Min(enemies.Count, portalCandidates.Count);
+        int count;
+        if (desiredPortalCount > 0)
+        {
+            count = Mathf.Min(desiredPortalCount, portalCandidates.Count);
+        }
+        else
+        {
+            count = Mathf.Min(enemies.Count, portalCandidates.Count);
+        }
         if (count <= 0) return;
 
         List<SummoningPortalEntry> selectedPortals = SelectPortalsWithSideSplit(portalCandidates, count);
@@ -276,7 +745,23 @@ public class AgisEnemy : MonoBehaviour
                 }
             }
 
-            StartCoroutine(SpawnFromPortalRoutine(portalInstance, spawnPos, enemies[i], rarity, isRightSide));
+            EnemyWaveEntry entry = enemies.Count > 0 ? enemies[i % enemies.Count] : null;
+
+            if (entry == null)
+            {
+                continue;
+            }
+
+            ActiveSummoningPortal active = new ActiveSummoningPortal
+            {
+                portalInstance = portalInstance,
+                portalWorldPosition = spawnPos,
+                invertOffsetX = isRightSide,
+                enemyEntry = entry,
+                rarity = rarity
+            };
+            activePortals.Add(active);
+            StartCoroutine(SpawnFromPortalRoutine(active));
         }
     }
 
@@ -351,8 +836,16 @@ public class AgisEnemy : MonoBehaviour
         }
     }
 
-    private IEnumerator SpawnFromPortalRoutine(GameObject portalInstance, Vector3 portalWorldPosition, EnemyWaveEntry enemyEntry, CardRarity rarity, bool invertOffsetX)
+    private IEnumerator SpawnFromPortalRoutine(ActiveSummoningPortal portal)
     {
+        if (portal == null)
+        {
+            yield break;
+        }
+
+        GameObject portalInstance = portal.portalInstance;
+        Vector3 portalWorldPosition = portal.portalWorldPosition;
+
         Animator portalAnimator = null;
         if (portalInstance != null)
         {
@@ -391,16 +884,49 @@ public class AgisEnemy : MonoBehaviour
             interval = 1f;
         }
 
-        while (enemyHealth == null || enemyHealth.IsAlive)
+        bool needsImmediateSpawnAfterResume = false;
+        float timeUntilNextSpawn = 0f;
+
+        while (enemyHealth != null && enemyHealth.IsAlive)
         {
-            if (enemyEntry != null)
+            if (portalSummoningPaused)
             {
-                Vector3 pos = portalWorldPosition;
-                pos.x += invertOffsetX ? -enemyEntry.Offset.x : enemyEntry.Offset.x;
-                pos.y += enemyEntry.Offset.y;
-                SpawnEnemyByName(enemyEntry.EnemyName, pos, rarity);
+                needsImmediateSpawnAfterResume = true;
+                yield return null;
+                continue;
             }
-            yield return GameStateManager.WaitForPauseSafeSeconds(interval);
+
+            if (needsImmediateSpawnAfterResume)
+            {
+                timeUntilNextSpawn = 0f;
+                needsImmediateSpawnAfterResume = false;
+            }
+
+            if (timeUntilNextSpawn <= 0f)
+            {
+                EnemyWaveEntry enemyEntry = portal.enemyEntry;
+                if (enemyEntry != null)
+                {
+                    Vector3 pos = portalWorldPosition;
+                    pos.x += portal.invertOffsetX ? -enemyEntry.Offset.x : enemyEntry.Offset.x;
+                    pos.y += enemyEntry.Offset.y;
+                    SpawnEnemyByName(enemyEntry.EnemyName, pos, portal.rarity);
+                }
+
+                timeUntilNextSpawn = interval;
+                yield return null;
+                continue;
+            }
+
+            float dt = GameStateManager.GetPauseSafeDeltaTime();
+            if (dt <= 0f)
+            {
+                yield return null;
+                continue;
+            }
+
+            timeUntilNextSpawn -= dt;
+            yield return null;
         }
     }
 
@@ -478,6 +1004,12 @@ public class AgisEnemy : MonoBehaviour
         if (animator != null)
         {
             animator.SetBool("death", true);
+        }
+
+        if (buffDebuffRoutine != null)
+        {
+            StopCoroutine(buffDebuffRoutine);
+            buffDebuffRoutine = null;
         }
     }
 }

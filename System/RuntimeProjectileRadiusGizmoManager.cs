@@ -1,8 +1,10 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
 
-[DefaultExecutionOrder(-100)]
+[DefaultExecutionOrder(-130)]
 public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
 {
     public static RuntimeProjectileRadiusGizmoManager Instance { get; private set; }
@@ -13,6 +15,42 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
     private InputAction pointerPositionAction;
 
     private Camera worldCamera;
+
+    private bool IsPointerOverInteractiveUI(Vector2 screenPosition)
+    {
+        if (EventSystem.current == null)
+        {
+            return false;
+        }
+
+        PointerEventData eventData = new PointerEventData(EventSystem.current);
+        eventData.position = screenPosition;
+
+        List<RaycastResult> results = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(eventData, results);
+
+        for (int i = 0; i < results.Count; i++)
+        {
+            GameObject go = results[i].gameObject;
+            if (go == null)
+            {
+                continue;
+            }
+
+            if (go.GetComponentInParent<Selectable>() != null)
+            {
+                return true;
+            }
+
+            GameObject clickHandler = ExecuteEvents.GetEventHandler<IPointerClickHandler>(go);
+            if (clickHandler != null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static int handledClickFrame = -1;
 
@@ -93,7 +131,7 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
             return pointerPressAction.WasPressedThisFrame();
         }
 
-        if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
         {
             return true;
         }
@@ -125,7 +163,7 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
 
         if (pointerPressAction == null)
         {
-            pointerPressAction = new InputAction("ProjectileGizmo_Press", InputActionType.Button, "<Mouse>/rightButton");
+            pointerPressAction = new InputAction("ProjectileGizmo_Press", InputActionType.Button, "<Mouse>/leftButton");
             pointerPressAction.Enable();
         }
 
@@ -230,24 +268,10 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
             return false;
         }
 
-        if (EventSystem.current != null)
+        if (IsPointerOverInteractiveUI(screenPosition))
         {
-            bool isOverUi = EventSystem.current.IsPointerOverGameObject();
-            if (!isOverUi && Touchscreen.current != null)
-            {
-                var touch = Touchscreen.current.primaryTouch;
-                if (touch != null)
-                {
-                    int touchId = touch.touchId.ReadValue();
-                    isOverUi = EventSystem.current.IsPointerOverGameObject(touchId);
-                }
-            }
-
-            if (isOverUi)
-            {
-                Physics2D.queriesHitTriggers = prevQueriesHitTriggers;
-                return false;
-            }
+            Physics2D.queriesHitTriggers = prevQueriesHitTriggers;
+            return false;
         }
 
         if (worldCamera == null)

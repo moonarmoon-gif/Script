@@ -225,7 +225,7 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
         }
 
         float finalCooldown = baseCooldown > 0f
-            ? baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f)
+            ? Mathf.Max(0.01f, baseCooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds))
             : 0f;
 
         if (card != null)
@@ -255,8 +255,9 @@ public class HellBeam : MonoBehaviour, IInstantModifiable
         float effectiveCooldown = finalCooldown;
         if (cachedPlayerStats != null)
         {
+            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
             float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown = finalCooldown * multiplier;
+            effectiveCooldown *= multiplier;
 
             if (MinCooldownManager.Instance != null && card != null)
             {

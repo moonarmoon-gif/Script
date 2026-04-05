@@ -311,6 +311,13 @@ public class StaticStatus : MonoBehaviour
 
         staticPeriod = Mathf.Max(0.01f, period);
 
+        if (DamageNumberManager.Instance != null && !EnemyDamagePopupScope.SuppressPopups)
+        {
+            Vector3 pos = transform.position;
+            pos = DamageNumberManager.Instance.GetAnchorWorldPosition(gameObject, pos);
+            DamageNumberManager.Instance.ShowStatic(pos);
+        }
+
         // Restart static period timer
         StartStaticPeriod();
         Debug.Log($"<color=yellow>⚡ STATIC REAPPLIED (ON HIT)! New period={staticPeriod:F2}s, RemainingDuration={remainingDuration:F2}s</color>");

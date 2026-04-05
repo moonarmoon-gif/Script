@@ -24,6 +24,7 @@ public class EnemySpawner : MonoBehaviour
 
         public float BossHealthMultiplier = 1f;
         public float BossDamageMultiplier = 1f;
+        public float BossExpMultiplier = 1f;
     }
 
     public List<Wave> waves;
@@ -721,6 +722,12 @@ public class EnemySpawner : MonoBehaviour
             bossHealth.RegisterPostScalingHealthMultiplier(bossWave.BossHealthMultiplier);
             bossHealth.OnDeath += OnBossDeath;
             bossHealth.SetImmuneToBossMenace(true);
+        }
+
+        EnemyExpData bossExpData = currentBossEnemy.GetComponent<EnemyExpData>();
+        if (bossExpData != null)
+        {
+            bossExpData.RegisterPostScalingExpMultiplier(bossWave.BossExpMultiplier);
         }
 
         NorcthexEnemy norcthex = currentBossEnemy.GetComponent<NorcthexEnemy>();

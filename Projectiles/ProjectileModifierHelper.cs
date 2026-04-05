@@ -22,14 +22,11 @@ public static class ProjectileModifierHelper
     }
     
     /// <summary>
-    /// Apply cooldown reduction (percentage from BASE cooldown, always calculated from base)
-    /// Example: base=10s, reduction=10% -> result=9s (10 - 10*0.1)
-    /// If called again with 10% more: base=10s, total=20% -> result=8s (10 - 10*0.2)
+    /// Apply cooldown reduction (flat seconds from BASE cooldown)
     /// </summary>
     public static float ApplyCooldownReduction(float baseCooldown, CardModifierStats modifiers)
     {
-        float reduction = baseCooldown * (modifiers.cooldownReductionPercent / 100f);
-        return Mathf.Max(0.1f, baseCooldown - reduction);
+        return Mathf.Max(0.1f, baseCooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
     }
     
     /// <summary>

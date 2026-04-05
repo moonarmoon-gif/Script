@@ -105,16 +105,8 @@ public class ProjectileCardModifiers : MonoBehaviour
                     stats.lifetimeIncrease += value; // RAW seconds (e.g., 0.75 = +0.75 seconds, 0.1 = +0.1 seconds)
                     break;
                 case ProjectileModifierData.ModifierType.CooldownReduction:
-                    // Support fractional values with hyperbolic stacking.
-                    // We store TOTAL CDR as an additive fraction in cooldownMultiplier and
-                    // convert it to an effective percent so existing callers that use
-                    // base * (1 - percent) automatically become hyperbolic:
-                    // effectivePercent = total / (1 + total).
-                    float add = Mathf.Max(0f, value / 100f);
-                    stats.cooldownMultiplier += add;
-                    float totalCdr = Mathf.Max(0f, stats.cooldownMultiplier);
-                    float effectiveFraction = totalCdr / (1f + totalCdr);
-                    stats.cooldownReductionPercent = Mathf.Max(0f, effectiveFraction * 100f);
+                    // Flat seconds reduced from BASE cooldown.
+                    stats.cooldownReductionSeconds += Mathf.Max(0f, value);
                     break;
                 case ProjectileModifierData.ModifierType.ManaCostReduction:
                     // Support fractional values
@@ -191,7 +183,7 @@ public class ProjectileCardModifiers : MonoBehaviour
             }
         }
         
-        Debug.Log($"<color=green>✓ Registered modifiers for {card.cardName}: Speed=+{stats.speedIncrease:F2}, Size={stats.sizeMultiplier:F2}x, Pierce={stats.pierceCount}, Damage={stats.damageMultiplier:F2}x, Lifetime=+{stats.lifetimeIncrease:F2}s, Cooldown=-{stats.cooldownReductionPercent:F1}%, ManaCost=-{stats.manaCostReduction:F2}, BurnChance=+{stats.burnChanceBonusPercent:F2}%, SlowChance=+{stats.slowChanceBonusPercent:F2}%, StaticChance=+{stats.staticChanceBonusPercent:F2}%, SpecialChance=+{stats.specialChanceBonusPercent:F2}%, Count={stats.projectileCount}, DamageRadius=+{stats.damageRadiusIncrease:F2}, ExplosionRadius=+{stats.explosionRadiusBonus:F2}, StrikeZoneRadius=+{stats.strikeZoneRadiusBonus:F2}, AttackSpeed=+{stats.attackSpeedPercent:F2}%</color>");
+        Debug.Log($"<color=green>✓ Registered modifiers for {card.cardName}: Speed=+{stats.speedIncrease:F2}, Size={stats.sizeMultiplier:F2}x, Pierce={stats.pierceCount}, Damage={stats.damageMultiplier:F2}x, Lifetime=+{stats.lifetimeIncrease:F2}s, Cooldown=-{stats.cooldownReductionSeconds:F2}s, ManaCost=-{stats.manaCostReduction:F2}, BurnChance=+{stats.burnChanceBonusPercent:F2}%, SlowChance=+{stats.slowChanceBonusPercent:F2}%, StaticChance=+{stats.staticChanceBonusPercent:F2}%, SpecialChance=+{stats.specialChanceBonusPercent:F2}%, Count={stats.projectileCount}, DamageRadius=+{stats.damageRadiusIncrease:F2}, ExplosionRadius=+{stats.explosionRadiusBonus:F2}, StrikeZoneRadius=+{stats.strikeZoneRadiusBonus:F2}, AttackSpeed=+{stats.attackSpeedPercent:F2}%</color>");
         
         // CRITICAL: Update active stars immediately if this is an OrbitalStar card
         if (card.projectileType == ProjectileCards.ProjectileType.NovaStar || 
@@ -442,8 +434,7 @@ public class CardModifierStats
     public int pierceCount = 0; // Pierce count (whole number)
     public float pierceAccumulator = 0f; // Fractional accumulator for pierce
     public float lifetimeIncrease = 0f; // RAW seconds added to lifetime (supports 0.1s, 0.2s, etc.)
-    public float cooldownReductionPercent = 0f; // Percentage reduced from BASE cooldown (supports 0.5%, 1.2%, etc.)
-    public float cooldownMultiplier = 0f;
+    public float cooldownReductionSeconds = 0f; // Flat seconds reduced from BASE cooldown
     public float manaCostReduction = 0f; // Percentage for mana (supports fractional)
     public float damageFlat = 0f; // Flat damage added per hit (from DamageIncrease modifiers)
     public float damageMultiplier = 1f; // Reserved multiplier for damage (kept for backward compatibility)

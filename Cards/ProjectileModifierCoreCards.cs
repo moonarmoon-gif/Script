@@ -112,7 +112,7 @@ public class ProjectileModifierCoreCards : BaseCard
                 break;
                 
             case ProjectileModType.CooldownReduction:
-                stats.Cooldown -= Mathf.Max(0f, primaryVal);
+                stats.projectileCooldownReduction += Mathf.Max(0f, primaryVal);
                 break;
                 
             case ProjectileModType.ManaCostReduction:
@@ -197,7 +197,7 @@ public class ProjectileModifierCoreCards : BaseCard
             case ProjectileModType.LifetimeIncrease:
                 return $"Projectiles last {primaryStr2}% longer";
             case ProjectileModType.CooldownReduction:
-                return $"Reduce projectile cooldown by {primaryStr2}%";
+                return $"Reduce projectile cooldown by {primaryStr2}s";
             case ProjectileModType.ManaCostReduction:
                 return $"Reduce projectile mana cost by {primaryStr2}%";
             case ProjectileModType.DamageIncrease:
