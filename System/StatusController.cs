@@ -1824,6 +1824,11 @@ public class StatusController : MonoBehaviour
             return;
         }
 
+        if (HasStatus(StatusId.Immune) && IsDebuff(id))
+        {
+            return;
+        }
+
         if (id == StatusId.Freeze)
         {
             freezeDeathEffectPlayed = false;

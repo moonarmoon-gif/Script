@@ -26,10 +26,11 @@ public class CardSelectionManager : MonoBehaviour
     [Header("Selection Settings")]
     [SerializeField] private int cardsToShow = 3;
     [SerializeField] public bool pauseGameOnSelection = true;
-    [Tooltip("Delay between card selection stages (Core \u2192 Projectile). TOTAL delay = delayBetweenStages + cardDisplayDelay")]
+    [Tooltip("Delay between card selection stages (Core → Projectile). TOTAL delay = delayBetweenStages + cardDisplayDelay")]
     [SerializeField] private float delayBetweenStages = 0.5f;
     [Tooltip("Enable two-stage selection: Core cards first, then Projectile cards")]
     [SerializeField] private bool enableTwoStageSelection = true;
+    public bool SelectActiveProjectilesAtStart = true;
     public int MaxProjectileLimit = 5;
     public int PerBossLimitIncrease = 1;
 
@@ -1111,6 +1112,11 @@ public class CardSelectionManager : MonoBehaviour
 
     public IEnumerator ShowInitialActiveProjectileSelection(int count)
     {
+        if (!SelectActiveProjectilesAtStart)
+        {
+            yield break;
+        }
+
         if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
         {
             yield break;

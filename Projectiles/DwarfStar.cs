@@ -106,8 +106,8 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
     [Tooltip("Damage multiplier per level (Level 2 = base * multiplier, Level 3 = base * multiplier^2)")]
     public float damageScalingPerLevel = 1.5f;
 
-    [Tooltip("Damage instances per second")]
-    public float damageInstancesPerSecond = 2f;
+    [Tooltip("Damage tick interval in seconds")]
+    public float DamageTickInterval = 0.25f;
 
     // Calculated damage based on level
     private float currentDamage;
@@ -270,7 +270,7 @@ public class DwarfStar : MonoBehaviour, IInstantModifiable
 
         currentDamage = baseDamage * Mathf.Pow(damageScalingPerLevel, currentLevel - 1);
 
-        damageInterval = 1f / damageInstancesPerSecond;
+        damageInterval = Mathf.Max(0.01f, DamageTickInterval);
         nextDamageTime = GameStateManager.PauseSafeTime + damageInterval;
 
         baseDamageRadius = damageRadius;

@@ -61,6 +61,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     private float baseDamage;
     private Vector3 baseScale;
     private Vector2 baseExplosionRadiusOffset;
+    private Vector2 baseShadowOffset;
 
     public float ExplosionRadiusToSizeIncreasePercentPerRadius = 100f;
 
@@ -69,10 +70,8 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     [SerializeField] private float explosionEffectDuration = 3f;
     [Tooltip("Fade-out duration for explosion effect (0 = no fade)")]
     [SerializeField] private float explosionFadeOutDuration = 1f;
-    [Tooltip("Offset for explosion effect (left side)")]
-    [SerializeField] private Vector2 explosionEffectOffsetLeft = Vector2.zero;
-    [Tooltip("Offset for explosion effect (right side)")]
-    [SerializeField] private Vector2 explosionEffectOffsetRight = Vector2.zero;
+    [Tooltip("Offset for explosion effect")]
+    [SerializeField] private Vector2 explosionEffectOffset = Vector2.zero;
     [Tooltip("Size multiplier for explosion effect")]
     [SerializeField] private float explosionEffectSizeMultiplier = 1f;
     [Tooltip("Base animation speed for explosion effect (used for calculations, not applied directly)")]
@@ -318,6 +317,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         baseDamage = damage;
         baseScale = transform.localScale;
         baseExplosionRadiusOffset = explosionRadiusOffset;
+        baseShadowOffset = shadowOffset;
 
         // Get or add audio source
         _audioSource = GetComponent<AudioSource>();
@@ -487,13 +487,8 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             // IMPORTANT: Scale explosion radius with size (+10% size = +10% explosion radius)
             explosionRadius *= modifiers.sizeMultiplier;
 
-            // CRITICAL: Scale explosion offset X with size (Y stays the same)
-            explosionRadiusOffset.x *= modifiers.sizeMultiplier;
-            // explosionRadiusOffset.y stays unchanged
-
             // Also scale effect offsets X
-            explosionEffectOffsetLeft.x *= modifiers.sizeMultiplier;
-            explosionEffectOffsetRight.x *= modifiers.sizeMultiplier;
+            explosionEffectOffset.x *= modifiers.sizeMultiplier;
 
             // Scale collider using utility with colliderSizeOffset
             ColliderScaler.ScaleCollider(_collider2D, modifiers.sizeMultiplier, colliderSizeOffset);
@@ -503,7 +498,16 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         // horizontal visual scale to the explosion radius offset X so that
         // they stay in sync (scale.x = explosionRadiusOffset.x).
         Vector3 nukeScale = transform.localScale;
-        nukeScale.x = explosionRadiusOffset.x;
+        float desiredXScale = explosionRadiusOffset.x;
+        if (Mathf.Abs(desiredXScale) > 0.0001f)
+        {
+            nukeScale.x = desiredXScale;
+        }
+
+        if (Mathf.Abs(nukeScale.x) < 0.0001f)
+        {
+            nukeScale.x = 0.01f;
+        }
         transform.localScale = nukeScale;
 
         // CRITICAL: Store explosion radius BEFORE modifiers for effect scaling
@@ -519,8 +523,6 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
             float radiusIncrease = explosionRadius - baseExplosionRadius;
             if (radiusIncrease > 0f)
             {
-                explosionRadiusOffset.y = baseExplosionRadiusOffset.y + radiusIncrease;
-
                 float percentPerRadius = Mathf.Max(0f, ExplosionRadiusToSizeIncreasePercentPerRadius);
                 float sizeMultiplierFromRadius = 1f + (radiusIncrease * (percentPerRadius / 100f));
                 if (sizeMultiplierFromRadius > 0f && !Mathf.Approximately(sizeMultiplierFromRadius, 1f))
@@ -529,6 +531,10 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
                 }
             }
         }
+
+        // ExplosionRadiusOffset remains constant; only shadow Y reacts to radius increases.
+        float initializeRadiusIncrease = explosionRadius - baseExplosionRadius;
+        shadowOffset.y = baseShadowOffset.y - Mathf.Max(0f, initializeRadiusIncrease);
 
         Debug.Log($"<color=red>NuclearStrike Explosion Radius:</color>");
         Debug.Log($"<color=red>  Original: {originalExplosionRadius:F2}</color>");
@@ -975,9 +981,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         // so it still happens even though this projectile will be destroyed.
         if (explosionEffectPrefab != null)
         {
-            Camera mainCam = Camera.main;
-            bool isOnLeftSide = mainCam != null && transform.position.x < mainCam.transform.position.x;
-            Vector2 effectOffset = GetOffsetForCurrentSize(isOnLeftSide);
+            Vector2 effectOffset = GetOffsetForCurrentSize();
             Vector3 explosionPosition = transform.position + (Vector3)effectOffset;
 
             float effectDelay = explosionEffectTimingAdjustment < 0f ? Mathf.Abs(explosionEffectTimingAdjustment) : 0f;
@@ -1418,12 +1422,19 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
     /// Gets the appropriate offset based on current size percentage.
     /// Interpolates between configured size offset pairs.
     /// </summary>
+    private Vector2 GetOffsetForCurrentSize()
+    {
+        Vector2 left = GetOffsetForCurrentSize(true);
+        Vector2 right = GetOffsetForCurrentSize(false);
+        return (left + right) * 0.5f;
+    }
+
     private Vector2 GetOffsetForCurrentSize(bool isLeftSide)
     {
         // If no size offsets configured, use default offsets
         if (sizeOffsets == null || sizeOffsets.Count == 0)
         {
-            return isLeftSide ? explosionEffectOffsetLeft : explosionEffectOffsetRight;
+            return explosionEffectOffset;
         }
 
         // Get current size multiplier from transform scale and convert to percentage
@@ -1483,7 +1494,7 @@ public class NuclearStrike : MonoBehaviour, IInstantModifiable
         }
 
         // Fallback to default offsets
-        return isLeftSide ? explosionEffectOffsetLeft : explosionEffectOffsetRight;
+        return explosionEffectOffset;
     }
 
     private void SpawnExplosionEffectImmediate(Vector3 position)
@@ -1688,6 +1699,14 @@ if (newRadius != explosionRadius)
 {
     explosionRadius = newRadius;
     Debug.Log($"<color=lime>  Explosion Radius: ({baseExplosionRadius:F2} + {modifiers.explosionRadiusBonus:F2}) * {modifiers.explosionRadiusMultiplier:F2}x = {explosionRadius:F2}</color>");
+
+    float radiusIncrease = Mathf.Max(0f, explosionRadius - baseExplosionRadius);
+    shadowOffset.y = baseShadowOffset.y - radiusIncrease;
+
+    if (shadowInstance != null && !hasExploded)
+    {
+        shadowInstance.transform.position = landingPosition + (Vector3)shadowOffset;
+    }
 }
 
  if (shadowInstance != null && !hasExploded)

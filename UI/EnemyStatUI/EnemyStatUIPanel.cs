@@ -797,7 +797,21 @@ public class EnemyStatUIPanel : MonoBehaviour, IBeginDragHandler, IDragHandler, 
         float currentHealth = enemyHealth != null ? enemyHealth.CurrentHealth : 0f;
         if (healthText != null)
         {
-            healthText.text = currentHealth.ToString("0");
+            float rounded = currentHealth;
+            if (StatusControllerManager.Instance != null)
+            {
+                rounded = StatusControllerManager.Instance.RoundDamage(rounded);
+            }
+            else
+            {
+                rounded = Mathf.CeilToInt(rounded);
+            }
+
+            if (enemyHealth != null && enemyHealth.IsAlive)
+            {
+                rounded = Mathf.Max(1f, rounded);
+            }
+            healthText.text = rounded.ToString("0");
         }
 
         float attack = hasBaseAttack ? cachedBaseAttack : 0f;

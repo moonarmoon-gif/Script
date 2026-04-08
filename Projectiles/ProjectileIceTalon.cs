@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections;
+using System.Collections.Generic;
 
 [RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(Collider2D))]
@@ -61,6 +62,8 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
     [Header("Spread Settings")]
     [Tooltip("Minimum angular separation (degrees) between Talon projectiles when using custom angles and multi-shot.")]
     public float minAngleSeparation = 0f;
+
+    public List<float> UltimateFiringAngles = new List<float>();
 
     private static System.Collections.Generic.Dictionary<string, float> lastFireTimes = new System.Collections.Generic.Dictionary<string, float>();
     private string prefabKey;
@@ -379,13 +382,16 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
         int enhancedVariant = 0;
         bool hasVariant1 = false;
         bool hasVariant2 = false;
+        bool hasVariant3 = false;
         if (ProjectileCardLevelSystem.Instance != null && card != null)
         {
             enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
-            hasVariant1 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
-            hasVariant2 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2);
+            bool ultimateSelected = ProjectileCardLevelSystem.Instance.IsUltimateEnhancementSelected(card);
+            hasVariant1 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1) || ultimateSelected;
+            hasVariant2 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 2) || ultimateSelected;
+            hasVariant3 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 3) || ultimateSelected || enhancedVariant == 3;
 
-            if (enhancedVariant == 3)
+            if (hasVariant3)
             {
                 ProjectileStatusChanceAdditiveBonus additive = GetComponent<ProjectileStatusChanceAdditiveBonus>();
                 if (additive == null)
@@ -431,7 +437,7 @@ public class ProjectileIceTalon : MonoBehaviour, IInstantModifiable
             card.runtimeSpawnInterval = Mathf.Max(0.0001f, baseCooldown);
         }
 
-        float finalCooldown = baseCooldown * (1f - modifiers.cooldownReductionPercent / 100f);
+        float finalCooldown = Mathf.Max(0.01f, baseCooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         if (MinCooldownManager.Instance != null)
         {
             finalCooldown = MinCooldownManager.Instance.ClampCooldown(card, finalCooldown);

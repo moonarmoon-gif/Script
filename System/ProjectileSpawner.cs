@@ -1016,6 +1016,22 @@ public class ProjectileSpawner : MonoBehaviour
         // current enhancedVariant index.
         ProjectileFireTalon fireTalon = data.card.projectilePrefab.GetComponent<ProjectileFireTalon>();
         ProjectileIceTalon iceTalon = data.card.projectilePrefab.GetComponent<ProjectileIceTalon>();
+
+        bool ultimateSelectedForTalon = false;
+        List<float> ultimateAngles = null;
+        if ((fireTalon != null || iceTalon != null) && ProjectileCardLevelSystem.Instance != null)
+        {
+            ultimateSelectedForTalon = ProjectileCardLevelSystem.Instance.IsUltimateEnhancementSelected(data.card);
+            if (ultimateSelectedForTalon)
+            {
+                ultimateAngles = fireTalon != null ? fireTalon.UltimateFiringAngles : iceTalon.UltimateFiringAngles;
+                if (ultimateAngles == null || ultimateAngles.Count == 0)
+                {
+                    ultimateSelectedForTalon = false;
+                    ultimateAngles = null;
+                }
+            }
+        }
         
         if ((fireTalon != null || iceTalon != null) && ProjectileCardLevelSystem.Instance != null)
         {
@@ -1043,6 +1059,11 @@ public class ProjectileSpawner : MonoBehaviour
                 int enhancedBonus = fireTalon != null ? fireTalon.enhancedProjectileCountBonus : iceTalon.enhancedProjectileCountBonus;
                 projCount += enhancedBonus;
                 Debug.Log($"<color=gold>Talon VARIANT 1 (history): Adding {enhancedBonus} bonus projectiles → Total: {projCount}</color>");
+            }
+
+            if (ultimateSelectedForTalon && ultimateAngles != null && ultimateAngles.Count > 0)
+            {
+                projCount = Mathf.Max(projCount, ultimateAngles.Count);
             }
         }
 
@@ -1249,7 +1270,14 @@ public class ProjectileSpawner : MonoBehaviour
 
             // CRITICAL FIX: Each projectile gets unique random direction if custom angles enabled
             Vector2 currentSpawnDirection;
-            if (data.card.useCustomAngles && projCount > 1)
+            bool useUltimateAngles = ultimateSelectedForTalon && ultimateAngles != null && ultimateAngles.Count > 0;
+            if (useUltimateAngles)
+            {
+                float fixedAngle = ultimateAngles[i % ultimateAngles.Count];
+                float fixedAngleRad = fixedAngle * Mathf.Deg2Rad;
+                currentSpawnDirection = new Vector2(Mathf.Cos(fixedAngleRad), Mathf.Sin(fixedAngleRad)).normalized;
+            }
+            else if (data.card.useCustomAngles && projCount > 1)
             {
                 // Check if this is a Talon variant projectile with minimum angle separation
                 ProjectileFireTalon fireTalonCheck = data.card.projectilePrefab.GetComponent<ProjectileFireTalon>();
@@ -1297,7 +1325,7 @@ public class ProjectileSpawner : MonoBehaviour
             
             // Calculate angle offset for spread pattern (only if enabled)
             float angleOffset = 0f;
-            if (useSpreadPattern && projCount > 1)
+            if (!useUltimateAngles && useSpreadPattern && projCount > 1)
             {
                 float step = spreadDegrees / (projCount - 1);
                 angleOffset = -spreadDegrees / 2f + (step * i);

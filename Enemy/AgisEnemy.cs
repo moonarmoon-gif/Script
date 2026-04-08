@@ -18,6 +18,8 @@ public class AgisEnemy : MonoBehaviour
     public float TeleportOutDuration = 1f;
     public float DeathDuration = 1f;
 
+    public bool PlayDeathAnimationOnDeath = true;
+
     public float PortalStartDuration = 1f;
     public float PortalAnimationTimer = 1.25f;
     public float SpawnDelay = 0.25f;
@@ -74,9 +76,12 @@ public class AgisEnemy : MonoBehaviour
     private Coroutine startupRoutine;
     private Coroutine buffDebuffRoutine;
 
+    private bool isDead;
+
     private bool attackInProgress;
     private Coroutine thresholdAttackRoutine;
     private int queuedAttack3Count;
+    private bool attack3InProgress;
     private bool threshold75Triggered;
     private bool threshold50Triggered;
     private bool threshold25Triggered;
@@ -86,13 +91,25 @@ public class AgisEnemy : MonoBehaviour
         public GameObject portalInstance;
         public Vector3 portalWorldPosition;
         public bool invertOffsetX;
+        public SummoningPortalEntry portalEntry;
         public EnemyWaveEntry enemyEntry;
         public CardRarity rarity;
+        public bool spawnReady;
     }
 
     private readonly List<ActiveSummoningPortal> activePortals = new List<ActiveSummoningPortal>();
     private CardRarity currentPortalRarity = CardRarity.Common;
     private bool portalSummoningPaused;
+
+    private Coroutine globalPortalSpawnRoutine;
+    private float globalTimeUntilNextPortalSpawn;
+    private bool globalNeedsImmediatePortalSpawnAfterResume;
+    private bool globalHadReadyPortals;
+
+    private readonly Dictionary<CardRarity, Queue<EnemyWaveEntry>> uniqueEnemyBagsByRarity = new Dictionary<CardRarity, Queue<EnemyWaveEntry>>();
+
+    private static readonly int[] FixedPortalSpawnOrder = { 0, 11, 1, 10, 2, 9, 3, 8, 4, 7, 5, 6 };
+    private int fixedPortalSpawnCursor;
 
     private void Awake()
     {
@@ -185,7 +202,10 @@ public class AgisEnemy : MonoBehaviour
             yield return null;
         }
 
-        yield return PlayAttack1SequenceRoutine();
+        if (GetAttack1RepeatCount() > 0)
+        {
+            yield return PlayAttack1SequenceRoutine();
+        }
 
         if (buffDebuffRoutine != null)
         {
@@ -196,23 +216,39 @@ public class AgisEnemy : MonoBehaviour
 
     private IEnumerator BuffDebuffAttackLoopRoutine()
     {
+        float timeUntilNextAttack = -1f;
+
         while (enemyHealth != null && enemyHealth.IsAlive)
         {
-            while (attackInProgress && enemyHealth != null && enemyHealth.IsAlive)
+            if (attack3InProgress)
             {
+                timeUntilNextAttack = -1f;
                 yield return null;
+                continue;
             }
 
-            float min = Mathf.Max(0f, BuffDebuffMinTimer);
-            float max = Mathf.Max(min, BuffDebuffMaxTimer);
-            float delay = UnityEngine.Random.Range(min, max);
-            if (delay > 0f)
-            {
-                yield return GameStateManager.WaitForPauseSafeSeconds(delay);
-            }
-            else
+            if (attackInProgress)
             {
                 yield return null;
+                continue;
+            }
+
+            if (timeUntilNextAttack < 0f)
+            {
+                float min = Mathf.Max(0f, BuffDebuffMinTimer);
+                float max = Mathf.Max(min, BuffDebuffMaxTimer);
+                timeUntilNextAttack = UnityEngine.Random.Range(min, max);
+            }
+
+            if (timeUntilNextAttack > 0f)
+            {
+                float dt = GameStateManager.GetPauseSafeDeltaTime();
+                if (dt > 0f)
+                {
+                    timeUntilNextAttack -= dt;
+                }
+                yield return null;
+                continue;
             }
 
             if (enemyHealth == null || !enemyHealth.IsAlive)
@@ -220,8 +256,19 @@ public class AgisEnemy : MonoBehaviour
                 yield break;
             }
 
-            int roll = UnityEngine.Random.Range(0, 4);
-            switch (roll)
+            timeUntilNextAttack = -1f;
+
+            List<int> rolls = new List<int>(4);
+            if (GetAttack1RepeatCount() > 0)
+            {
+                rolls.Add(0);
+            }
+            rolls.Add(1);
+            rolls.Add(2);
+            rolls.Add(3);
+
+            int pick = rolls[UnityEngine.Random.Range(0, rolls.Count)];
+            switch (pick)
             {
                 case 0:
                     yield return PlayAttack1SequenceRoutine();
@@ -241,8 +288,17 @@ public class AgisEnemy : MonoBehaviour
 
     private IEnumerator PlayAttackRoutine(string attackParam, float duration)
     {
-        if (duration <= 0f || animator == null)
+        if (animator == null)
         {
+            yield break;
+        }
+
+        if (string.Equals(attackParam, "attack1", StringComparison.OrdinalIgnoreCase) && !CanSpawnAnotherPortal())
+        {
+            if (HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
+            {
+                animator.SetBool("idle", true);
+            }
             yield break;
         }
 
@@ -286,7 +342,14 @@ public class AgisEnemy : MonoBehaviour
                 animator.SetBool(attackParam, true);
             }
 
-            yield return GameStateManager.WaitForPauseSafeSeconds(duration);
+            if (duration > 0f)
+            {
+                yield return GameStateManager.WaitForPauseSafeSeconds(duration);
+            }
+            else
+            {
+                yield return null;
+            }
 
             if (animator != null && HasAnimatorParameter(animator, attackParam, AnimatorControllerParameterType.Bool))
             {
@@ -306,12 +369,22 @@ public class AgisEnemy : MonoBehaviour
 
     private int GetAttack1RepeatCount()
     {
-        return Mathf.Max(1, PortalsSpawnedPerCast);
+        int repeats = Mathf.Max(1, PortalsSpawnedPerCast);
+        int remaining = GetRemainingPortalSlots();
+        if (remaining <= 0)
+        {
+            return 0;
+        }
+        return Mathf.Min(repeats, remaining);
     }
 
     private IEnumerator PlayAttack1SequenceRoutine()
     {
         int repeats = GetAttack1RepeatCount();
+        if (repeats <= 0)
+        {
+            yield break;
+        }
         for (int i = 0; i < repeats; i++)
         {
             yield return PlayAttackRoutine("attack1", Mathf.Max(0f, Attack1Duration));
@@ -368,28 +441,158 @@ public class AgisEnemy : MonoBehaviour
         return enemies[idx];
     }
 
+    private int GetMaxPortalSlots()
+    {
+        if (SummoningPortals == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < SummoningPortals.Count; i++)
+        {
+            SummoningPortalEntry p = SummoningPortals[i];
+            if (p == null || p.PortalPosition == null) continue;
+            count++;
+        }
+        return count;
+    }
+
+    private int GetActivePortalCount()
+    {
+        int count = 0;
+        for (int i = 0; i < activePortals.Count; i++)
+        {
+            ActiveSummoningPortal p = activePortals[i];
+            if (p == null) continue;
+            if (p.portalInstance == null) continue;
+            count++;
+        }
+        return count;
+    }
+
+    private int GetRemainingPortalSlots()
+    {
+        return Mathf.Max(0, GetMaxPortalSlots() - GetActivePortalCount());
+    }
+
+    private bool CanSpawnAnotherPortal()
+    {
+        if (PortalPrefab == null) return false;
+        return GetRemainingPortalSlots() > 0;
+    }
+
+    private bool IsPortalEntryInUse(SummoningPortalEntry portalEntry)
+    {
+        if (portalEntry == null) return false;
+
+        for (int i = 0; i < activePortals.Count; i++)
+        {
+            ActiveSummoningPortal p = activePortals[i];
+            if (p == null) continue;
+            if (p.portalInstance == null) continue;
+            if (p.portalEntry == portalEntry) return true;
+        }
+
+        return false;
+    }
+
+    private Queue<EnemyWaveEntry> BuildUniqueEnemyCycleQueue(CardRarity rarity)
+    {
+        List<EnemyWaveEntry> waveEntries = FilterValidWaveEntries(GetWaveForRarity(rarity));
+        Dictionary<string, List<EnemyWaveEntry>> byName = new Dictionary<string, List<EnemyWaveEntry>>(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < waveEntries.Count; i++)
+        {
+            EnemyWaveEntry entry = waveEntries[i];
+            if (entry == null || string.IsNullOrWhiteSpace(entry.EnemyName))
+            {
+                continue;
+            }
+
+            if (!byName.TryGetValue(entry.EnemyName, out var list))
+            {
+                list = new List<EnemyWaveEntry>();
+                byName[entry.EnemyName] = list;
+            }
+
+            list.Add(entry);
+        }
+
+        List<EnemyWaveEntry> picks = new List<EnemyWaveEntry>();
+        foreach (var kvp in byName)
+        {
+            List<EnemyWaveEntry> candidates = kvp.Value;
+            if (candidates == null || candidates.Count == 0) continue;
+            picks.Add(candidates[UnityEngine.Random.Range(0, candidates.Count)]);
+        }
+
+        Shuffle(picks);
+
+        Queue<EnemyWaveEntry> q = new Queue<EnemyWaveEntry>();
+        for (int i = 0; i < picks.Count; i++)
+        {
+            q.Enqueue(picks[i]);
+        }
+
+        return q;
+    }
+
+    private EnemyWaveEntry GetNextUniqueEnemyEntry(CardRarity rarity)
+    {
+        if (!uniqueEnemyBagsByRarity.TryGetValue(rarity, out Queue<EnemyWaveEntry> q) || q == null)
+        {
+            q = BuildUniqueEnemyCycleQueue(rarity);
+            uniqueEnemyBagsByRarity[rarity] = q;
+        }
+
+        if (q.Count == 0)
+        {
+            q = BuildUniqueEnemyCycleQueue(rarity);
+            uniqueEnemyBagsByRarity[rarity] = q;
+        }
+
+        if (q.Count == 0)
+        {
+            return null;
+        }
+
+        return q.Dequeue();
+    }
+
     private void UpgradePortalRarity()
     {
         int current = (int)currentPortalRarity;
         int next = Mathf.Clamp(current + 1, (int)CardRarity.Common, (int)CardRarity.Mythic);
         currentPortalRarity = (CardRarity)next;
 
-        EnemyWaveEntry replacement = GetRandomEnemyEntryForCurrentRarity();
-        if (replacement == null)
-        {
-            return;
-        }
+        uniqueEnemyBagsByRarity.Remove(currentPortalRarity);
 
         for (int i = 0; i < activePortals.Count; i++)
         {
             ActiveSummoningPortal portal = activePortals[i];
-            if (portal == null)
+            if (portal == null || portal.portalInstance == null)
             {
                 continue;
             }
 
             portal.rarity = currentPortalRarity;
-            portal.enemyEntry = GetRandomEnemyEntryForCurrentRarity();
+        }
+
+        for (int i = 0; i < activePortals.Count; i++)
+        {
+            ActiveSummoningPortal portal = activePortals[i];
+            if (portal == null || portal.portalInstance == null)
+            {
+                continue;
+            }
+
+            portal.enemyEntry = GetNextUniqueEnemyEntry(currentPortalRarity);
+        }
+
+        if (animator != null && HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
+        {
+            animator.SetBool("idle", true);
         }
     }
 
@@ -406,7 +609,12 @@ public class AgisEnemy : MonoBehaviour
             yield break;
         }
 
-        EnemyWaveEntry entry = GetRandomEnemyEntryForCurrentRarity();
+        if (!CanSpawnAnotherPortal())
+        {
+            yield break;
+        }
+
+        EnemyWaveEntry entry = GetNextUniqueEnemyEntry(currentPortalRarity);
         if (entry == null)
         {
             yield break;
@@ -422,6 +630,11 @@ public class AgisEnemy : MonoBehaviour
             return;
         }
 
+        if (!CanSpawnAnotherPortal())
+        {
+            return;
+        }
+
         if (SummoningPortals == null || SummoningPortals.Count == 0)
         {
             return;
@@ -432,6 +645,7 @@ public class AgisEnemy : MonoBehaviour
         {
             SummoningPortalEntry p = SummoningPortals[i];
             if (p == null || p.PortalPosition == null) continue;
+            if (IsPortalEntryInUse(p)) continue;
             portalCandidates.Add(p);
         }
         if (portalCandidates.Count == 0)
@@ -486,6 +700,7 @@ public class AgisEnemy : MonoBehaviour
             portalInstance = portalInstance,
             portalWorldPosition = spawnPos,
             invertOffsetX = isRightSide,
+            portalEntry = portal,
             enemyEntry = entry,
             rarity = rarity
         };
@@ -600,14 +815,27 @@ public class AgisEnemy : MonoBehaviour
             portalSummoningPaused = true;
 
             enemyHealth.SetImmuneToBossMenace(true);
-            yield return PlayAttackRoutine("attack3", Mathf.Max(0f, Attack3Duration));
-            if (enemyHealth != null)
+            attack3InProgress = true;
+            try
             {
-                enemyHealth.SetImmuneToBossMenace(false);
+                yield return PlayAttackRoutine("attack3", Mathf.Max(0f, Attack3Duration));
+            }
+            finally
+            {
+                attack3InProgress = false;
+                if (enemyHealth != null)
+                {
+                    enemyHealth.SetImmuneToBossMenace(false);
+                }
             }
 
             UpgradePortalRarity();
             portalSummoningPaused = false;
+
+            if (animator != null && HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
+            {
+                animator.SetBool("idle", true);
+            }
             yield return null;
         }
 
@@ -700,7 +928,7 @@ public class AgisEnemy : MonoBehaviour
         }
         else
         {
-            count = Mathf.Min(enemies.Count, portalCandidates.Count);
+            count = portalCandidates.Count;
         }
         if (count <= 0) return;
 
@@ -708,6 +936,18 @@ public class AgisEnemy : MonoBehaviour
         if (selectedPortals == null || selectedPortals.Count == 0) return;
 
         Shuffle(enemies);
+
+        List<EnemyWaveEntry> spawnAssignments = new List<EnemyWaveEntry>(count);
+        int idx = 0;
+        while (spawnAssignments.Count < count && enemies.Count > 0)
+        {
+            if (idx % enemies.Count == 0)
+            {
+                Shuffle(enemies);
+            }
+            spawnAssignments.Add(enemies[idx % enemies.Count]);
+            idx++;
+        }
 
         float referenceX = 0f;
         if (AdvancedPlayerController.Instance != null)
@@ -745,7 +985,7 @@ public class AgisEnemy : MonoBehaviour
                 }
             }
 
-            EnemyWaveEntry entry = enemies.Count > 0 ? enemies[i % enemies.Count] : null;
+            EnemyWaveEntry entry = spawnAssignments.Count > 0 ? spawnAssignments[i % spawnAssignments.Count] : null;
 
             if (entry == null)
             {
@@ -757,6 +997,7 @@ public class AgisEnemy : MonoBehaviour
                 portalInstance = portalInstance,
                 portalWorldPosition = spawnPos,
                 invertOffsetX = isRightSide,
+                portalEntry = portal,
                 enemyEntry = entry,
                 rarity = rarity
             };
@@ -767,59 +1008,64 @@ public class AgisEnemy : MonoBehaviour
 
     private List<SummoningPortalEntry> SelectPortalsWithSideSplit(List<SummoningPortalEntry> candidates, int desiredCount)
     {
-        List<SummoningPortalEntry> valid = new List<SummoningPortalEntry>();
+        List<SummoningPortalEntry> selected = new List<SummoningPortalEntry>();
+        if (candidates == null || candidates.Count == 0)
+        {
+            return selected;
+        }
+
+        if (desiredCount <= 0)
+        {
+            return selected;
+        }
+
+        HashSet<SummoningPortalEntry> candidateSet = new HashSet<SummoningPortalEntry>();
         for (int i = 0; i < candidates.Count; i++)
         {
             SummoningPortalEntry p = candidates[i];
             if (p == null || p.PortalPosition == null) continue;
-            valid.Add(p);
+            candidateSet.Add(p);
         }
 
-        if (desiredCount <= 0 || valid.Count == 0) return new List<SummoningPortalEntry>();
-
-        float referenceX = 0f;
-        if (AdvancedPlayerController.Instance != null)
+        if (candidateSet.Count == 0)
         {
-            referenceX = AdvancedPlayerController.Instance.transform.position.x;
-        }
-        else if (Camera.main != null)
-        {
-            referenceX = Camera.main.transform.position.x;
+            return selected;
         }
 
-        List<SummoningPortalEntry> left = new List<SummoningPortalEntry>();
-        List<SummoningPortalEntry> right = new List<SummoningPortalEntry>();
-        for (int i = 0; i < valid.Count; i++)
+        int safety = Mathf.Max(candidateSet.Count, 1) * Mathf.Max(FixedPortalSpawnOrder.Length, 1);
+        while (selected.Count < desiredCount && safety-- > 0)
         {
-            SummoningPortalEntry p = valid[i];
-            if (p.PortalPosition.position.x < referenceX) left.Add(p);
-            else right.Add(p);
-        }
+            int orderIdx = fixedPortalSpawnCursor % FixedPortalSpawnOrder.Length;
+            int portalIdx = FixedPortalSpawnOrder[orderIdx];
+            fixedPortalSpawnCursor++;
 
-        Shuffle(left);
-        Shuffle(right);
+            if (SummoningPortals == null || portalIdx < 0 || portalIdx >= SummoningPortals.Count)
+            {
+                continue;
+            }
 
-        int leftWanted = desiredCount / 2;
-        int rightWanted = desiredCount / 2;
-        if ((desiredCount % 2) == 1)
-        {
-            if (UnityEngine.Random.value < 0.5f) leftWanted++;
-            else rightWanted++;
-        }
+            SummoningPortalEntry portal = SummoningPortals[portalIdx];
+            if (portal == null || portal.PortalPosition == null)
+            {
+                continue;
+            }
 
-        List<SummoningPortalEntry> selected = new List<SummoningPortalEntry>();
+            if (!candidateSet.Contains(portal))
+            {
+                continue;
+            }
 
-        for (int i = 0; i < leftWanted && i < left.Count; i++) selected.Add(left[i]);
-        for (int i = 0; i < rightWanted && i < right.Count; i++) selected.Add(right[i]);
+            if (IsPortalEntryInUse(portal))
+            {
+                continue;
+            }
 
-        int remaining = desiredCount - selected.Count;
-        if (remaining > 0)
-        {
-            List<SummoningPortalEntry> extras = new List<SummoningPortalEntry>();
-            for (int i = Mathf.Min(leftWanted, left.Count); i < left.Count; i++) extras.Add(left[i]);
-            for (int i = Mathf.Min(rightWanted, right.Count); i < right.Count; i++) extras.Add(right[i]);
-            Shuffle(extras);
-            for (int i = 0; i < remaining && i < extras.Count; i++) selected.Add(extras[i]);
+            if (selected.Contains(portal))
+            {
+                continue;
+            }
+
+            selected.Add(portal);
         }
 
         return selected;
@@ -878,42 +1124,79 @@ public class AgisEnemy : MonoBehaviour
             yield break;
         }
 
+        portal.spawnReady = true;
+
+        if (globalPortalSpawnRoutine == null)
+        {
+            globalTimeUntilNextPortalSpawn = 0f;
+            globalHadReadyPortals = false;
+            globalPortalSpawnRoutine = StartCoroutine(GlobalPortalSpawnRoutine());
+        }
+    }
+
+    private IEnumerator GlobalPortalSpawnRoutine()
+    {
         float interval = EnemySpawnInterval;
         if (interval <= 0f)
         {
             interval = 1f;
         }
 
-        bool needsImmediateSpawnAfterResume = false;
-        float timeUntilNextSpawn = 0f;
-
         while (enemyHealth != null && enemyHealth.IsAlive)
         {
             if (portalSummoningPaused)
             {
-                needsImmediateSpawnAfterResume = true;
+                globalNeedsImmediatePortalSpawnAfterResume = true;
                 yield return null;
                 continue;
             }
 
-            if (needsImmediateSpawnAfterResume)
+            bool hasReadyPortals = false;
+            for (int i = 0; i < activePortals.Count; i++)
             {
-                timeUntilNextSpawn = 0f;
-                needsImmediateSpawnAfterResume = false;
+                ActiveSummoningPortal p = activePortals[i];
+                if (p == null) continue;
+                if (!p.spawnReady) continue;
+                hasReadyPortals = true;
+                break;
             }
 
-            if (timeUntilNextSpawn <= 0f)
+            if (hasReadyPortals && !globalHadReadyPortals)
             {
-                EnemyWaveEntry enemyEntry = portal.enemyEntry;
-                if (enemyEntry != null)
+                globalTimeUntilNextPortalSpawn = 0f;
+            }
+            globalHadReadyPortals = hasReadyPortals;
+
+            if (!hasReadyPortals)
+            {
+                yield return null;
+                continue;
+            }
+
+            if (globalNeedsImmediatePortalSpawnAfterResume)
+            {
+                globalTimeUntilNextPortalSpawn = 0f;
+                globalNeedsImmediatePortalSpawnAfterResume = false;
+            }
+
+            if (globalTimeUntilNextPortalSpawn <= 0f)
+            {
+                for (int i = 0; i < activePortals.Count; i++)
                 {
-                    Vector3 pos = portalWorldPosition;
-                    pos.x += portal.invertOffsetX ? -enemyEntry.Offset.x : enemyEntry.Offset.x;
+                    ActiveSummoningPortal p = activePortals[i];
+                    if (p == null) continue;
+                    if (!p.spawnReady) continue;
+
+                    EnemyWaveEntry enemyEntry = p.enemyEntry;
+                    if (enemyEntry == null) continue;
+
+                    Vector3 pos = p.portalWorldPosition;
+                    pos.x += p.invertOffsetX ? -enemyEntry.Offset.x : enemyEntry.Offset.x;
                     pos.y += enemyEntry.Offset.y;
-                    SpawnEnemyByName(enemyEntry.EnemyName, pos, portal.rarity);
+                    SpawnEnemyByName(enemyEntry.EnemyName, pos, p.rarity);
                 }
 
-                timeUntilNextSpawn = interval;
+                globalTimeUntilNextPortalSpawn = interval;
                 yield return null;
                 continue;
             }
@@ -925,9 +1208,11 @@ public class AgisEnemy : MonoBehaviour
                 continue;
             }
 
-            timeUntilNextSpawn -= dt;
+            globalTimeUntilNextPortalSpawn -= dt;
             yield return null;
         }
+
+        globalPortalSpawnRoutine = null;
     }
 
     private void SpawnEnemyByName(string enemyName, Vector3 spawnPosition, CardRarity rarity)
@@ -1001,15 +1286,97 @@ public class AgisEnemy : MonoBehaviour
 
     private void HandleDeath()
     {
+        if (isDead)
+        {
+            return;
+        }
+        isDead = true;
+
+        StopAllCoroutines();
+
+        startupRoutine = null;
+        buffDebuffRoutine = null;
+        thresholdAttackRoutine = null;
+        globalPortalSpawnRoutine = null;
+
+        portalSummoningPaused = true;
+
+        float animDuration = Mathf.Max(0f, PlayDeathAnimationOnDeath ? DeathDuration : TeleportOutDuration);
+
         if (animator != null)
         {
-            animator.SetBool("death", true);
+            if (PlayDeathAnimationOnDeath)
+            {
+                if (HasAnimatorParameter(animator, "death", AnimatorControllerParameterType.Bool))
+                {
+                    animator.SetBool("death", true);
+                }
+                else if (HasAnimatorParameter(animator, "death", AnimatorControllerParameterType.Trigger))
+                {
+                    animator.SetTrigger("death");
+                }
+            }
+            else
+            {
+                if (HasAnimatorParameter(animator, "teleportout", AnimatorControllerParameterType.Bool))
+                {
+                    animator.SetBool("teleportout", true);
+                }
+                else if (HasAnimatorParameter(animator, "teleportout", AnimatorControllerParameterType.Trigger))
+                {
+                    animator.SetTrigger("teleportout");
+                }
+            }
         }
 
-        if (buffDebuffRoutine != null)
+        StartCoroutine(EndAndDestroyAllPortalsRoutine());
+
+        float portalCleanupDelay = Mathf.Max(0f, PortalStartDuration) + 0.05f;
+        float destroyDelay = Mathf.Max(animDuration, portalCleanupDelay);
+        PauseSafeSelfDestruct.Schedule(gameObject, destroyDelay);
+    }
+
+    private IEnumerator EndAndDestroyAllPortalsRoutine()
+    {
+        for (int i = 0; i < activePortals.Count; i++)
         {
-            StopCoroutine(buffDebuffRoutine);
-            buffDebuffRoutine = null;
+            ActiveSummoningPortal p = activePortals[i];
+            if (p == null || p.portalInstance == null) continue;
+
+            Animator portalAnimator = p.portalInstance.GetComponent<Animator>();
+            if (portalAnimator == null)
+            {
+                portalAnimator = p.portalInstance.GetComponentInChildren<Animator>();
+            }
+
+            if (portalAnimator != null)
+            {
+                if (HasAnimatorParameter(portalAnimator, "loop", AnimatorControllerParameterType.Bool))
+                {
+                    portalAnimator.SetBool("loop", false);
+                }
+
+                if (HasAnimatorParameter(portalAnimator, "end", AnimatorControllerParameterType.Bool))
+                {
+                    portalAnimator.SetBool("end", true);
+                }
+            }
         }
+
+        float wait = Mathf.Max(0f, PortalStartDuration);
+        if (wait > 0f)
+        {
+            yield return GameStateManager.WaitForPauseSafeSeconds(wait);
+        }
+
+        for (int i = 0; i < activePortals.Count; i++)
+        {
+            ActiveSummoningPortal p = activePortals[i];
+            if (p == null || p.portalInstance == null) continue;
+            Destroy(p.portalInstance);
+            p.portalInstance = null;
+        }
+
+        activePortals.Clear();
     }
 }

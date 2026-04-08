@@ -9,8 +9,8 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 {
     [Header("Beam Settings")]
     [SerializeField] private float lifetimeSeconds = 3f;
-    [Tooltip("Damage instances per second (1 = once per second, 2 = twice per second, 0.5 = once every 2 seconds)")]
-    [SerializeField] private float damageInstancesPerSecond = 2f;
+    [Tooltip("Damage tick interval in seconds")]
+    public float DamageTickInterval = 0.2f;
 
     [Header("Animation Timing")]
     [Tooltip("Delay before setting BeamStart to true (start animation duration)")]
@@ -161,6 +161,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     [SerializeField] private float variant1Damage = 0f;
     [Tooltip("Base cooldown for Enhanced Variant 1 (seconds)")]
     public float variant1BaseCooldown = 8f;
+    public float Variant1BonusLifetime = 1f;
 
     [Range(0f, 1f)]
     public float variant4BurnChance = 0.5f;
@@ -200,8 +201,8 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
     [Tooltip("Reduce base X scale by this percentage (0.5 = 50% reduction)")]
     [Range(0f, 1f)]
     public float variant2ReducedXScale = 0.5f;
-    [Tooltip("Damage instances per second for Variant 2")]
-    public float variant2DamageInstancesPerSecond = 5f;
+    [Tooltip("Damage tick interval for Variant 2 in seconds")]
+    public float Variant2DamageTickInterval = 0.2f;
     [Tooltip("Unique damage value for Variant 2 (replaces base damage)")]
     public float variant2Damage = 100f;
     [Tooltip("Animation speed multiplier for startup animation (2 = 2x faster)")]
@@ -737,7 +738,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
         float finalBeamStartDelay = beamStartDelay;
         float finalBeamEndDuration = beamEndDuration;
         float baseLifetime = lifetimeSeconds;
-        float baseDamageInstancesPerSecond = damageInstancesPerSecond;
+        float baseDamageTickInterval = DamageTickInterval;
 
         // CRITICAL: Variants can use their own unique base cooldowns
         float baseCooldown = cooldown;
@@ -751,7 +752,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             // but later we will fire dual smart beams.
             baseCooldown = variant2BaseCooldown;
             baseLifetime = variant2LifetimeSeconds;
-            baseDamageInstancesPerSecond = variant2DamageInstancesPerSecond;
+            baseDamageTickInterval = Variant2DamageTickInterval;
             finalBeamStartDelay = variant2BeamStartDelay;
             finalBeamEndDuration = variant2BeamEndDuration;
 
@@ -761,7 +762,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 Debug.Log($"<color=magenta>ElementalBeam STACKED 2+3: Using Variant 2 base cooldown {variant2BaseCooldown:F2}s (dual smart beams)</color>");
             }
 
-            Debug.Log($"<color=gold>ElementalBeam STACKED Variant 2+3: Using unique cooldown {baseCooldown:F2}s, lifetime {baseLifetime:F2}s, damageInstances {baseDamageInstancesPerSecond:F2}/s, startDelay {finalBeamStartDelay:F2}s, endDuration {finalBeamEndDuration:F2}s</color>");
+            Debug.Log($"<color=gold>ElementalBeam STACKED Variant 2+3: Using unique cooldown {baseCooldown:F2}s, lifetime {baseLifetime:F2}s, tickInterval {baseDamageTickInterval:F3}s, startDelay {finalBeamStartDelay:F2}s, endDuration {finalBeamEndDuration:F2}s</color>");
         }
         else if (isStackedVariant13 && variant3BaseCooldown > 0f)
         {
@@ -794,7 +795,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             // coreLifetime = lifetimeSeconds + variant2LifetimeSeconds
             // finalLifetime = coreLifetime + lifetimeModifier (no exchange rate).
             baseLifetime = lifetimeSeconds + variant2LifetimeSeconds;
-            baseDamageInstancesPerSecond = variant2DamageInstancesPerSecond;
+            baseDamageTickInterval = Variant2DamageTickInterval;
             finalBeamStartDelay = variant2BeamStartDelay;
             finalBeamEndDuration = variant2BeamEndDuration;
 
@@ -817,14 +818,14 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 card.runtimeSpawnInterval = baseCooldown;
             }
 
-            Debug.Log($"<color=gold>ElementalBeam STACKED Variant 1+2: cooldown {baseCooldown:F2}s, lifetime {baseLifetime:F2}s, damageInstances {baseDamageInstancesPerSecond:F2}/s, startDelay {finalBeamStartDelay:F2}s, endDuration {finalBeamEndDuration:F2}s</color>");
+            Debug.Log($"<color=gold>ElementalBeam STACKED Variant 1+2: cooldown {baseCooldown:F2}s, lifetime {baseLifetime:F2}s, tickInterval {baseDamageTickInterval:F3}s, startDelay {finalBeamStartDelay:F2}s, endDuration {finalBeamEndDuration:F2}s</color>");
         }
         else if (enhancedVariant == 2)
         {
             // Variant 2: Use unique cooldown, lifetime, animation timing, and damage instances
             baseCooldown = variant2BaseCooldown;
             baseLifetime = variant2LifetimeSeconds;
-            baseDamageInstancesPerSecond = variant2DamageInstancesPerSecond;
+            baseDamageTickInterval = Variant2DamageTickInterval;
             finalBeamStartDelay = variant2BeamStartDelay;
             finalBeamEndDuration = variant2BeamEndDuration;
 
@@ -835,7 +836,7 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
                 Debug.Log($"<color=gold>Variant 2: Updated card.runtimeSpawnInterval to {variant2BaseCooldown}s (ProjectileSpawner will use this)</color>");
             }
 
-            Debug.Log($"<color=gold>ElementalBeam Variant 2: Using unique cooldown {baseCooldown:F2}s, lifetime {baseLifetime:F2}s, damageInstances {baseDamageInstancesPerSecond:F2}/s, startDelay {finalBeamStartDelay:F2}s, endDuration {finalBeamEndDuration:F2}s</color>");
+            Debug.Log($"<color=gold>ElementalBeam Variant 2: Using unique cooldown {baseCooldown:F2}s, lifetime {baseLifetime:F2}s, tickInterval {baseDamageTickInterval:F3}s, startDelay {finalBeamStartDelay:F2}s, endDuration {finalBeamEndDuration:F2}s</color>");
         }
         else if (uiEnhancedVariant == 3)
         {
@@ -896,6 +897,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             ? (modifiers.lifetimeIncrease * variant2LifetimeExchangeRate)
             : modifiers.lifetimeIncrease;
         float finalLifetime = baseLifetime + lifetimeModifier;
+
+        if (hasVariant1History)
+        {
+            finalLifetime += Mathf.Max(0f, Variant1BonusLifetime);
+        }
 
         // Only log Variant 2 lifetime exchange when it's actually applied
         if (enhancedVariant == 2 && !isVariant12Stacked && modifiers.lifetimeIncrease > 0f)
@@ -1420,9 +1426,8 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
             rotationDirection = Mathf.Abs(angle) > 90f ? -1f : 1f;
         }
 
-        // Calculate damage interval using variant-specific damage instances
-        damageInterval = 1f / baseDamageInstancesPerSecond;
-        Debug.Log($"<color=cyan>ElementalBeam: Damage interval = {damageInterval:F3}s (from {baseDamageInstancesPerSecond:F2} instances/sec)</color>");
+        damageInterval = Mathf.Max(0.01f, baseDamageTickInterval);
+        Debug.Log($"<color=cyan>ElementalBeam: Damage interval = {damageInterval:F3}s</color>");
 
         // Start animation timing and damage routines
         StartCoroutine(AnimationTimingRoutine(finalLifetime, finalBeamStartDelay, finalBeamEndDuration));

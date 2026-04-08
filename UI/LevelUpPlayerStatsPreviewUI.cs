@@ -358,7 +358,7 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
             Color c = isPositive ? positiveDeltaColor : negativeDeltaColor;
             string color = ColorUtility.ToHtmlStringRGBA(c);
 
-            line.ValueText.text = $"{currentStr} <color=#{color}>({sign}{deltaStr})</color>";
+            line.ValueText.text = $"{currentStr}<color=#{color}>({sign}{deltaStr})</color>";
         }
     }
 
@@ -637,13 +637,12 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
             overrideSuffix = textOverride.OverrideSuffix;
         }
 
-        float baseValue = currentValue - delta;
-        string baseStr = FormatFieldValue(fieldName, baseValue, overrideSuffix, suffix);
+        string currentStr = FormatFieldValue(fieldName, currentValue, overrideSuffix, suffix);
         string deltaValueStr = FormatFieldDeltaValue(fieldName, delta, overrideSuffix, suffix);
         labelsSb.Append(displayName);
         labelsSb.Append(':');
 
-        valuesSb.Append(baseStr);
+        valuesSb.Append(currentStr);
 
         if (Mathf.Abs(delta) <= 0.0001f)
         {
@@ -754,7 +753,10 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
 
             int baseValue = Mathf.Max(0, row.baseValue);
 
-            basePoints[key] = 0;
+            int savedTotal = PlayerPrefs.GetInt($"LevelUpUI.{key}", baseValue);
+            savedTotal = Mathf.Max(baseValue, savedTotal);
+
+            basePoints[key] = Mathf.Max(0, savedTotal - baseValue);
             currentPoints[key] = Mathf.Max(0, row.currentValue - baseValue);
         }
     }

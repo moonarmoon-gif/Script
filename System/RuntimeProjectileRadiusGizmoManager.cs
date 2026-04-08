@@ -109,12 +109,6 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
             }
         }
 
-        bool allowToggle = Instance.ShouldToggleOnThisCall();
-        if (!allowToggle)
-        {
-            return false;
-        }
-
         bool handled = Instance.TryHandleClickInternal(screenPosition, true);
         if (handled)
         {
@@ -128,10 +122,13 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
     {
         if (pointerPressAction != null)
         {
-            return pointerPressAction.WasPressedThisFrame();
+            if (pointerPressAction.WasPressedThisFrame())
+            {
+                return true;
+            }
         }
 
-        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+        if (Mouse.current != null && (Mouse.current.leftButton.wasPressedThisFrame || Mouse.current.rightButton.wasPressedThisFrame))
         {
             return true;
         }
@@ -211,10 +208,15 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
         {
             pressedThisFrame = pointerPressAction.WasPressedThisFrame();
             pointerPos = pointerPositionAction.ReadValue<Vector2>();
+
+            if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
+            {
+                pressedThisFrame = true;
+            }
         }
         else if (Mouse.current != null)
         {
-            pressedThisFrame = Mouse.current.rightButton.wasPressedThisFrame;
+            pressedThisFrame = Mouse.current.leftButton.wasPressedThisFrame || Mouse.current.rightButton.wasPressedThisFrame;
             pointerPos = Mouse.current.position.ReadValue();
         }
 
@@ -274,7 +276,7 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
             return false;
         }
 
-        if (worldCamera == null)
+        if (worldCamera == null || !worldCamera.isActiveAndEnabled)
         {
             worldCamera = Camera.main;
             if (worldCamera == null)
@@ -335,6 +337,36 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
             }
         }
 
+        float clickAssistRadiusWorld = 0f;
+        if (worldCamera != null && worldCamera.orthographic && Screen.height > 0)
+        {
+            float unitsPerPixel = (worldCamera.orthographicSize * 2f) / Screen.height;
+            clickAssistRadiusWorld = unitsPerPixel * 12f;
+        }
+        else
+        {
+            clickAssistRadiusWorld = 0.25f;
+        }
+
+        if (clickAssistRadiusWorld > 0.0001f)
+        {
+            Collider2D[] circleOverlaps = Physics2D.OverlapCircleAll(p2, clickAssistRadiusWorld, projectileClickMask);
+            for (int i = 0; i < circleOverlaps.Length; i++)
+            {
+                Collider2D c = circleOverlaps[i];
+                if (c == null)
+                {
+                    continue;
+                }
+
+                if (TryHandleCollider(c, allowToggle))
+                {
+                    Physics2D.queriesHitTriggers = prevQueriesHitTriggers;
+                    return true;
+                }
+            }
+        }
+
         Physics2D.queriesHitTriggers = prevQueriesHitTriggers;
         return false;
     }
@@ -356,7 +388,13 @@ public class RuntimeProjectileRadiusGizmoManager : MonoBehaviour
             return true;
         }
 
-        if (kind == RuntimeProjectileRadiusGizmo.GizmoSourceKind.NovaStar || kind == RuntimeProjectileRadiusGizmo.GizmoSourceKind.DwarfStar)
+        if (kind == RuntimeProjectileRadiusGizmo.GizmoSourceKind.NovaStar)
+        {
+            ToggleGlobalStarGizmos(kind);
+            return true;
+        }
+
+        if (kind == RuntimeProjectileRadiusGizmo.GizmoSourceKind.DwarfStar)
         {
             ToggleGlobalStarGizmos(kind);
             return true;

@@ -32,11 +32,7 @@ public class ProjectileCardModifiers : MonoBehaviour
     /// </summary>
     private string GetCardKey(ProjectileCards card)
     {
-        if (card.projectilePrefab == null)
-        {
-            return $"{card.cardName}_{card.projectileType}";
-        }
-        return $"{card.projectilePrefab.name}_{card.projectileType}";
+        return $"{card.cardName}_{card.projectileType}";
     }
     
     /// <summary>
