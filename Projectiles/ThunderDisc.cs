@@ -8,6 +8,7 @@ public class ThunderDisc : MonoBehaviour
 {
     [Header("Motion")]
     [SerializeField] private float speed = 15f;
+    private float baseSpeed;
 
     [Header("Offscreen Destruction")]
     [Tooltip("Bonus destroy boundary size (world units). If projectile goes outside the camera bounds plus this value, it is destroyed immediately.")]
@@ -36,6 +37,8 @@ public class ThunderDisc : MonoBehaviour
     [Header("Bounce")]
     [Tooltip("Chance to bounce to another enemy after hitting one")] 
     public float BounceChance = 100f;
+    private float baseBounceChance;
+    public float EnhancedBounceChance = 5f;
     public float BounceSpeedBoost = 5f;
     [Range(0f, 100f)] public float ReducedBounceChance = 50f;
 
@@ -139,6 +142,11 @@ public class ThunderDisc : MonoBehaviour
         }
 
         EnsureTrailAudioSource();
+
+        // Cache base inspector values so runtime modifier changes can safely
+        // overwrite the visible fields (useful for pooled projectiles too).
+        baseSpeed = speed;
+        baseBounceChance = BounceChance;
     }
 
     private void OnEnable()
@@ -149,6 +157,10 @@ public class ThunderDisc : MonoBehaviour
             _fadeOutRoutine = null;
         }
         StopTrailSfx(true);
+
+        // Restore base values on reuse so Launch() always starts from the true base.
+        speed = baseSpeed;
+        BounceChance = baseBounceChance;
     }
 
     private void OnDisable()
@@ -269,7 +281,7 @@ public class ThunderDisc : MonoBehaviour
             Debug.Log($"<color=cyan>PlayerProjectiles using modifiers from {card.cardName}</color>");
         }
 
-        float finalSpeed = speed + modifiers.speedIncrease;
+        float finalSpeed = baseSpeed + modifiers.speedIncrease;
         float finalCooldown = Mathf.Max(0.1f, cooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         int finalManaCost = Mathf.Max(0, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
         float finalDamage = damage + modifiers.damageFlat;
@@ -355,9 +367,34 @@ public class ThunderDisc : MonoBehaviour
         }
         pre.EnsureRolled();
 
-        float effectiveBounceChance = Mathf.Max(0f, BounceChance);
-        effectiveBounceChance += Mathf.Max(0f, modifiers.specialChanceBonusPercent);
+        float effectiveBounceChance = Mathf.Max(0f, baseBounceChance);
+        float specialBonus = Mathf.Max(0f, modifiers.specialChanceBonusPercent);
+
+        if (ProjectileCardLevelSystem.Instance != null && card != null)
+        {
+            int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
+            bool hasVariant1 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
+
+            bool applyVariant1 = enhancedVariant == 1 || hasVariant1;
+            if (applyVariant1)
+            {
+                int unlockLevel = ProjectileCardLevelSystem.Instance.GetEnhancedUnlockLevel();
+                if (unlockLevel > 0)
+                {
+                    int level = ProjectileCardLevelSystem.Instance.GetLevel(card);
+                    int tiersReached = Mathf.Max(0, level / unlockLevel);
+                    if (tiersReached > 0)
+                    {
+                        effectiveBounceChance += Mathf.Max(0f, EnhancedBounceChance) * tiersReached;
+                    }
+                }
+            }
+        }
+
+        effectiveBounceChance += specialBonus;
         bounceChanceCurrent = Mathf.Clamp(effectiveBounceChance, 0f, 100f);
+        // Show the effective value in the inspector at runtime.
+        BounceChance = bounceChanceCurrent;
 
         float mult = 1f - Mathf.Clamp01(ReducedBounceChance / 100f);
         bounceChanceMultiplierPerBounce = Mathf.Clamp01(mult);
@@ -371,6 +408,7 @@ public class ThunderDisc : MonoBehaviour
         }
 
         Vector2 dir = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector2.right;
+        speed = finalSpeed; // keep inspector in sync with true runtime speed
         currentMoveSpeed = finalSpeed;
         _rigidbody2D.velocity = dir * finalSpeed;
 
@@ -518,6 +556,8 @@ public class ThunderDisc : MonoBehaviour
 
         bounceChanceCurrent *= bounceChanceMultiplierPerBounce;
         bounceChanceCurrent = Mathf.Clamp(bounceChanceCurrent, 0f, 100f);
+        // Keep inspector bounce chance synced as it decays per bounce.
+        BounceChance = bounceChanceCurrent;
 
         hasHitEnemy = false;
         lastDamageTime = GameStateManager.PauseSafeTime;

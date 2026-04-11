@@ -34,8 +34,16 @@ public class EnemyHealth : MonoBehaviour, IDamageable
     /// </summary>
     public void MultiplyMaxHealth(float multiplier)
     {
-        maxHealth *= multiplier;
-        currentHealth *= multiplier;
+        if (multiplier <= 0f)
+        {
+            return;
+        }
+
+        float newMax = maxHealth * multiplier;
+        float newCur = currentHealth * multiplier;
+
+        maxHealth = Mathf.Max(1f, RoundHalfUp(newMax));
+        currentHealth = Mathf.Clamp(RoundHalfUp(newCur), 0f, maxHealth);
     }
 
     public void RegisterPostScalingHealthMultiplier(float multiplier)
@@ -186,6 +194,11 @@ public class EnemyHealth : MonoBehaviour, IDamageable
 
     private void Start()
     {
+        // Enforce whole-number storage for health while keeping float math.
+        // (Max/Current are stored as floats but always rounded to integers.)
+        maxHealth = Mathf.Max(1f, RoundHalfUp(maxHealth));
+        currentHealth = Mathf.Clamp(RoundHalfUp(currentHealth), 0f, maxHealth);
+
         // Initialize current health to max health if not already set
         if (currentHealth <= 0f || currentHealth > maxHealth)
         {
@@ -200,8 +213,8 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             float multiplier = EnemyScalingSystem.Instance.GetHealthMultiplier();
 
             // Scale both max and current health proportionally
-            maxHealth *= multiplier;
-            currentHealth *= multiplier;
+            maxHealth = Mathf.Max(1f, RoundHalfUp(originalMax * multiplier));
+            currentHealth = Mathf.Clamp(RoundHalfUp(originalCurrent * multiplier), 0f, maxHealth);
         }
 
         hasStarted = true;
@@ -215,7 +228,8 @@ public class EnemyHealth : MonoBehaviour, IDamageable
 
     private void OnValidate()
     {
-        currentHealth = Mathf.Clamp(currentHealth, 0f, MaxHealth);
+        maxHealth = Mathf.Max(1f, RoundHalfUp(maxHealth));
+        currentHealth = Mathf.Clamp(RoundHalfUp(currentHealth), 0f, maxHealth);
         // Don't raise events in editor - only at runtime
         if (Application.isPlaying)
         {
@@ -441,6 +455,11 @@ public class EnemyHealth : MonoBehaviour, IDamageable
             finalAmount = 1f;
         }
 
+        if (!isStatusTickLocal && amount > 0f && finalAmount <= 0f && !hasImmuneStatus)
+        {
+            finalAmount = 1f;
+        }
+
         if (!StatusDamageScope.IsStatusTick)
         {
             if (statusController != null)
@@ -577,6 +596,7 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         hasTakenDamage = true;
 
         currentHealth = Mathf.Clamp(currentHealth - finalAmount, 0f, MaxHealth);
+        currentHealth = Mathf.Clamp(RoundHalfUp(currentHealth), 0f, MaxHealth);
         OnDamageTaken?.Invoke(finalAmount, hitPoint, hitNormal);
 
         GameObject dmgPlayer = GameObject.FindGameObjectWithTag("Player");
@@ -654,10 +674,22 @@ public class EnemyHealth : MonoBehaviour, IDamageable
         }
 
         currentHealth = Mathf.Clamp(currentHealth + healAmount, 0f, MaxHealth);
+        currentHealth = Mathf.Clamp(RoundHalfUp(currentHealth), 0f, MaxHealth);
         RaiseChanged();
     }
 
     private void RaiseChanged() => OnHealthChanged?.Invoke(CurrentHealth, MaxHealth);
+
+    // Round-half-up so .5 always rounds upward (health is non-negative).
+    private static float RoundHalfUp(float value)
+    {
+        if (value <= 0f)
+        {
+            return 0f;
+        }
+
+        return Mathf.Floor(value + 0.5f);
+    }
 
     public bool IsCurrentlyImmune()
     {

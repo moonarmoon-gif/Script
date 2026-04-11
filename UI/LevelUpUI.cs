@@ -59,6 +59,27 @@ public class LevelUpUI : MonoBehaviour
 
             string key = NormalizeStatKey(string.IsNullOrEmpty(row.statName) ? $"Stat{i}" : row.statName);
 
+            if (string.Equals(key, "Intelligence", StringComparison.Ordinal))
+            {
+                const string intelligenceReworkKey = "LevelUpUI.Intelligence.ReworkVersion";
+                int version = PlayerPrefs.GetInt(intelligenceReworkKey, 0);
+                if (version < 1)
+                {
+                    if (Mathf.Approximately(row.NormalStatValue, 0.25f) || Mathf.Approximately(row.NormalStatValue, 0f))
+                    {
+                        row.NormalStatValue = 0.2f;
+                    }
+
+                    string prefsNormalKey = $"LevelUpUI.{key}.NormalStatValue";
+                    if (!PlayerPrefs.HasKey(prefsNormalKey) || Mathf.Approximately(PlayerPrefs.GetFloat(prefsNormalKey, row.NormalStatValue), 0.25f))
+                    {
+                        PlayerPrefs.SetFloat(prefsNormalKey, 0.2f);
+                    }
+
+                    PlayerPrefs.SetInt(intelligenceReworkKey, 1);
+                }
+            }
+
             if (string.Equals(key, "Vitality", StringComparison.Ordinal))
             {
                 row.NormalStatValue = 5f;
@@ -172,11 +193,6 @@ public class LevelUpUI : MonoBehaviour
 
         ApplyBackground();
         SetPlayerStatsPreviewUIEnabled(false);
-
-        if (LevelUpButton != null)
-        {
-            LevelUpButton.gameObject.SetActive(false);
-        }
     }
 
     private void OnEnable()
@@ -217,6 +233,7 @@ public class LevelUpUI : MonoBehaviour
 
     public void Hide()
     {
+        startingScreen = null;
         SetPlayerStatsPreviewUIEnabled(false);
         SetVisible(false);
 
@@ -350,7 +367,7 @@ public class LevelUpUI : MonoBehaviour
                 switch (normalized)
                 {
                     case "Intelligence":
-                        row.NormalStatValue = 0.25f;
+                        row.NormalStatValue = 0.2f;
                         row.EnhancedStatValue = 5f;
                         break;
                     case "Agility":
@@ -470,6 +487,10 @@ public class LevelUpUI : MonoBehaviour
 
         OnLevelUpConfirmed?.Invoke();
         OnLevelUpConfirmedWithStats?.Invoke(values);
+
+        // Refresh preview UI so any pending (+/-) deltas are cleared after confirmation,
+        // and future increases/decreases preview relative to the newly confirmed baseline.
+        OnStatAllocationChanged?.Invoke();
     }
 
     private void RegisterListeners()
@@ -510,6 +531,12 @@ public class LevelUpUI : MonoBehaviour
         }
 
         // LevelUpButton is deprecated: stats are committed when pressing Play.
+
+        if (LevelUpButton != null)
+        {
+            levelUpAction ??= HandleLevelUpClicked;
+            LevelUpButton.onClick.AddListener(levelUpAction);
+        }
 
         if (PlayButton != null)
         {
@@ -643,6 +670,11 @@ public class LevelUpUI : MonoBehaviour
         {
             RemainingPointsValueText.text = remaining.ToString();
         }
+
+        if (LevelUpButton != null)
+        {
+            // Keep interactable state driven by the UI setup; do not force-disable here.
+        }
     }
 
     private void SelectStat(int index)
@@ -703,7 +735,17 @@ public class LevelUpUI : MonoBehaviour
         OnStatAllocationChanged?.Invoke();
     }
 
-    private void HandleLevelUpClicked() { }
+    private void HandleLevelUpClicked()
+    {
+        CommitCurrentValuesToPrefs();
+
+        if (startingScreen != null)
+        {
+            return;
+        }
+
+        Hide();
+    }
 
     private void HandlePlayClicked()
     {
@@ -715,6 +757,6 @@ public class LevelUpUI : MonoBehaviour
             return;
         }
 
-        Debug.LogWarning("LevelUpUI: StartingScreen reference missing. Play button can't start the game.");
+        Hide();
     }
 }

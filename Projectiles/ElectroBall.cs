@@ -104,6 +104,7 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
     private Vector2 baseExplosionOffset;
     private Vector2 baseExplosionEffectOffset;
     private Vector3 baseScale;
+    private float lastAppliedScaleY = float.NaN;
 
     private float explosionEffectScale = 1f;
 
@@ -547,9 +548,32 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
 
     private Vector2 GetExplosionCenterWorld(Vector2 radiusOffset)
     {
-        Vector3 localOffset = new Vector3(radiusOffset.x, radiusOffset.y, 0f);
-        Vector3 worldOffset = transform.TransformVector(localOffset);
+        // Treat ExplosionRadiusOffset as a world-space offset so we can explicitly
+        // keep it in sync with size changes (instead of double-scaling via TransformVector).
+        Vector3 worldOffset = (transform.right * radiusOffset.x) + (transform.up * radiusOffset.y);
         return (Vector2)transform.position + (Vector2)worldOffset;
+    }
+
+    private void ApplyExplosionRadiusOffsetScaleFromSizeYIfChanged()
+    {
+        if (baseScale.y == 0f)
+        {
+            return;
+        }
+
+        float scaleY = transform.localScale.y;
+        if (!float.IsNaN(lastAppliedScaleY) && Mathf.Approximately(scaleY, lastAppliedScaleY))
+        {
+            return;
+        }
+
+        float mulY = scaleY / baseScale.y;
+        ExplosionRadiusOffset = new Vector2(
+            baseExplosionOffset.x * (baseScale.x == 0f ? 1f : (transform.localScale.x / baseScale.x)),
+            baseExplosionOffset.y * mulY
+        );
+
+        lastAppliedScaleY = scaleY;
     }
 
     public Vector2 GetSpawnOffset(Vector2 direction)
@@ -661,18 +685,26 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         float finalSpeed = speed + modifiers.speedIncrease;
         float finalDamage = damage + modifiers.damageFlat;
 
-        float totalSizeMultiplier = modifiers.sizeMultiplier;
+        float totalSizeMultiplier = Mathf.Max(0.0001f, modifiers.sizeMultiplier);
         float explosionRadiusBaseScaled = Mathf.Max(0f, baseExplosionRadius * totalSizeMultiplier);
-        if (thunderBurstActive)
+
+        // Always apply size multipliers to the parent projectile so Variant 2 (ThunderBurst)
+        // respects IncreasedSize from modifiers and variant stackings (v1+v2, v2+v3, v1+v2+v3).
+        transform.localScale = baseScale * totalSizeMultiplier;
+        if (_collider2D != null)
         {
-            thunderBurstSizeAfterCards = Mathf.Max(0f, baseThunderBurstSize * totalSizeMultiplier);
-            ApplyThunderBurstSize();
-        }
-        else if (totalSizeMultiplier != 1f)
-        {
-            transform.localScale *= totalSizeMultiplier;
             ColliderScaler.ScaleCollider(_collider2D, totalSizeMultiplier, colliderSizeOffset);
         }
+
+        // ThunderBurst has its own local scaling knob; do NOT multiply it by the card size again
+        // (parent scale already includes modifier size).
+        thunderBurstSizeAfterCards = Mathf.Max(0f, baseThunderBurstSize);
+        if (thunderBurstActive)
+        {
+            ApplyThunderBurstSize();
+        }
+
+        ApplyExplosionRadiusOffsetScaleFromSizeYIfChanged();
 
         ExplosionRadius = Mathf.Max(0f, (explosionRadiusBaseScaled + modifiers.explosionRadiusBonus) * modifiers.explosionRadiusMultiplier);
 
@@ -826,7 +858,7 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
         }
 
         cachedDetonationEffectWorldPosition = transform.position;
-        cachedDetonationCenterWorldPosition = GetExplosionCenterWorld(baseExplosionOffset);
+        cachedDetonationCenterWorldPosition = GetExplosionCenterWorld(ExplosionRadiusOffset);
         hasDetonationWorldSnapshot = true;
 
         isDetonating = true;
@@ -934,7 +966,7 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
 
         Vector2 explosionCenter = hasDetonationWorldSnapshot
             ? cachedDetonationCenterWorldPosition
-            : GetExplosionCenterWorld(baseExplosionOffset);
+            : GetExplosionCenterWorld(ExplosionRadiusOffset);
         Collider2D[] hitColliders = Physics2D.OverlapCircleAll(explosionCenter, ExplosionRadius, enemyLayer);
 
         SlowEffect slowEffect = GetComponent<SlowEffect>();
@@ -1048,16 +1080,20 @@ public class ElectroBall : MonoBehaviour, IInstantModifiable
 
         float totalSizeMultiplier = mods.sizeMultiplier;
         float explosionRadiusBaseScaled = Mathf.Max(0f, baseExplosionRadius * totalSizeMultiplier);
-        if (thunderBurstActive)
+
+        transform.localScale = baseScale * totalSizeMultiplier;
+        if (_collider2D != null)
         {
-            thunderBurstSizeAfterCards = Mathf.Max(0f, baseThunderBurstSize * totalSizeMultiplier);
-            ApplyThunderBurstSize();
-        }
-        else if (totalSizeMultiplier != 1f)
-        {
-            transform.localScale = baseScale * totalSizeMultiplier;
             ColliderScaler.ScaleCollider(_collider2D, totalSizeMultiplier, colliderSizeOffset);
         }
+
+        thunderBurstSizeAfterCards = Mathf.Max(0f, baseThunderBurstSize);
+        if (thunderBurstActive)
+        {
+            ApplyThunderBurstSize();
+        }
+
+        ApplyExplosionRadiusOffsetScaleFromSizeYIfChanged();
 
         ExplosionRadius = Mathf.Max(0f, (explosionRadiusBaseScaled + mods.explosionRadiusBonus) * mods.explosionRadiusMultiplier);
 

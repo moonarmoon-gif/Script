@@ -107,7 +107,19 @@ public class HealthUI : MonoBehaviour
         // Update text
         if (healthText != null)
         {
-            healthText.text = $"{Mathf.CeilToInt(currentHealth)} / {Mathf.CeilToInt(maxHealth)}";
+            int currentDisplay = Mathf.RoundToInt(currentHealth);
+            int maxDisplay = Mathf.Max(1, Mathf.RoundToInt(maxHealth));
+
+            if (source != null && source.IsAlive)
+            {
+                currentDisplay = Mathf.Max(1, currentDisplay);
+            }
+            else
+            {
+                currentDisplay = 0;
+            }
+
+            healthText.text = $"{currentDisplay} / {maxDisplay}";
         }
 
         // Update color based on health percentage

@@ -86,6 +86,71 @@ public class AgisEnemy : MonoBehaviour
     private bool threshold50Triggered;
     private bool threshold25Triggered;
 
+    private bool HasAttackAnimatorParam(string attackParam)
+    {
+        if (animator == null || string.IsNullOrEmpty(attackParam))
+        {
+            return false;
+        }
+
+        return TryResolveAnimatorParamName(animator, attackParam, AnimatorControllerParameterType.Trigger, out _)
+               || TryResolveAnimatorParamName(animator, attackParam, AnimatorControllerParameterType.Bool, out _);
+    }
+
+    private bool TryResolveAnimatorParamName(Animator anim, string requestedName, AnimatorControllerParameterType type, out string resolvedName)
+    {
+        resolvedName = null;
+        if (anim == null || string.IsNullOrEmpty(requestedName))
+        {
+            return false;
+        }
+
+        AnimatorControllerParameter[] parameters = anim.parameters;
+        if (parameters == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            AnimatorControllerParameter p = parameters[i];
+            if (p == null || p.type != type) continue;
+            if (string.Equals(p.name, requestedName, StringComparison.OrdinalIgnoreCase))
+            {
+                resolvedName = p.name;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void SetAnimBoolIfExists(string requestedName, bool value)
+    {
+        if (animator == null)
+        {
+            return;
+        }
+
+        if (TryResolveAnimatorParamName(animator, requestedName, AnimatorControllerParameterType.Bool, out string resolved))
+        {
+            animator.SetBool(resolved, value);
+        }
+    }
+
+    private void SetAnimTriggerIfExists(string requestedName)
+    {
+        if (animator == null)
+        {
+            return;
+        }
+
+        if (TryResolveAnimatorParamName(animator, requestedName, AnimatorControllerParameterType.Trigger, out string resolved))
+        {
+            animator.SetTrigger(resolved);
+        }
+    }
+
     private sealed class ActiveSummoningPortal
     {
         public GameObject portalInstance;
@@ -181,10 +246,7 @@ public class AgisEnemy : MonoBehaviour
 
     private IEnumerator StartupRoutine()
     {
-        if (animator != null)
-        {
-            animator.SetBool("idle", false);
-        }
+        SetAnimBoolIfExists("idle", false);
 
         float teleportIn = Mathf.Max(0f, TeleportInDuration);
         if (teleportIn > 0f)
@@ -192,10 +254,7 @@ public class AgisEnemy : MonoBehaviour
             yield return GameStateManager.WaitForPauseSafeSeconds(teleportIn);
         }
 
-        if (animator != null)
-        {
-            animator.SetBool("idle", true);
-        }
+        SetAnimBoolIfExists("idle", true);
 
         while (enemyHealth != null && enemyHealth.IsAlive && enemyHealth.IsImmuneToBossMenace)
         {
@@ -216,39 +275,12 @@ public class AgisEnemy : MonoBehaviour
 
     private IEnumerator BuffDebuffAttackLoopRoutine()
     {
-        float timeUntilNextAttack = -1f;
-
         while (enemyHealth != null && enemyHealth.IsAlive)
         {
-            if (attack3InProgress)
-            {
-                timeUntilNextAttack = -1f;
-                yield return null;
-                continue;
-            }
-
-            if (attackInProgress)
+            // Wait for any currently running attack to finish first.
+            while ((attackInProgress || attack3InProgress) && enemyHealth != null && enemyHealth.IsAlive)
             {
                 yield return null;
-                continue;
-            }
-
-            if (timeUntilNextAttack < 0f)
-            {
-                float min = Mathf.Max(0f, BuffDebuffMinTimer);
-                float max = Mathf.Max(min, BuffDebuffMaxTimer);
-                timeUntilNextAttack = UnityEngine.Random.Range(min, max);
-            }
-
-            if (timeUntilNextAttack > 0f)
-            {
-                float dt = GameStateManager.GetPauseSafeDeltaTime();
-                if (dt > 0f)
-                {
-                    timeUntilNextAttack -= dt;
-                }
-                yield return null;
-                continue;
             }
 
             if (enemyHealth == null || !enemyHealth.IsAlive)
@@ -256,16 +288,52 @@ public class AgisEnemy : MonoBehaviour
                 yield break;
             }
 
-            timeUntilNextAttack = -1f;
+            float min = Mathf.Max(0f, BuffDebuffMinTimer);
+            float max = Mathf.Max(min, BuffDebuffMaxTimer);
+            float wait = UnityEngine.Random.Range(min, max);
+            if (wait > 0f)
+            {
+                yield return GameStateManager.WaitForPauseSafeSeconds(wait);
+            }
 
+            if (enemyHealth == null || !enemyHealth.IsAlive)
+            {
+                yield break;
+            }
+
+            // If something else started an attack while we were waiting, restart the loop
+            // so we don't get stuck idling forever.
+            if (attackInProgress || attack3InProgress)
+            {
+                continue;
+            }
+
+            // Only roll attacks that actually exist in this animator, otherwise it can
+            // look like the boss "never attacks" even though the timer is firing.
             List<int> rolls = new List<int>(4);
-            if (GetAttack1RepeatCount() > 0)
+            if (GetAttack1RepeatCount() > 0 && HasAttackAnimatorParam("attack1"))
             {
                 rolls.Add(0);
             }
-            rolls.Add(1);
-            rolls.Add(2);
-            rolls.Add(3);
+            if (HasAttackAnimatorParam("attack2"))
+            {
+                rolls.Add(1);
+            }
+            if (HasAttackAnimatorParam("attack4"))
+            {
+                rolls.Add(2);
+            }
+            if (HasAttackAnimatorParam("attack5"))
+            {
+                rolls.Add(3);
+            }
+
+            if (rolls.Count == 0)
+            {
+                // Nothing to play; stay safe and try again next frame.
+                yield return null;
+                continue;
+            }
 
             int pick = rolls[UnityEngine.Random.Range(0, rolls.Count)];
             switch (pick)
@@ -295,10 +363,7 @@ public class AgisEnemy : MonoBehaviour
 
         if (string.Equals(attackParam, "attack1", StringComparison.OrdinalIgnoreCase) && !CanSpawnAnotherPortal())
         {
-            if (HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
-            {
-                animator.SetBool("idle", true);
-            }
+            SetAnimBoolIfExists("idle", true);
             yield break;
         }
 
@@ -328,18 +393,15 @@ public class AgisEnemy : MonoBehaviour
                 ApplyGlobalStatusEffect(Attack5GlobalEffect);
             }
 
-            if (HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
-            {
-                animator.SetBool("idle", false);
-            }
+            SetAnimBoolIfExists("idle", false);
 
-            if (HasAnimatorParameter(animator, attackParam, AnimatorControllerParameterType.Trigger))
+            if (TryResolveAnimatorParamName(animator, attackParam, AnimatorControllerParameterType.Trigger, out string resolvedTrigger))
             {
-                animator.SetTrigger(attackParam);
+                animator.SetTrigger(resolvedTrigger);
             }
-            else if (HasAnimatorParameter(animator, attackParam, AnimatorControllerParameterType.Bool))
+            else if (TryResolveAnimatorParamName(animator, attackParam, AnimatorControllerParameterType.Bool, out string resolvedBool))
             {
-                animator.SetBool(attackParam, true);
+                animator.SetBool(resolvedBool, true);
             }
 
             if (duration > 0f)
@@ -351,15 +413,15 @@ public class AgisEnemy : MonoBehaviour
                 yield return null;
             }
 
-            if (animator != null && HasAnimatorParameter(animator, attackParam, AnimatorControllerParameterType.Bool))
+            if (animator != null)
             {
-                animator.SetBool(attackParam, false);
+                if (TryResolveAnimatorParamName(animator, attackParam, AnimatorControllerParameterType.Bool, out string resolvedBoolEnd))
+                {
+                    animator.SetBool(resolvedBoolEnd, false);
+                }
             }
 
-            if (animator != null && HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
-            {
-                animator.SetBool("idle", true);
-            }
+            SetAnimBoolIfExists("idle", true);
         }
         finally
         {
@@ -590,10 +652,7 @@ public class AgisEnemy : MonoBehaviour
             portal.enemyEntry = GetNextUniqueEnemyEntry(currentPortalRarity);
         }
 
-        if (animator != null && HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
-        {
-            animator.SetBool("idle", true);
-        }
+        SetAnimBoolIfExists("idle", true);
     }
 
     private IEnumerator SpawnPortalAfterDelayRoutine()
@@ -832,10 +891,7 @@ public class AgisEnemy : MonoBehaviour
             UpgradePortalRarity();
             portalSummoningPaused = false;
 
-            if (animator != null && HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
-            {
-                animator.SetBool("idle", true);
-            }
+            SetAnimBoolIfExists("idle", true);
             yield return null;
         }
 
@@ -849,18 +905,15 @@ public class AgisEnemy : MonoBehaviour
 
         if (animator != null)
         {
-            if (HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
-            {
-                animator.SetBool("idle", false);
-            }
+            SetAnimBoolIfExists("idle", false);
 
-            if (HasAnimatorParameter(animator, "attack1", AnimatorControllerParameterType.Trigger))
+            if (TryResolveAnimatorParamName(animator, "attack1", AnimatorControllerParameterType.Trigger, out string resolvedTrigger))
             {
-                animator.SetTrigger("attack1");
+                animator.SetTrigger(resolvedTrigger);
             }
-            else if (HasAnimatorParameter(animator, "attack1", AnimatorControllerParameterType.Bool))
+            else if (TryResolveAnimatorParamName(animator, "attack1", AnimatorControllerParameterType.Bool, out string resolvedBool))
             {
-                animator.SetBool("attack1", true);
+                animator.SetBool(resolvedBool, true);
             }
         }
 
@@ -868,15 +921,12 @@ public class AgisEnemy : MonoBehaviour
 
         if (animator != null)
         {
-            if (HasAnimatorParameter(animator, "attack1", AnimatorControllerParameterType.Bool))
+            if (TryResolveAnimatorParamName(animator, "attack1", AnimatorControllerParameterType.Bool, out string resolvedBoolEnd))
             {
-                animator.SetBool("attack1", false);
+                animator.SetBool(resolvedBoolEnd, false);
             }
 
-            if (HasAnimatorParameter(animator, "idle", AnimatorControllerParameterType.Bool))
-            {
-                animator.SetBool("idle", true);
-            }
+            SetAnimBoolIfExists("idle", true);
         }
     }
 
@@ -1307,24 +1357,24 @@ public class AgisEnemy : MonoBehaviour
         {
             if (PlayDeathAnimationOnDeath)
             {
-                if (HasAnimatorParameter(animator, "death", AnimatorControllerParameterType.Bool))
+                if (TryResolveAnimatorParamName(animator, "death", AnimatorControllerParameterType.Bool, out string resolvedDeathBool))
                 {
-                    animator.SetBool("death", true);
+                    animator.SetBool(resolvedDeathBool, true);
                 }
-                else if (HasAnimatorParameter(animator, "death", AnimatorControllerParameterType.Trigger))
+                else
                 {
-                    animator.SetTrigger("death");
+                    SetAnimTriggerIfExists("death");
                 }
             }
             else
             {
-                if (HasAnimatorParameter(animator, "teleportout", AnimatorControllerParameterType.Bool))
+                if (TryResolveAnimatorParamName(animator, "teleportout", AnimatorControllerParameterType.Bool, out string resolvedTeleportBool))
                 {
-                    animator.SetBool("teleportout", true);
+                    animator.SetBool(resolvedTeleportBool, true);
                 }
-                else if (HasAnimatorParameter(animator, "teleportout", AnimatorControllerParameterType.Trigger))
+                else
                 {
-                    animator.SetTrigger("teleportout");
+                    SetAnimTriggerIfExists("teleportout");
                 }
             }
         }

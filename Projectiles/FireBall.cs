@@ -36,6 +36,7 @@ public class FireBall : MonoBehaviour
     [Header("FireBite")]
     public bool EnableFireBite = false;
     public float FireBiteChance = 100f;
+    public float EnhancedFireBiteChance = 5f;
     public float ExecuteTimer = 0.75f;
     public float FireBiteAnimationTime = 0.75f;
     public float FireBiteMomentumDuration = 0.2f;
@@ -72,9 +73,6 @@ public class FireBall : MonoBehaviour
     [SerializeField] private float hitEffectAdditionalRotationOffsetDeg = 0f;
     [SerializeField] private bool hitEffectRotateToVelocity = true;
     [SerializeField] private bool hitEffectKeepInitialRotation = false;
-
-    [Header("ElectroBall")]
-    public bool IsElectroBall = false;
 
     [Header("Impact Orientation")]
     [SerializeField] private ImpactOrientationMode impactOrientation = ImpactOrientationMode.SurfaceNormal;
@@ -118,7 +116,7 @@ public class FireBall : MonoBehaviour
     private PlayerStats cachedPlayerStats;
     private float baseDamageAfterCards;
 
-    private Dictionary<int, float> electroBallHitEffectRotationByEnemyId;
+    private float baseFireBiteChance;
 
     private bool fireBiteHasLockedTarget = false;
     private EnemyHealth fireBiteTarget;
@@ -193,6 +191,7 @@ public class FireBall : MonoBehaviour
         _rigidbody2D = GetComponent<Rigidbody2D>();
         _collider2D = GetComponent<Collider2D>();
         cachedAnimator = GetComponent<Animator>();
+        baseFireBiteChance = FireBiteChance;
 
         if (cachedAnimator != null)
         {
@@ -451,6 +450,9 @@ public class FireBall : MonoBehaviour
             _fadeOutRoutine = null;
         }
         StopTrailSfx(true);
+
+        // Reset per-instance values so enhanced logic doesn't accumulate on pooled reuse.
+        FireBiteChance = baseFireBiteChance;
     }
 
     private void OnDisable()
@@ -583,6 +585,39 @@ public class FireBall : MonoBehaviour
         {
             modifiers = ProjectileCardModifiers.Instance.GetCardModifiers(card);
             Debug.Log($"<color=cyan>PlayerProjectiles using modifiers from {card.cardName}</color>");
+        }
+
+        // Enhanced FireBall (Variant 1): Increase FireBite chance when the card is enhanced.
+        // This mirrors ThunderDisc's "enhanced tier" behavior (per tier reached) and is driven
+        // by ProjectileCardLevelSystem + ProjectileVariantSet variantIndex == 1.
+        FireBiteChance = baseFireBiteChance;
+        if (ProjectileCardLevelSystem.Instance != null && card != null)
+        {
+            int selected = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
+            bool unlocked = ProjectileCardLevelSystem.Instance.IsEnhancedUnlocked(card);
+            bool hasVariant1History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
+
+            // If enhanced is unlocked but no variant has been chosen yet, treat Variant 1 as the default
+            // so FireBall immediately behaves as "enhanced" at the unlock tier (same pattern as ElectroBall).
+            if (selected == 0 && unlocked)
+            {
+                selected = 1;
+            }
+
+            bool applyVariant1 = selected == 1 || hasVariant1History;
+            if (applyVariant1)
+            {
+                int unlockLevel = ProjectileCardLevelSystem.Instance.GetEnhancedUnlockLevel();
+                if (unlockLevel > 0)
+                {
+                    int level = ProjectileCardLevelSystem.Instance.GetLevel(card);
+                    int tiersReached = Mathf.Max(0, level / unlockLevel);
+                    if (tiersReached > 0)
+                    {
+                        FireBiteChance = baseFireBiteChance + Mathf.Max(0f, EnhancedFireBiteChance) * tiersReached;
+                    }
+                }
+            }
         }
 
         float finalSpeed = speed + modifiers.speedIncrease;
@@ -1053,7 +1088,7 @@ public class FireBall : MonoBehaviour
 
     private void SpawnHitEffectImmediate(Vector3 position, GameObject enemyObject)
     {
-        float extraRotation = GetElectroBallHitEffectRotationOffsetForEnemy(enemyObject);
+        float extraRotation = 0f;
         Quaternion rotation = transform.rotation;
 
         if (!hitEffectKeepInitialRotation)
@@ -1097,28 +1132,6 @@ public class FireBall : MonoBehaviour
     {
         yield return GameStateManager.WaitForPauseSafeSeconds(delay);
         SpawnHitEffectImmediate(position, enemyObject);
-    }
-
-    private float GetElectroBallHitEffectRotationOffsetForEnemy(GameObject enemyObject)
-    {
-        if (!IsElectroBall || enemyObject == null)
-        {
-            return 0f;
-        }
-
-        int id = enemyObject.GetInstanceID();
-        if (electroBallHitEffectRotationByEnemyId == null)
-        {
-            electroBallHitEffectRotationByEnemyId = new Dictionary<int, float>();
-        }
-
-        if (!electroBallHitEffectRotationByEnemyId.TryGetValue(id, out float rot))
-        {
-            rot = Random.Range(0f, 360f);
-            electroBallHitEffectRotationByEnemyId[id] = rot;
-        }
-
-        return rot;
     }
 
     private bool IsClickHitboxCollider(Collider2D other)

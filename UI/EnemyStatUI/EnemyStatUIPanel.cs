@@ -807,9 +807,16 @@ public class EnemyStatUIPanel : MonoBehaviour, IBeginDragHandler, IDragHandler, 
                 rounded = Mathf.CeilToInt(rounded);
             }
 
-            if (enemyHealth != null && enemyHealth.IsAlive)
+            if (enemyHealth != null)
             {
-                rounded = Mathf.Max(1f, rounded);
+                if (enemyHealth.IsAlive)
+                {
+                    rounded = Mathf.Max(1f, rounded);
+                }
+                else
+                {
+                    rounded = 0f;
+                }
             }
             healthText.text = rounded.ToString("0");
         }

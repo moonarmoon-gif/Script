@@ -291,7 +291,7 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
 
         int requiredPointsForEnhanced = GetRequiredPointsForEnhanced();
 
-        GetStatTuning("Intelligence", 0.25f, 5f, out float intelligenceNormal, out float intelligenceEnhanced);
+        GetStatTuning("Intelligence", 0.2f, 5f, out float intelligenceNormal, out float intelligenceEnhanced);
         GetStatTuning("Agility", 0.5f, 2f, out float agilityNormal, out float agilityEnhanced);
         GetStatTuning("Willpower", 0.05f, 20f, out float willpowerNormal, out float willpowerEnhanced);
         GetStatTuning("Vitality", 5f, 0.5f, out float vitalityNormal, out float vitalityEnhanced);
@@ -412,7 +412,7 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
 
             if (string.Equals(attr, "Intelligence", StringComparison.Ordinal))
             {
-                GetStatTuning("Intelligence", 0.25f, 5f, out _, out float enhanced);
+                GetStatTuning("Intelligence", 0.2f, 5f, out _, out float enhanced);
                 if (Mathf.Abs(coeff - enhanced) <= 0.0001f)
                 {
                     return (Get(points, "Intelligence") / requiredPointsForEnhanced) * coeff;

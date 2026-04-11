@@ -239,7 +239,7 @@ public class PlayerStats : MonoBehaviour
 
         int requiredPointsForEnhanced = Mathf.Max(1, PlayerPrefs.GetInt("LevelUpUI.RequiredPointsForEnhanced", 5));
 
-        float intelligenceNormal = PlayerPrefs.GetFloat("LevelUpUI.Intelligence.NormalStatValue", 0.25f);
+        float intelligenceNormal = PlayerPrefs.GetFloat("LevelUpUI.Intelligence.NormalStatValue", 0.2f);
         float intelligenceEnhanced = PlayerPrefs.GetFloat("LevelUpUI.Intelligence.EnhancedStatValue", 5f);
 
         float agilityNormal = PlayerPrefs.GetFloat("LevelUpUI.Agility.NormalStatValue", 0.5f);
