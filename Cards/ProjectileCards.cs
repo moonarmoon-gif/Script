@@ -186,7 +186,8 @@ public class ProjectileCards : BaseCard
     {
         // Apply rarity-based values (use runtime variable, don't modify inspector)
         // Ensure minimum cooldown of 0.1s
-        runtimeSpawnInterval = Mathf.Max(0.1f, GetSpawnIntervalForRarity());
+        float computedSpawnInterval = Mathf.Max(0.1f, GetSpawnIntervalForRarity());
+        runtimeSpawnInterval = PreserveFastestRuntimeSpawnInterval(player, computedSpawnInterval);
         
         // Determine if this call is the special initial ACTIVE projectile pick at
         // game start ("free" unlock). For that one, we want ZERO modifiers and
@@ -276,6 +277,44 @@ public class ProjectileCards : BaseCard
 
         // One-shot flag: ensure it does not affect any future calls on this instance
         suppressLevelGainOnce = false;
+    }
+
+    private float PreserveFastestRuntimeSpawnInterval(GameObject player, float computedSpawnInterval)
+    {
+        float preservedInterval = Mathf.Max(0.1f, computedSpawnInterval);
+        if (player == null)
+        {
+            return preservedInterval;
+        }
+
+        ProjectileCards existingRuntimeCard = null;
+        if (projectileSystem == ProjectileSystemType.Active)
+        {
+            AdvancedPlayerController controller = player.GetComponent<AdvancedPlayerController>();
+            if (controller != null)
+            {
+                existingRuntimeCard = controller.GetRegisteredActiveProjectileCard(this);
+            }
+        }
+        else
+        {
+            ProjectileSpawner spawner = player.GetComponent<ProjectileSpawner>();
+            if (spawner != null)
+            {
+                existingRuntimeCard = spawner.GetMatchingProjectileCard(this);
+            }
+        }
+
+        if (existingRuntimeCard == null || existingRuntimeCard == this)
+        {
+            return preservedInterval;
+        }
+
+        float existingInterval = existingRuntimeCard.runtimeSpawnInterval > 0f
+            ? existingRuntimeCard.runtimeSpawnInterval
+            : existingRuntimeCard.spawnInterval;
+
+        return Mathf.Min(Mathf.Max(0.1f, existingInterval), preservedInterval);
     }
 
     private bool ShouldSkipInitialActiveLevelGain()
@@ -525,12 +564,12 @@ public class ProjectileCards : BaseCard
             // Apply alignment to modifier line
             if (!string.IsNullOrEmpty(alignmentTag))
             {
-                modDesc = $"{alignmentTag}• {modDesc}{alignmentCloseTag}";
+                modDesc = $"{alignmentTag}{modDesc}{alignmentCloseTag}";
                 result += "\n" + modDesc;
             }
             else
             {
-                result += "\n• " + modDesc;
+                result += "\n" + modDesc;
             }
         }
 

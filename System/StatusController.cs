@@ -1739,11 +1739,17 @@ public class StatusController : MonoBehaviour
 
         switch (id)
         {
+            case StatusId.Vulnerable:
+                DamageNumberManager.Instance.ShowVulnerable(anchor);
+                break;
             case StatusId.Poison:
                 DamageNumberManager.Instance.ShowPoison(anchor);
                 break;
             case StatusId.Bleed:
                 DamageNumberManager.Instance.ShowBleed(anchor);
+                break;
+            case StatusId.Burden:
+                DamageNumberManager.Instance.ShowBurden(anchor);
                 break;
             case StatusId.Wound:
                 DamageNumberManager.Instance.ShowWound(anchor);
@@ -1760,11 +1766,20 @@ public class StatusController : MonoBehaviour
             case StatusId.Freeze:
                 DamageNumberManager.Instance.ShowFreeze(anchor);
                 break;
+            case StatusId.Frostbite:
+                DamageNumberManager.Instance.ShowFrostbite(anchor);
+                break;
+            case StatusId.Scorched:
+                DamageNumberManager.Instance.ShowScorched(anchor);
+                break;
             case StatusId.Immolation:
                 DamageNumberManager.Instance.ShowBlaze(anchor);
                 break;
             case StatusId.Static:
                 DamageNumberManager.Instance.ShowStatic(anchor);
+                break;
+            case StatusId.Shocked:
+                DamageNumberManager.Instance.ShowShocked(anchor);
                 break;
             case StatusId.Nullify:
                 DamageNumberManager.Instance.ShowNullify(anchor);
@@ -1774,6 +1789,9 @@ public class StatusController : MonoBehaviour
                 break;
             case StatusId.Immune:
                 DamageNumberManager.Instance.ShowImmune(anchor);
+                break;
+            case StatusId.DeathMark:
+                DamageNumberManager.Instance.ShowDeathMark(anchor);
                 break;
             case StatusId.Execute:
                 DamageNumberManager.Instance.ShowExecuted(anchor);

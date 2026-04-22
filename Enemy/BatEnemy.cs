@@ -287,6 +287,7 @@ public class BatEnemy : MonoBehaviour
         {
             Vector3 hitPoint = transform.position;
             Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
+            PlayerHealth.RegisterPendingAttacker(gameObject);
             playerDamageable.TakeDamage(attackDamageV2, hitPoint, hitNormal);
             hasDealtDamageThisAttack = true; // Mark damage as dealt
             Debug.Log($"<color=magenta>Bat dealt {attackDamageV2} damage at {attackDamageDelayV2}s into attack</color>");

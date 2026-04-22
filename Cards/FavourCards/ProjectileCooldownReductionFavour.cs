@@ -4,7 +4,7 @@ using UnityEngine;
 public class ProjectileCooldownReductionFavour : FavourEffect
 {
     [Header("Cooldown Reduction Settings")]
-    [Tooltip("Global projectile cooldown reduction per card (seconds).")]
+    [Tooltip("Flat points subtracted from PlayerStats.Cooldown each time this favour is gained/upgraded (100 = base cooldowns, lower = faster).")]
     public float CooldownReduction = 5f;
 
     private PlayerStats playerStats;
@@ -29,7 +29,7 @@ public class ProjectileCooldownReductionFavour : FavourEffect
 
         stacks = 1;
         float delta = Mathf.Max(0f, CooldownReduction);
-        playerStats.projectileCooldownReduction += delta;
+        playerStats.Cooldown = Mathf.Max(0f, playerStats.Cooldown - delta);
     }
 
     public override void OnUpgrade(GameObject player, FavourEffectManager manager, FavourCards sourceCard)
@@ -46,7 +46,7 @@ public class ProjectileCooldownReductionFavour : FavourEffect
 
         stacks++;
         float delta = Mathf.Max(0f, CooldownReduction);
-        playerStats.projectileCooldownReduction += delta;
+        playerStats.Cooldown = Mathf.Max(0f, playerStats.Cooldown - delta);
     }
 
     public override void OnRemove(GameObject player, FavourEffectManager manager)
@@ -58,6 +58,6 @@ public class ProjectileCooldownReductionFavour : FavourEffect
 
         float delta = Mathf.Max(0f, CooldownReduction);
         float total = delta * stacks;
-        playerStats.projectileCooldownReduction = Mathf.Max(0f, playerStats.projectileCooldownReduction - total);
+        playerStats.Cooldown = Mathf.Max(0f, playerStats.Cooldown + total);
     }
 }

@@ -82,8 +82,20 @@ public class CardButton : MonoBehaviour
             {
                 descriptionText.text = card.GetFormattedDescription();
             }
-            descriptionText.fontSize = card.descriptionFontSize;
-            descriptionText.color = card.descriptionColor;
+
+            if (manager != null)
+            {
+                float size = manager.GetDescriptionFontSize(card);
+                if (size > 0f)
+                {
+                    descriptionText.fontSize = size;
+                }
+
+                if (manager.TryGetDescriptionColor(card, card.rarity, out Color descColor))
+                {
+                    descriptionText.color = descColor;
+                }
+            }
             
             // Apply outline
             if (card.enableDescriptionOutline)
@@ -212,8 +224,20 @@ public class CardButton : MonoBehaviour
             {
                 descriptionText.text = combinedCard.GetCombinedDescription();
             }
-            descriptionText.fontSize = card.descriptionFontSize;
-            descriptionText.color = card.descriptionColor;
+
+            if (manager != null)
+            {
+                float size = manager.GetDescriptionFontSize(card);
+                if (size > 0f)
+                {
+                    descriptionText.fontSize = size;
+                }
+
+                if (manager.TryGetDescriptionColor(card, combinedCard.rarity, out Color descColor))
+                {
+                    descriptionText.color = descColor;
+                }
+            }
             
             // Apply outline
             if (card.enableDescriptionOutline)

@@ -77,7 +77,8 @@ public class FocusLowFavour : FavourEffect
         }
         else
         {
-            currentFocusGain += Mathf.Max(0, BonusFocusGain);
+            // Only raise the cap; do not reset lastHpDamageTime so the
+            // ongoing NoHpDamageWindowSeconds countdown continues unchanged.
             currentMaxStacks += Mathf.Max(0, BonusMaxStacks);
         }
     }
@@ -89,7 +90,8 @@ public class FocusLowFavour : FavourEffect
             return;
         }
 
-        if (currentFocusGain <= 0 || currentMaxStacks <= 0)
+        int perWindowGain = Mathf.Max(0, FocusGain);
+        if (perWindowGain <= 0 || currentMaxStacks <= 0)
         {
             return;
         }
@@ -107,7 +109,8 @@ public class FocusLowFavour : FavourEffect
         }
 
         int room = currentMaxStacks - existing;
-        int toAdd = Mathf.Min(room, currentFocusGain);
+        // Only allow FocusGain stacks per window, even after multiple upgrades.
+        int toAdd = Mathf.Min(room, perWindowGain);
         if (toAdd <= 0)
         {
             return;

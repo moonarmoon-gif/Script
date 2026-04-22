@@ -33,6 +33,11 @@ public class PlayerProjectiles : MonoBehaviour
     [SerializeField] private ProjectileType projectileType = ProjectileType.Fire;
     public ProjectileType ProjectileElement => projectileType;
 
+    public float EnhancedDamage = 10f;
+    public float EnhancedAttackSpeed = 5f;
+    public float EnhancedSlowChance = 7f;
+    public float EnhancedIcicleChance = 7f;
+
     // Instance-based cooldown tracking (per prefab type)
     private static System.Collections.Generic.Dictionary<string, float> lastFireTimes = new System.Collections.Generic.Dictionary<string, float>();
     private string prefabKey;
@@ -105,8 +110,11 @@ public class PlayerProjectiles : MonoBehaviour
     private FavourEffectManager favourEffectManager;
     private PlayerStats cachedPlayerStats;
     private float baseDamageAfterCards;
+    private SlowEffect cachedSlowEffect;
+    private float baseSlowChance;
 
     private Dictionary<int, float> electroBallHitEffectRotationByEnemyId;
+    public float EffectiveIcicleChanceBonus { get; private set; }
 
     public enum ImpactOrientationMode
     {
@@ -120,6 +128,8 @@ public class PlayerProjectiles : MonoBehaviour
     {
         _rigidbody2D = GetComponent<Rigidbody2D>();
         _collider2D = GetComponent<Collider2D>();
+        cachedSlowEffect = GetComponent<SlowEffect>();
+        baseSlowChance = cachedSlowEffect != null ? cachedSlowEffect.slowChance : 0f;
 
         if (_rigidbody2D != null)
         {
@@ -145,6 +155,11 @@ public class PlayerProjectiles : MonoBehaviour
             _fadeOutRoutine = null;
         }
         StopTrailSfx(true);
+        EffectiveIcicleChanceBonus = 0f;
+        if (cachedSlowEffect != null)
+        {
+            cachedSlowEffect.slowChance = baseSlowChance;
+        }
     }
 
     private void OnDisable()
@@ -174,6 +189,32 @@ public class PlayerProjectiles : MonoBehaviour
         float step = maxRotationDegreesPerSecond * GameStateManager.GetPauseSafeDeltaTime();
         float newAngle = Mathf.MoveTowardsAngle(current, desired, step);
         transform.rotation = Quaternion.Euler(0f, 0f, newAngle);
+    }
+
+    private int GetEnhancedVariantPickCount(ProjectileCards card, int variantIndex)
+    {
+        if (card == null || ProjectileCardLevelSystem.Instance == null)
+        {
+            return 0;
+        }
+
+        return ProjectileCardLevelSystem.Instance.GetEnhancedVariantPickCount(card, variantIndex);
+    }
+
+    private int GetCombinedEnhancedVariantPickCount(ProjectileCards card, params int[] variantIndices)
+    {
+        int total = 0;
+        if (variantIndices == null)
+        {
+            return total;
+        }
+
+        for (int i = 0; i < variantIndices.Length; i++)
+        {
+            total += GetEnhancedVariantPickCount(card, variantIndices[i]);
+        }
+
+        return total;
     }
 
     private bool IsOutsideCameraBounds()
@@ -265,10 +306,36 @@ public class PlayerProjectiles : MonoBehaviour
             Debug.Log($"<color=cyan>PlayerProjectiles using modifiers from {card.cardName}</color>");
         }
 
+        EffectiveIcicleChanceBonus = 0f;
+        if (card != null && card.projectileType == ProjectileCards.ProjectileType.IceLance)
+        {
+            int icicleStacks = GetCombinedEnhancedVariantPickCount(card, 1, 2, 3);
+            EffectiveIcicleChanceBonus = Mathf.Max(0f, EnhancedIcicleChance) * icicleStacks;
+
+            int slowStacks = GetEnhancedVariantPickCount(card, 3);
+            if (cachedSlowEffect != null)
+            {
+                cachedSlowEffect.slowChance = Mathf.Clamp(
+                    baseSlowChance + Mathf.Max(0f, EnhancedSlowChance) * slowStacks,
+                    0f,
+                    100f);
+            }
+        }
+
+        bool useInternalCooldown = (card == null);
         float finalSpeed = speed + modifiers.speedIncrease;
-        float finalCooldown = Mathf.Max(0.1f, cooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         int finalManaCost = Mathf.Max(0, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
-        float finalDamage = damage + modifiers.damageFlat;
+        float enhancedDamageBonus = 0f;
+        if (card != null && card.projectileType == ProjectileCards.ProjectileType.IceLance)
+        {
+            int damageStacks = GetEnhancedVariantPickCount(card, 1);
+            if (damageStacks > 0)
+            {
+                enhancedDamageBonus = Mathf.Max(0f, EnhancedDamage) * damageStacks;
+            }
+        }
+
+        float finalDamage = damage + modifiers.damageFlat + enhancedDamageBonus;
 
         if (modifiers.sizeMultiplier != 1f)
         {
@@ -289,20 +356,24 @@ public class PlayerProjectiles : MonoBehaviour
             cachedPlayerStats = colliderToIgnore.GetComponent<PlayerStats>();
         }
 
-        float effectiveCooldown = finalCooldown;
-        if (cachedPlayerStats != null)
+        float effectiveCooldown = 0f;
+        if (useInternalCooldown)
         {
-            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
-            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown *= multiplier;
+            effectiveCooldown = Mathf.Max(0.1f, cooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
+            if (cachedPlayerStats != null)
+            {
+                effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
+                float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+                effectiveCooldown *= multiplier;
 
-            if (MinCooldownManager.Instance != null && card != null)
-            {
-                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
-            }
-            else
-            {
-                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+                if (MinCooldownManager.Instance != null && card != null)
+                {
+                    effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+                }
+                else
+                {
+                    effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+                }
             }
         }
 
@@ -310,7 +381,6 @@ public class PlayerProjectiles : MonoBehaviour
         baseDamageAfterCards = damage;
 
         prefabKey = $"PlayerProjectile_{projectileType}";
-        bool useInternalCooldown = (card == null);
 
         if (!skipCooldownCheck)
         {

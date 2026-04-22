@@ -40,10 +40,16 @@ public class DamageNumberManager : MonoBehaviour
     [SerializeField] private Color blazeStatusColor = new Color(1f, 0.35f, 0.15f);
     [SerializeField] private Color slowStatusColor = new Color(0.4f, 0.8f, 1f);
     [SerializeField] private Color freezeStatusColor = new Color(0.6f, 0.9f, 1f);
+    [SerializeField] private Color vulnerableStatusColor = new Color(1f, 0.65f, 0.25f);
+    [SerializeField] private Color burdenStatusColor = new Color(0.7f, 0.55f, 0.35f);
+    [SerializeField] private Color frostbiteStatusColor = new Color(0.45f, 0.9f, 1f);
+    [SerializeField] private Color scorchedStatusColor = new Color(1f, 0.3f, 0.1f);
     [SerializeField] private Color staticStatusColor = new Color(1f, 1f, 0f);
+    [SerializeField] private Color shockedStatusColor = new Color(1f, 0.95f, 0.3f);
     [SerializeField] private Color executeStatusColor = Color.red;
     [SerializeField] private Color poisonStatusColor = new Color(0.5f, 1f, 0.5f);
     [SerializeField] private Color bleedStatusColor = new Color(0.9f, 0.1f, 0.1f);
+    [SerializeField] private Color deathMarkStatusColor = new Color(0.85f, 0.15f, 0.25f);
     [SerializeField] private Color woundStatusColor = new Color(1f, 0.6f, 0.2f);
     [SerializeField] private Color weakStatusColor = new Color(1f, 0.6f, 0.2f);
     [SerializeField] private Color nullifyStatusColor = new Color(0.6f, 0.9f, 1f);
@@ -55,10 +61,16 @@ public class DamageNumberManager : MonoBehaviour
     [SerializeField] private Vector3 blazeStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 slowStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 freezeStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 vulnerableStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 burdenStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 frostbiteStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 scorchedStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 staticStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 shockedStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 executeStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 poisonStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 bleedStatusOffset = new Vector3(0f, 1.5f, 0f);
+    [SerializeField] private Vector3 deathMarkStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 woundStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 reflectStatusOffset = new Vector3(0f, 1.5f, 0f);
     [SerializeField] private Vector3 nullifyStatusOffset = new Vector3(0f, 1.5f, 0f);
@@ -685,9 +697,34 @@ public class DamageNumberManager : MonoBehaviour
         ShowStatusInternal("Freeze", worldPosition + freezeStatusOffset, freezeStatusColor);
     }
 
+    public void ShowVulnerable(Vector3 worldPosition)
+    {
+        ShowStatusInternal("Vulnerable", worldPosition + vulnerableStatusOffset, vulnerableStatusColor);
+    }
+
+    public void ShowBurden(Vector3 worldPosition)
+    {
+        ShowStatusInternal("Burden", worldPosition + burdenStatusOffset, burdenStatusColor);
+    }
+
+    public void ShowFrostbite(Vector3 worldPosition)
+    {
+        ShowStatusInternal("Frostbite", worldPosition + frostbiteStatusOffset, frostbiteStatusColor);
+    }
+
+    public void ShowScorched(Vector3 worldPosition)
+    {
+        ShowStatusInternal("Scorched", worldPosition + scorchedStatusOffset, scorchedStatusColor);
+    }
+
     public void ShowExecuted(Vector3 worldPosition)
     {
         ShowStatusInternal("Executed", worldPosition + executeStatusOffset, executeStatusColor);
+    }
+
+    public void ShowShocked(Vector3 worldPosition)
+    {
+        ShowStatusInternal("Shocked", worldPosition + shockedStatusOffset, shockedStatusColor);
     }
 
     public void ShowPoison(Vector3 worldPosition)
@@ -698,6 +735,11 @@ public class DamageNumberManager : MonoBehaviour
     public void ShowBleed(Vector3 worldPosition)
     {
         ShowStatusInternal("Bleed", worldPosition + bleedStatusOffset, bleedStatusColor);
+    }
+
+    public void ShowDeathMark(Vector3 worldPosition)
+    {
+        ShowStatusInternal("Deathmark", worldPosition + deathMarkStatusOffset, deathMarkStatusColor);
     }
 
     public void ShowWound(Vector3 worldPosition)

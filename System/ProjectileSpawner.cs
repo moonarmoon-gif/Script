@@ -220,6 +220,47 @@ public class ProjectileSpawner : MonoBehaviour
         advancedPlayerController = GetComponent<AdvancedPlayerController>();
     }
 
+    private static bool CardsSharePersistentIdentity(ProjectileCards a, ProjectileCards b)
+    {
+        if (a == null || b == null)
+        {
+            return false;
+        }
+
+        if (a == b)
+        {
+            return true;
+        }
+
+        return a.projectileType == b.projectileType &&
+               a.projectileSystem == b.projectileSystem &&
+               a.projectilePrefab == b.projectilePrefab;
+    }
+
+    public ProjectileCards GetMatchingProjectileCard(ProjectileCards card)
+    {
+        if (card == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < activeProjectiles.Count; i++)
+        {
+            ProjectileSpawnData data = activeProjectiles[i];
+            if (data == null || data.card == null)
+            {
+                continue;
+            }
+
+            if (CardsSharePersistentIdentity(data.card, card))
+            {
+                return data.card;
+            }
+        }
+
+        return null;
+    }
+
     private void OnDisable()
     {
         StopAllCoroutines();
@@ -292,11 +333,11 @@ public class ProjectileSpawner : MonoBehaviour
             }
             
             // Same prefab AND same projectile type - update card reference to use latest modifiers
-            if (data.card.projectilePrefab == card.projectilePrefab && 
-                data.card.projectileType == card.projectileType)
+            if (CardsSharePersistentIdentity(data.card, card))
             {
                 Debug.Log($"<color=yellow>{card.cardName} already active (same prefab & type: {card.projectileType}) - UPDATING card reference to use latest modifiers</color>");
                 data.card = card; // Update to new card instance to get latest modifiers
+                RescheduleCooldownForPassiveCard(card);
                 return;
             }
         }

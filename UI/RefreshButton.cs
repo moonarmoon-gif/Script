@@ -5,6 +5,7 @@ using TMPro;
 public class RefreshButton : MonoBehaviour
 {
     public Button Button;
+    [SerializeField] private CanvasGroup visibilityCanvasGroup;
 
     public float AvailableRefreshPerLevelUp = 1f;
 
@@ -16,6 +17,15 @@ public class RefreshButton : MonoBehaviour
 
     private void OnEnable()
     {
+        if (visibilityCanvasGroup == null)
+        {
+            visibilityCanvasGroup = GetComponent<CanvasGroup>();
+            if (visibilityCanvasGroup == null)
+            {
+                visibilityCanvasGroup = gameObject.AddComponent<CanvasGroup>();
+            }
+        }
+
         if (Button != null)
         {
             Button.onClick.AddListener(OnClick);
@@ -43,7 +53,15 @@ public class RefreshButton : MonoBehaviour
         }
 
         CardSelectionManager manager = CardSelectionManager.Instance;
-        Button.interactable = manager != null && manager.CanRefreshCurrentLevelUpStage();
+        bool shouldShow = manager != null && manager.ShouldShowRefreshButton();
+        if (visibilityCanvasGroup != null)
+        {
+            visibilityCanvasGroup.alpha = shouldShow ? 1f : 0f;
+            visibilityCanvasGroup.interactable = shouldShow;
+            visibilityCanvasGroup.blocksRaycasts = shouldShow;
+        }
+
+        Button.interactable = shouldShow && manager.CanRefreshCurrentLevelUpStage();
 
         if (RefreshAmountText != null && manager != null)
         {

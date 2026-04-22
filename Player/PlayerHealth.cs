@@ -3,7 +3,7 @@ using UnityEngine;
 
 public class PlayerHealth : MonoBehaviour, IDamageable
 {
-    private const float MeleeRangeThreshold = 4f;
+    private const float MeleeRangeThreshold = 3f;
     [Header("Health Settings")]
     [SerializeField] private float maxHealth = 100f;
     [SerializeField] private float currentHealth = 100f;
@@ -254,7 +254,16 @@ public class PlayerHealth : MonoBehaviour, IDamageable
         bool isAoeDamage = DamageAoeScope.IsAoeDamage;
         if (attacker != null && !StatusDamageScope.IsStatusTick && !isAoeDamage)
         {
-            float distance = Vector3.Distance(attacker.transform.position, transform.position);
+            // Some enemies apply melee damage via child hitboxes. Resolve to the owning enemy root
+            // so distance checks are stable and Thorn/Reflect work consistently.
+            Transform attackerTransform = attacker.transform;
+            EnemyHealth attackerEnemy = attacker.GetComponent<EnemyHealth>() ?? attacker.GetComponentInParent<EnemyHealth>();
+            if (attackerEnemy != null)
+            {
+                attackerTransform = attackerEnemy.transform;
+            }
+
+            float distance = Vector3.Distance(attackerTransform.position, transform.position);
             if (distance <= MeleeRangeThreshold)
             {
                 isMeleeLikeHit = true;
@@ -387,13 +396,25 @@ public class PlayerHealth : MonoBehaviour, IDamageable
                     IDamageable attackerDamageable = attacker.GetComponent<IDamageable>() ?? attacker.GetComponentInParent<IDamageable>();
                     if (attackerDamageable != null && attackerDamageable.IsAlive)
                     {
-                        Vector3 attackerPos = attacker.transform.position;
+                        // Prefer the owning EnemyHealth for both correct popup
+                        // anchoring and for using Thorn damage color.
+                        EnemyHealth attackerEnemyHealth = attacker.GetComponent<EnemyHealth>() ?? attacker.GetComponentInParent<EnemyHealth>();
+                        Vector3 attackerPos = attackerEnemyHealth != null ? attackerEnemyHealth.transform.position : attacker.transform.position;
                         Vector3 normal = (attackerPos - transform.position).normalized;
+
+                        if (attackerEnemyHealth != null)
+                        {
+                            attackerEnemyHealth.SetLastIncomingDamageType(DamageNumberManager.DamageType.Thorn);
+                        }
+
                         attackerDamageable.TakeDamage(reflectDamage, attackerPos, normal);
 
-                        if (DamageNumberManager.Instance != null)
+                        // Only render a manual popup when the attacker does not
+                        // have an EnemyHealth pipeline to render its own number.
+                        if (attackerEnemyHealth == null && DamageNumberManager.Instance != null)
                         {
-                            DamageNumberManager.Instance.ShowDamage(reflectDamage, attackerPos, DamageNumberManager.DamageType.Thorn);
+                            Vector3 anchor = DamageNumberManager.Instance.GetAnchorWorldPosition(attacker, attackerPos);
+                            DamageNumberManager.Instance.ShowDamage(reflectDamage, anchor, DamageNumberManager.DamageType.Thorn);
                         }
                     }
                 }

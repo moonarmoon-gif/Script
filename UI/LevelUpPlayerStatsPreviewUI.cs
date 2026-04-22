@@ -15,13 +15,13 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
         nameof(PlayerStats.critChance),
         nameof(PlayerStats.critDamage),
         nameof(PlayerStats.luck),
+        nameof(PlayerStats.favourLuck),
         nameof(PlayerStats.experienceMultiplier),
         nameof(PlayerStats.damageMultiplier),
         nameof(PlayerStats.armor),
         nameof(PlayerStats.manaRegenPerSecond),
         nameof(PlayerStats.healthRegenPerSecond),
         nameof(PlayerStats.AttackSpeedBonus),
-        nameof(PlayerStats.FavourInterval),
         nameof(PlayerStats.Cooldown)
     };
 
@@ -33,6 +33,7 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
         public bool OverrideSuffix;
         public string Suffix;
     }
+
     [Serializable]
     public struct StatContributions
     {
@@ -207,7 +208,6 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
         switch (fieldName)
         {
             case nameof(PlayerStats.Cooldown):
-            case nameof(PlayerStats.FavourInterval):
                 return delta < 0f;
             default:
                 return delta > 0f;
@@ -479,13 +479,6 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
                 continue;
             }
 
-            if (fieldName == nameof(PlayerStats.FavourInterval) && CardSelectionManager.Instance != null)
-            {
-                float interval = CardSelectionManager.Instance.FavourCardInterval;
-                AppendLine(labelsSb, valuesSb, fieldName, interval, 0f);
-                continue;
-            }
-
             object raw = fi.GetValue(statsSource);
 
             bool isFloat = raw is float;
@@ -580,7 +573,7 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
 
     private static bool IsSecondsFieldName(string fieldName)
     {
-        return fieldName == nameof(PlayerStats.FavourInterval);
+        return false;
     }
 
     private static bool IsIntegerFieldName(string fieldName)
@@ -588,6 +581,7 @@ public sealed class LevelUpPlayerStatsPreviewUI : MonoBehaviour
         return fieldName == nameof(PlayerStats.baseAttack)
                || fieldName == nameof(PlayerStats.armor)
                || fieldName == nameof(PlayerStats.luck)
+               || fieldName == nameof(PlayerStats.favourLuck)
                || fieldName == nameof(PlayerStats.maxHealth)
                || fieldName == nameof(PlayerStats.maxMana);
     }

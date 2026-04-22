@@ -59,6 +59,8 @@ public class ProjectileCardLevelSystem : MonoBehaviour
     // variant selection UI so that any variant chosen at a previous tier is NOT
     // offered again on later tiers for the same card.
     private Dictionary<string, HashSet<int>> chosenVariantHistory = new Dictionary<string, HashSet<int>>();
+
+    private Dictionary<string, Dictionary<int, int>> enhancedVariantPickCounts = new Dictionary<string, Dictionary<int, int>>();
     
     private void Awake()
     {
@@ -201,6 +203,22 @@ public class ProjectileCardLevelSystem : MonoBehaviour
         return false;
     }
 
+    public int GetEnhancedVariantPickCount(ProjectileCards card, int variantIndex)
+    {
+        if (card == null || variantIndex <= 0) return 0;
+
+        string cardKey = card.cardName;
+        if (enhancedVariantPickCounts.TryGetValue(cardKey, out var perVariant))
+        {
+            if (perVariant != null && perVariant.TryGetValue(variantIndex, out int count))
+            {
+                return Mathf.Max(0, count);
+            }
+        }
+
+        return 0;
+    }
+
     /// <summary>
     /// Fired whenever a card crosses to a higher enhancement tier (1-3).
     /// CardSelectionManager listens to this to trigger the Variant Selector UI.
@@ -282,6 +300,19 @@ public class ProjectileCardLevelSystem : MonoBehaviour
 
         selectedEnhancedVariants[cardKey] = storedVariant;
         Debug.Log($"<color=gold>{cardKey} Enhanced Variant set to: {storedVariant}</color>");
+
+        if (variantIndex > 0)
+        {
+            if (!enhancedVariantPickCounts.TryGetValue(cardKey, out var perVariant))
+            {
+                perVariant = new Dictionary<int, int>();
+                enhancedVariantPickCounts[cardKey] = perVariant;
+            }
+
+            int current = 0;
+            perVariant.TryGetValue(variantIndex, out current);
+            perVariant[variantIndex] = current + 1;
+        }
 
         // Record this variant in the per-card history so future enhancement tiers
         // can filter it out of the selection UI. Only variants > 0 are meaningful.
@@ -500,6 +531,7 @@ public class ProjectileCardLevelSystem : MonoBehaviour
         selectedEnhancedVariants.Clear();
         ultimateEnhancementsSelected.Clear();
         chosenVariantHistory.Clear();
+        enhancedVariantPickCounts.Clear();
         Debug.Log("<color=yellow>All card levels reset!</color>");
     }
 }

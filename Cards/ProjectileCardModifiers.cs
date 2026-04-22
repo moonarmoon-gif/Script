@@ -32,6 +32,24 @@ public class ProjectileCardModifiers : MonoBehaviour
     /// </summary>
     private string GetCardKey(ProjectileCards card)
     {
+        if (card == null)
+        {
+            return "null";
+        }
+
+        // IMPORTANT: key should be stable across "new card instances" of the same projectile.
+        // Using cardName here can break stacking if cardName varies (rarity suffixes, duplicates, etc.).
+        string prefabName = card.projectilePrefab != null ? card.projectilePrefab.name : "nullPrefab";
+        return $"{card.projectileType}_{prefabName}";
+    }
+
+    private string GetLegacyCardKey(ProjectileCards card)
+    {
+        if (card == null)
+        {
+            return "null";
+        }
+
         return $"{card.cardName}_{card.projectileType}";
     }
     
@@ -41,6 +59,7 @@ public class ProjectileCardModifiers : MonoBehaviour
     public void RegisterCardModifiers(ProjectileCards card, List<ProjectileModifierData> modifiers, CardRarity rarity)
     {
         string cardKey = GetCardKey(card);
+        string legacyKey = GetLegacyCardKey(card);
         Debug.Log($"<color=magenta>╔═══════════════════════════════════════════════════════════╗</color>");
         Debug.Log($"<color=magenta>║   RegisterCardModifiers: {card.cardName}</color>");
         Debug.Log($"<color=magenta>╚═══════════════════════════════════════════════════════════╝</color>");
@@ -52,8 +71,16 @@ public class ProjectileCardModifiers : MonoBehaviour
         // Use cardKey instead of card instance for persistent storage
         if (!cardModifiersByKey.ContainsKey(cardKey))
         {
-            cardModifiersByKey[cardKey] = new CardModifierStats();
-            Debug.Log($"<color=magenta>  Created NEW CardModifierStats for key: {cardKey}</color>");
+            if (cardModifiersByKey.TryGetValue(legacyKey, out CardModifierStats legacyStats) && legacyStats != null)
+            {
+                cardModifiersByKey[cardKey] = legacyStats;
+                Debug.Log($"<color=magenta>  Migrated LEGACY CardModifierStats from key: {legacyKey} -> {cardKey}</color>");
+            }
+            else
+            {
+                cardModifiersByKey[cardKey] = new CardModifierStats();
+                Debug.Log($"<color=magenta>  Created NEW CardModifierStats for key: {cardKey}</color>");
+            }
         }
         else
         {
@@ -226,6 +253,16 @@ public class ProjectileCardModifiers : MonoBehaviour
             // Update instance dictionary for future lookups
             cardModifiers[card] = cardModifiersByKey[cardKey];
             return cardModifiersByKey[cardKey];
+        }
+
+        // Legacy fallback: older sessions used cardName-based keying.
+        string legacyKey = GetLegacyCardKey(card);
+        if (cardModifiersByKey.TryGetValue(legacyKey, out CardModifierStats legacyStats) && legacyStats != null)
+        {
+            // Migrate forward so future lookups hit the stable key.
+            cardModifiersByKey[cardKey] = legacyStats;
+            cardModifiers[card] = legacyStats;
+            return legacyStats;
         }
         
         return new CardModifierStats(); // Return default stats

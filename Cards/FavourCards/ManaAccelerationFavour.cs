@@ -143,7 +143,7 @@ public class ManaAccelerationFavour : FavourEffect
         int delta = desired - stacksGranted;
         if (delta > 0)
         {
-            statusController.AddStatus(StatusId.Acceleration, delta, -1f, 0f, null, sourceKey);
+            statusController.AddStatus(StatusId.Acceleration, delta, -9999f, 0f, null, sourceKey);
             stacksGranted += delta;
         }
         else if (delta < 0)

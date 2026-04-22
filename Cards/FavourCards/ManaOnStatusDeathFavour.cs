@@ -78,40 +78,7 @@ public class ManaOnStatusDeathFavour : FavourEffect
 
     public override void OnStatusApplied(GameObject player, GameObject enemy, StatusId statusId, FavourEffectManager manager)
     {
-        EnsureInitialized(player);
-
-        if (playerMana == null || enemy == null)
-        {
-            return;
-        }
-
-        if (!IsQualifyingStatus(statusId))
-        {
-            return;
-        }
-
-        float now = GameStateManager.PauseSafeTime;
-        int enemyId = enemy.GetInstanceID();
-
-        PruneOldEntries(now);
-
-        // Record that a qualifying status was applied very recently to this enemy.
-        lastQualifyingStatusAppliedTime[enemyId] = now;
-
-        // If the enemy already died (kill callback may have happened earlier in the same hit),
-        // and we have a pending kill for this enemy within the small window, grant now.
-        EnemyHealth eh = enemy.GetComponent<EnemyHealth>() ?? enemy.GetComponentInParent<EnemyHealth>();
-        if (eh != null && !eh.IsAlive)
-        {
-            if (!HasGranted(enemyId) && pendingKillTime.TryGetValue(enemyId, out float killT))
-            {
-                if (now - killT <= SameAttackWindowSeconds)
-                {
-                    TryGrantMana(enemyId);
-                    pendingKillTime.Remove(enemyId);
-                }
-            }
-        }
+        return;
     }
 
     public override void OnEnemyKilled(GameObject player, GameObject enemy, FavourEffectManager manager)
@@ -133,37 +100,20 @@ public class ManaOnStatusDeathFavour : FavourEffect
             return;
         }
 
-        StatusController status = enemy.GetComponent<StatusController>() ?? enemy.GetComponentInParent<StatusController>();
-
-        bool qualifiesNow = false;
-
-        // Primary: enemy is actually affected by qualifying statuses at kill time.
-        if (status != null && HasQualifyingStatus(status))
+        if (StatusDamageScope.IsStatusTick)
         {
-            qualifiesNow = true;
-        }
-        else
-        {
-            // Secondary: status was applied essentially "this same attack", but ordering made it arrive after death.
-            if (lastQualifyingStatusAppliedTime.TryGetValue(enemyId, out float t))
-            {
-                if (now - t <= SameAttackWindowSeconds)
-                {
-                    qualifiesNow = true;
-                }
-            }
-        }
-
-        if (qualifiesNow)
-        {
-            TryGrantMana(enemyId);
-            pendingKillTime.Remove(enemyId);
             return;
         }
 
-        // Not qualifying right now — store as pending so a status application that occurs a moment later
-        // (same hit ordering) can still grant.
-        pendingKillTime[enemyId] = now;
+        EnemyLastHitSource hitSource = enemy.GetComponent<EnemyLastHitSource>() ?? enemy.GetComponentInParent<EnemyLastHitSource>();
+        ProjectileCards sourceCard = hitSource != null ? hitSource.lastProjectileCard : null;
+        if (sourceCard == null || sourceCard.projectileSystem != ProjectileCards.ProjectileSystemType.Active)
+        {
+            return;
+        }
+
+        TryGrantMana(enemyId);
+        pendingKillTime.Remove(enemyId);
     }
 
     private void EnsureInitialized(GameObject player)

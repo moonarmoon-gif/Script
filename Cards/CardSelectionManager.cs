@@ -26,7 +26,7 @@ public class CardSelectionManager : MonoBehaviour
     [Header("Selection Settings")]
     [SerializeField] private int cardsToShow = 3;
     [SerializeField] public bool pauseGameOnSelection = true;
-    [Tooltip("Delay between card selection stages (Core → Projectile). TOTAL delay = delayBetweenStages + cardDisplayDelay")]
+    [Tooltip("Delay between card selection stages (e.g. Core → Projectile). Not stacked with Card Display Delay; see cardDisplayDelay tooltip.")]
     [SerializeField] private float delayBetweenStages = 0.5f;
     [Tooltip("Enable two-stage selection: Core cards first, then Projectile cards")]
     [SerializeField] private bool enableTwoStageSelection = true;
@@ -46,7 +46,7 @@ public class CardSelectionManager : MonoBehaviour
     private string initialActiveProjectileSystemCardName = null;
 
     [Header("UI Timing")]
-    [Tooltip("Delay after game freezes before showing card UI")]
+    [Tooltip("Delay after game freezes before showing CORE card UI on level-up. Projectile stages use delayBetweenStages only for the Core → Projectile gap.")]
     public float cardDisplayDelay = 0.5f;
 
     public float EnemyCardDisplayDelay = 0.1f;
@@ -81,6 +81,13 @@ public class CardSelectionManager : MonoBehaviour
     [Tooltip("When enabled, Favour cards are offered automatically every interval, using the same soul-level-based rarity odds. This mode is active only when AutomaticLevelingFavourSystem is disabled.")]
     [SerializeField] private bool timedLevelingFavourSystem = true;
 
+    [Header("Mine Element Selection")]
+    private bool enableMineElementSelection = false;
+
+    public bool OnLevelUpFavourSystem = false;
+
+    public bool FavourLuckSystem = false;
+
     [Tooltip("Interval in seconds between automatic Favour card offers when TimedLevelingFavourSystem is active.")]
     [SerializeField] private float favourCardInterval = 30f;
 
@@ -99,6 +106,35 @@ public class CardSelectionManager : MonoBehaviour
     public Color mythicColor = new Color(1f, 0.2f, 0.2f);
     public Color bossColor = new Color(1f, 0.84f, 0f); // Gold color for Boss rarity
 
+    [Header("Description Font Sizes")]
+    public float CoreDescriptionFontSize = 18f;
+    public float ProjectileDescriptionFontSize = 18f;
+    public float FavourDescriptionFontSize = 18f;
+
+    [Header("Core Description Colors")]
+    [SerializeField, InspectorName("CoreColor (Common)")] private Color coreDescriptionCommonColor = Color.white;
+    [SerializeField, InspectorName("CoreColor (Uncommon)")] private Color coreDescriptionUncommonColor = Color.white;
+    [SerializeField, InspectorName("CoreColor (Rare)")] private Color coreDescriptionRareColor = Color.white;
+    [SerializeField, InspectorName("CoreColor (Epic)")] private Color coreDescriptionEpicColor = Color.white;
+    [SerializeField, InspectorName("CoreColor (Legendary)")] private Color coreDescriptionLegendaryColor = Color.white;
+    [SerializeField, InspectorName("CoreColor (Mythic)")] private Color coreDescriptionMythicColor = Color.white;
+
+    [Header("Projectile Description Colors")]
+    [SerializeField, InspectorName("ProjectileColor (Common)")] private Color projectileDescriptionCommonColor = Color.white;
+    [SerializeField, InspectorName("ProjectileColor (Uncommon)")] private Color projectileDescriptionUncommonColor = Color.white;
+    [SerializeField, InspectorName("ProjectileColor (Rare)")] private Color projectileDescriptionRareColor = Color.white;
+    [SerializeField, InspectorName("ProjectileColor (Epic)")] private Color projectileDescriptionEpicColor = Color.white;
+    [SerializeField, InspectorName("ProjectileColor (Legendary)")] private Color projectileDescriptionLegendaryColor = Color.white;
+    [SerializeField, InspectorName("ProjectileColor (Mythic)")] private Color projectileDescriptionMythicColor = Color.white;
+
+    [Header("Favour Description Colors")]
+    [SerializeField, InspectorName("FavourColor (Common)")] private Color favourDescriptionCommonColor = Color.white;
+    [SerializeField, InspectorName("FavourColor (Uncommon)")] private Color favourDescriptionUncommonColor = Color.white;
+    [SerializeField, InspectorName("FavourColor (Rare)")] private Color favourDescriptionRareColor = Color.white;
+    [SerializeField, InspectorName("FavourColor (Epic)")] private Color favourDescriptionEpicColor = Color.white;
+    [SerializeField, InspectorName("FavourColor (Legendary)")] private Color favourDescriptionLegendaryColor = Color.white;
+    [SerializeField, InspectorName("FavourColor (Mythic)")] private Color favourDescriptionMythicColor = Color.white;
+
     [Header("UI References")]
     [SerializeField] private GameObject cardSelectionUI;
     [SerializeField] private Transform cardContainer;
@@ -109,9 +145,6 @@ public class CardSelectionManager : MonoBehaviour
     [SerializeField] private GameObject variantSelectorCardButtonPrefab;
     [SerializeField] private GameObject fireMineCardButtonPrefab;
     [SerializeField] private GameObject frostMineCardButtonPrefab;
-
-    [Header("Mine Element Selection")]
-    [SerializeField] private bool enableMineElementSelection = true;
 
     private GameObject player;
     private bool isSelectionActive = false;
@@ -129,6 +162,8 @@ public class CardSelectionManager : MonoBehaviour
     private bool currentSelectionExcludeCommon = false;
     private bool isRefreshingCurrentStage = false;
     private Coroutine refreshCurrentStageRoutine;
+    private RefreshableSelectionType currentRefreshableSelectionType = RefreshableSelectionType.None;
+    private System.Func<List<BaseCard>> currentFavourRefreshGenerator;
 
     private GameObject soulExpCanvas;
     private float timedFavourElapsed = 0f;
@@ -136,11 +171,14 @@ public class CardSelectionManager : MonoBehaviour
 
     private StartingScreen cachedStartingScreen;
     private LevelUpUI cachedLevelUpUI;
+    private bool canToggleCardSelectionUiActive = true;
+    private CanvasGroup cardSelectionCanvasGroup;
 
     private bool wasTimedModeActive = false;
     private bool soulExpGainEnabledBeforeTimed = true;
     private bool lastAutomaticLevelingFavourSystem;
     private bool lastTimedLevelingFavourSystem;
+    private bool lastOnLevelUpFavourSystem;
 
     private RefreshButton cachedRefreshButton;
     private int nextRefreshButtonSearchFrame = 0;
@@ -190,6 +228,14 @@ public class CardSelectionManager : MonoBehaviour
         Favour = 2,
         Enemy = 3,
         Other = 4
+    }
+
+    private enum RefreshableSelectionType
+    {
+        None = 0,
+        Core = 1,
+        Projectile = 2,
+        Favour = 3
     }
 
     private ExternalSelectionPriority GetExternalSelectionPriority(List<BaseCard> cards)
@@ -353,10 +399,131 @@ public class CardSelectionManager : MonoBehaviour
         }
     }
 
+    public bool ShouldShowRefreshButton()
+    {
+        return isSelectionActive && currentRefreshableSelectionType != RefreshableSelectionType.None;
+    }
+
+    private void ResetCurrentSelectionStageState(bool clearFavourRefreshGenerator = true)
+    {
+        currentSelectionIsLevelUpStage = false;
+        currentSelectionIsCoreStage = false;
+        currentSelectionExcludeCommon = false;
+        refreshAwardPendingForThisStage = false;
+        isRefreshingCurrentStage = false;
+        currentRefreshableSelectionType = RefreshableSelectionType.None;
+
+        if (clearFavourRefreshGenerator)
+        {
+            currentFavourRefreshGenerator = null;
+        }
+    }
+
+    private static bool AreAllCardsFavourCards(List<BaseCard> cards)
+    {
+        if (cards == null || cards.Count == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < cards.Count; i++)
+        {
+            if (!(cards[i] is FavourCards))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public float GetDescriptionFontSize(BaseCard card)
+    {
+        if (card is CoreCards)
+        {
+            return CoreDescriptionFontSize;
+        }
+
+        if (card is ProjectileCards)
+        {
+            return ProjectileDescriptionFontSize;
+        }
+
+        if (card is FavourCards)
+        {
+            return FavourDescriptionFontSize;
+        }
+
+        return 0f;
+    }
+
+    public bool TryGetDescriptionColor(BaseCard card, CardRarity rarity, out Color color)
+    {
+        if (card is CoreCards)
+        {
+            color = GetCoreDescriptionColor(rarity);
+            return true;
+        }
+
+        if (card is ProjectileCards)
+        {
+            color = GetProjectileDescriptionColor(rarity);
+            return true;
+        }
+
+        if (card is FavourCards)
+        {
+            color = GetFavourDescriptionColor(rarity);
+            return true;
+        }
+
+        color = default;
+        return false;
+    }
+
+    private Color GetCoreDescriptionColor(CardRarity rarity)
+    {
+        switch (rarity)
+        {
+            case CardRarity.Uncommon: return coreDescriptionUncommonColor;
+            case CardRarity.Rare: return coreDescriptionRareColor;
+            case CardRarity.Epic: return coreDescriptionEpicColor;
+            case CardRarity.Legendary: return coreDescriptionLegendaryColor;
+            case CardRarity.Mythic: return coreDescriptionMythicColor;
+            default: return coreDescriptionCommonColor;
+        }
+    }
+
+    private Color GetProjectileDescriptionColor(CardRarity rarity)
+    {
+        switch (rarity)
+        {
+            case CardRarity.Uncommon: return projectileDescriptionUncommonColor;
+            case CardRarity.Rare: return projectileDescriptionRareColor;
+            case CardRarity.Epic: return projectileDescriptionEpicColor;
+            case CardRarity.Legendary: return projectileDescriptionLegendaryColor;
+            case CardRarity.Mythic: return projectileDescriptionMythicColor;
+            default: return projectileDescriptionCommonColor;
+        }
+    }
+
+    private Color GetFavourDescriptionColor(CardRarity rarity)
+    {
+        switch (rarity)
+        {
+            case CardRarity.Uncommon: return favourDescriptionUncommonColor;
+            case CardRarity.Rare: return favourDescriptionRareColor;
+            case CardRarity.Epic: return favourDescriptionEpicColor;
+            case CardRarity.Legendary: return favourDescriptionLegendaryColor;
+            case CardRarity.Mythic: return favourDescriptionMythicColor;
+            default: return favourDescriptionCommonColor;
+        }
+    }
+
     public bool CanRefreshCurrentLevelUpStage()
     {
         return isSelectionActive &&
-               currentSelectionIsLevelUpStage &&
+               currentRefreshableSelectionType != RefreshableSelectionType.None &&
                !isRefreshingCurrentStage &&
                refreshCurrency >= 1f;
     }
@@ -383,7 +550,7 @@ public class CardSelectionManager : MonoBehaviour
 
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(false);
+            HideCardSelectionUi();
         }
 
         float delay = Mathf.Max(0f, refreshedCardDisplayDelay);
@@ -392,34 +559,50 @@ public class CardSelectionManager : MonoBehaviour
             yield return new WaitForSecondsRealtime(delay);
         }
 
-        if (!isSelectionActive || !currentSelectionIsLevelUpStage)
+        if (!isSelectionActive || currentRefreshableSelectionType == RefreshableSelectionType.None)
         {
             isRefreshingCurrentStage = false;
             refreshCurrentStageRoutine = null;
             yield break;
         }
 
-        List<CombinedCard> selectedCards;
-        if (currentSelectionIsCoreStage)
+        if (currentRefreshableSelectionType == RefreshableSelectionType.Core)
         {
-            selectedCards = GenerateRandomCombinedCards(cardsToShow, currentSelectionExcludeCommon);
-        }
-        else
-        {
-            selectedCards = GenerateRandomProjectileCards(cardsToShow, currentSelectionExcludeCommon);
-        }
-
-        if (cardSelectionUI != null)
-        {
-            cardSelectionUI.SetActive(true);
-
-            if (currentSelectionIsCoreStage)
+            List<CombinedCard> selectedCards = GenerateRandomCombinedCards(cardsToShow, currentSelectionExcludeCommon);
+            if (cardSelectionUI != null)
             {
+                ShowCardSelectionUi();
                 DisplayCombinedCards(selectedCards);
             }
-            else
+        }
+        else if (currentRefreshableSelectionType == RefreshableSelectionType.Projectile)
+        {
+            List<CombinedCard> selectedCards = GenerateRandomProjectileCards(cardsToShow, currentSelectionExcludeCommon);
+            if (cardSelectionUI != null)
             {
+                ShowCardSelectionUi();
                 DisplayProjectileCards(selectedCards);
+            }
+        }
+        else if (currentRefreshableSelectionType == RefreshableSelectionType.Favour)
+        {
+            if (currentFavourRefreshGenerator != null)
+            {
+                List<BaseCard> selectedCards = currentFavourRefreshGenerator.Invoke();
+                if (selectedCards != null && selectedCards.Count > 0 && cardSelectionUI != null && cardContainer != null)
+                {
+                    foreach (Transform child in cardContainer)
+                    {
+                        Destroy(child.gameObject);
+                    }
+
+                    ShowCardSelectionUi();
+                    DisplayBaseCards(selectedCards);
+                }
+                else if (cardSelectionUI != null)
+                {
+                    ShowCardSelectionUi();
+                }
             }
         }
 
@@ -578,7 +761,8 @@ public class CardSelectionManager : MonoBehaviour
         }
         else
         {
-            cardSelectionUI.SetActive(false);
+            ValidateCardSelectionUiSafety();
+            HideCardSelectionUi();
         }
 
         if (cardContainer == null)
@@ -592,15 +776,98 @@ public class CardSelectionManager : MonoBehaviour
         }
 
         soulExpCanvas = FindSoulExpCanvas();
+        ApplyFavourSystemMode();
         lastAutomaticLevelingFavourSystem = automaticLevelingFavourSystem;
         lastTimedLevelingFavourSystem = timedLevelingFavourSystem;
-        ApplyFavourSystemMode();
+        lastOnLevelUpFavourSystem = OnLevelUpFavourSystem;
 
         // Subscribe to enhancement tier events so we can show variant selection
         if (ProjectileCardLevelSystem.Instance != null)
         {
             ProjectileCardLevelSystem.Instance.OnCardTierIncreased += HandleCardTierIncreased;
             subscribedToTierEvents = true;
+        }
+    }
+
+    private void ValidateCardSelectionUiSafety()
+    {
+        if (cardSelectionUI == null)
+        {
+            canToggleCardSelectionUiActive = false;
+            return;
+        }
+
+        if (player == null)
+        {
+            player = GameObject.FindGameObjectWithTag("Player");
+        }
+
+        canToggleCardSelectionUiActive = true;
+        if (player != null)
+        {
+            Transform uiRoot = cardSelectionUI.transform;
+            Transform playerTransform = player.transform;
+            if (uiRoot == playerTransform || playerTransform.IsChildOf(uiRoot))
+            {
+                canToggleCardSelectionUiActive = false;
+                Debug.LogError("CardSelectionManager: cardSelectionUI references the player object or one of its parents. Falling back to CanvasGroup visibility so player GameObject is never toggled active.");
+            }
+        }
+
+        cardSelectionCanvasGroup = cardSelectionUI.GetComponent<CanvasGroup>();
+        if (cardSelectionCanvasGroup == null)
+        {
+            cardSelectionCanvasGroup = cardSelectionUI.AddComponent<CanvasGroup>();
+        }
+    }
+
+    private void ShowCardSelectionUi()
+    {
+        if (cardSelectionUI == null)
+        {
+            return;
+        }
+
+        if (canToggleCardSelectionUiActive && player == null)
+        {
+            ValidateCardSelectionUiSafety();
+        }
+
+        if (canToggleCardSelectionUiActive)
+        {
+            cardSelectionUI.SetActive(true);
+        }
+
+        if (cardSelectionCanvasGroup != null)
+        {
+            cardSelectionCanvasGroup.alpha = 1f;
+            cardSelectionCanvasGroup.interactable = true;
+            cardSelectionCanvasGroup.blocksRaycasts = true;
+        }
+    }
+
+    private void HideCardSelectionUi()
+    {
+        if (cardSelectionUI == null)
+        {
+            return;
+        }
+
+        if (canToggleCardSelectionUiActive && player == null)
+        {
+            ValidateCardSelectionUiSafety();
+        }
+
+        if (canToggleCardSelectionUiActive)
+        {
+            cardSelectionUI.SetActive(false);
+        }
+
+        if (cardSelectionCanvasGroup != null)
+        {
+            cardSelectionCanvasGroup.alpha = 0f;
+            cardSelectionCanvasGroup.interactable = false;
+            cardSelectionCanvasGroup.blocksRaycasts = false;
         }
     }
 
@@ -615,11 +882,14 @@ public class CardSelectionManager : MonoBehaviour
             subscribedToTierEvents = true;
         }
 
-        if (lastAutomaticLevelingFavourSystem != automaticLevelingFavourSystem || lastTimedLevelingFavourSystem != timedLevelingFavourSystem)
+        if (lastAutomaticLevelingFavourSystem != automaticLevelingFavourSystem ||
+            lastTimedLevelingFavourSystem != timedLevelingFavourSystem ||
+            lastOnLevelUpFavourSystem != OnLevelUpFavourSystem)
         {
+            ApplyFavourSystemMode();
             lastAutomaticLevelingFavourSystem = automaticLevelingFavourSystem;
             lastTimedLevelingFavourSystem = timedLevelingFavourSystem;
-            ApplyFavourSystemMode();
+            lastOnLevelUpFavourSystem = OnLevelUpFavourSystem;
         }
 
         TickTimedFavourSystem();
@@ -657,6 +927,12 @@ public class CardSelectionManager : MonoBehaviour
 
     private void ApplyFavourSystemMode()
     {
+        if (OnLevelUpFavourSystem)
+        {
+            timedLevelingFavourSystem = false;
+            automaticLevelingFavourSystem = false;
+        }
+
         if (timedLevelingFavourSystem && automaticLevelingFavourSystem)
         {
             automaticLevelingFavourSystem = false;
@@ -797,7 +1073,7 @@ public class CardSelectionManager : MonoBehaviour
 
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(false);
+            HideCardSelectionUi();
         }
 
         if (pauseGameOnSelection && !GameStateManager.ManualPauseActive)
@@ -809,11 +1085,7 @@ public class CardSelectionManager : MonoBehaviour
         isFirstStage = false;
         waitingForSecondStage = false;
 
-        currentSelectionIsLevelUpStage = false;
-        currentSelectionIsCoreStage = false;
-        currentSelectionExcludeCommon = false;
-        refreshAwardPendingForThisStage = false;
-        isRefreshingCurrentStage = false;
+        ResetCurrentSelectionStageState();
         refreshCurrentStageRoutine = null;
 
         pendingLevelUps.Clear();
@@ -899,6 +1171,12 @@ public class CardSelectionManager : MonoBehaviour
                 }
             }
 
+            if (IsOnLevelUpFavourSystemActive)
+            {
+                yield return StartCoroutine(ProcessLevelUpQueueWithOnLevelUpFavour(totalLevels));
+                continue;
+            }
+
             // Process all CORE card stages for this batch
             int coreStagesShown = 0;
             while (coreStagesShown < totalLevels)
@@ -933,21 +1211,13 @@ public class CardSelectionManager : MonoBehaviour
             }
 
             deferVariantSelections = false;
-            if (!processingVariantQueue && pendingVariantSelections.Count > 0)
-            {
-                StartCoroutine(ProcessVariantSelectionQueue());
-            }
-
-            while (processingVariantQueue || pendingVariantSelections.Count > 0)
-            {
-                yield return null;
-            }
+            yield return StartCoroutine(WaitForPendingVariantSelections());
 
             // Now process all PROJECTILE card stages for this batch, if enabled
             if (enableTwoStageSelection && totalLevels > 0)
             {
-                // Small gap between finishing all cores and starting projectiles
-                yield return new WaitForSecondsRealtime(delayBetweenStages * 1.5f);
+                // Gap between finishing all cores and starting projectiles
+                yield return new WaitForSecondsRealtime(delayBetweenStages);
 
                 for (int i = 0; i < totalLevels; i++)
                 {
@@ -959,15 +1229,7 @@ public class CardSelectionManager : MonoBehaviour
 
                     yield return StartCoroutine(ShowSingleLevelUpStage(false));
 
-                    if (!processingVariantQueue && pendingVariantSelections.Count > 0)
-                    {
-                        StartCoroutine(ProcessVariantSelectionQueue());
-                    }
-
-                    while (processingVariantQueue || pendingVariantSelections.Count > 0)
-                    {
-                        yield return null;
-                    }
+                    yield return StartCoroutine(WaitForPendingVariantSelections());
 
                     // Small delay between projectile card selections
                     if (i < totalLevels - 1)
@@ -977,15 +1239,7 @@ public class CardSelectionManager : MonoBehaviour
                 }
             }
 
-            if (!processingVariantQueue && pendingVariantSelections.Count > 0)
-            {
-                StartCoroutine(ProcessVariantSelectionQueue());
-            }
-
-            while (processingVariantQueue || pendingVariantSelections.Count > 0)
-            {
-                yield return null;
-            }
+            yield return StartCoroutine(WaitForPendingVariantSelections());
 
             // If more level-ups accumulated during this batch, add a short
             // delay before starting the next batch so the UI feels sequential.
@@ -997,11 +1251,295 @@ public class CardSelectionManager : MonoBehaviour
 
         processingLevelUpQueue = false;
     }
+
+    private IEnumerator ProcessLevelUpQueueWithOnLevelUpFavour(int totalLevels)
+    {
+        int levelsProcessed = 0;
+
+        while (levelsProcessed < totalLevels)
+        {
+            deferVariantSelections = true;
+
+            while (processingVariantQueue)
+            {
+                yield return null;
+            }
+
+            yield return StartCoroutine(ShowSingleLevelUpStage(true));
+            levelsProcessed++;
+
+            if (pendingLevelUps.Count > 0)
+            {
+                int extraLevels = pendingLevelUps.Count;
+                totalLevels += extraLevels;
+                for (int j = 0; j < extraLevels; j++)
+                {
+                    if (pendingLevelUps.Count > 0)
+                    {
+                        pendingLevelUps.Dequeue();
+                    }
+                }
+            }
+
+            if (delayBetweenStages > 0f)
+            {
+                PauseGameForQueuedStageTransition();
+                yield return new WaitForSecondsRealtime(delayBetweenStages);
+            }
+
+            if (enableTwoStageSelection)
+            {
+                while (processingVariantQueue)
+                {
+                    yield return null;
+                }
+
+                yield return StartCoroutine(ShowSingleLevelUpStage(false));
+
+                deferVariantSelections = false;
+                yield return StartCoroutine(WaitForPendingVariantSelections());
+            }
+            else
+            {
+                deferVariantSelections = false;
+            }
+
+            if (delayBetweenStages > 0f)
+            {
+                PauseGameForQueuedStageTransition();
+                yield return new WaitForSecondsRealtime(delayBetweenStages);
+            }
+
+            yield return StartCoroutine(ShowOnLevelUpFavourStage());
+
+            if (levelsProcessed < totalLevels && delayBetweenStages > 0f)
+            {
+                PauseGameForQueuedStageTransition();
+                yield return new WaitForSecondsRealtime(delayBetweenStages);
+            }
+        }
+
+        deferVariantSelections = false;
+        yield return StartCoroutine(WaitForPendingVariantSelections());
+    }
+
+    private IEnumerator ShowOnLevelUpFavourStage()
+    {
+        if (!IsOnLevelUpFavourSystemActive)
+        {
+            ResumeGameAfterQueuedStageTransitionIfNeeded();
+            yield break;
+        }
+
+        if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
+        {
+            ResumeGameAfterQueuedStageTransitionIfNeeded();
+            yield break;
+        }
+
+        if (favourCardPool == null || favourCardPool.Count == 0)
+        {
+            ResumeGameAfterQueuedStageTransitionIfNeeded();
+            yield break;
+        }
+
+        while (isSelectionActive)
+        {
+            yield return null;
+        }
+
+        int count = Mathf.Max(1, cardsToShow);
+        List<BaseCard> cards = GenerateOnLevelUpFavourCards(count);
+        if (cards == null || cards.Count == 0)
+        {
+            ResumeGameAfterQueuedStageTransitionIfNeeded();
+            yield break;
+        }
+
+        currentFavourRefreshGenerator = () => GenerateOnLevelUpFavourCards(count);
+        ShowCardsImmediate(cards, 0f);
+
+        while (isSelectionActive)
+        {
+            yield return null;
+        }
+    }
+
+    private void PauseGameForQueuedStageTransition()
+    {
+        if (pauseGameOnSelection)
+        {
+            Time.timeScale = 0f;
+        }
+    }
+
+    private void ResumeGameAfterQueuedStageTransitionIfNeeded()
+    {
+        if (pauseGameOnSelection && !GameStateManager.ManualPauseActive)
+        {
+            Time.timeScale = 1f;
+        }
+    }
+
+    private List<BaseCard> GenerateOnLevelUpFavourCards(int count)
+    {
+        int targetCount = Mathf.Max(1, count);
+
+        List<BaseCard> result = new List<BaseCard>();
+        HashSet<FavourCards> usedCards = new HashSet<FavourCards>();
+
+        if (FavourLuckSystem)
+        {
+            FavourRarityChanceTracker tracker = EnsureFavourRarityChanceTracker();
+            for (int i = 0; i < targetCount; i++)
+            {
+                CardRarity rolled = RollFavourRarity(tracker);
+                FavourCards baseCard = GetRandomFavourCardOfRarityWithFallback(rolled, usedCards);
+                if (baseCard == null)
+                {
+                    break;
+                }
+
+                usedCards.Add(baseCard);
+                result.Add(Instantiate(baseCard));
+            }
+
+            return result;
+        }
+
+        CardRarity stageRarity = GetNextFavourStageRarity();
+        for (int i = 0; i < targetCount; i++)
+        {
+            FavourCards baseCard = GetRandomFavourCardOfRarity(stageRarity, usedCards);
+            if (baseCard == null)
+            {
+                break;
+            }
+
+            usedCards.Add(baseCard);
+            result.Add(Instantiate(baseCard));
+        }
+
+        return result;
+    }
+
+    private static CardRarity RollFavourRarity(FavourRarityChanceTracker tracker)
+    {
+        float common = tracker != null ? Mathf.Max(0f, tracker.CommonFavourChance) : 100f;
+        float uncommon = tracker != null ? Mathf.Max(0f, tracker.UncommonFavourChance) : 0f;
+        float rare = tracker != null ? Mathf.Max(0f, tracker.RareFavourChance) : 0f;
+        float epic = tracker != null ? Mathf.Max(0f, tracker.EpicFavourChance) : 0f;
+        float legendary = tracker != null ? Mathf.Max(0f, tracker.LegendaryFavourChance) : 0f;
+        float mythic = tracker != null ? Mathf.Max(0f, tracker.MythicFavourChance) : 0f;
+
+        float total = common + uncommon + rare + epic + legendary + mythic;
+        if (total <= 0.001f)
+        {
+            return CardRarity.Common;
+        }
+
+        float roll = Random.Range(0f, total);
+        float cumulative = common;
+        if (roll < cumulative) return CardRarity.Common;
+
+        cumulative += uncommon;
+        if (roll < cumulative) return CardRarity.Uncommon;
+
+        cumulative += rare;
+        if (roll < cumulative) return CardRarity.Rare;
+
+        cumulative += epic;
+        if (roll < cumulative) return CardRarity.Epic;
+
+        cumulative += legendary;
+        if (roll < cumulative) return CardRarity.Legendary;
+
+        return CardRarity.Mythic;
+    }
+
+    private static FavourCards GetRandomFavourCardOfRarityWithFallback(CardRarity targetRarity, HashSet<FavourCards> usedCards)
+    {
+        CardSelectionManager mgr = Instance;
+        if (mgr == null)
+        {
+            return null;
+        }
+
+        if (targetRarity > CardRarity.Mythic)
+        {
+            targetRarity = CardRarity.Mythic;
+        }
+
+        if (targetRarity < CardRarity.Common)
+        {
+            targetRarity = CardRarity.Common;
+        }
+
+        FavourCards exact = mgr.GetRandomFavourCardOfRarity(targetRarity, usedCards);
+        if (exact != null)
+        {
+            return exact;
+        }
+
+        for (int r = (int)targetRarity - 1; r >= (int)CardRarity.Common; r--)
+        {
+            FavourCards lower = mgr.GetRandomFavourCardOfRarity((CardRarity)r, usedCards);
+            if (lower != null)
+            {
+                return lower;
+            }
+        }
+
+        for (int r = (int)targetRarity + 1; r <= (int)CardRarity.Mythic; r++)
+        {
+            FavourCards higher = mgr.GetRandomFavourCardOfRarity((CardRarity)r, usedCards);
+            if (higher != null)
+            {
+                return higher;
+            }
+        }
+
+        return null;
+    }
+
+    private static CardRarity GetNextFavourStageRarity()
+    {
+        FavourRarityManager favourRarityManager = FavourRarityManager.Instance;
+        if (favourRarityManager == null)
+        {
+            favourRarityManager = FindObjectOfType<FavourRarityManager>();
+        }
+
+        if (favourRarityManager == null)
+        {
+            GameObject go = new GameObject("FavourRarityManager");
+            favourRarityManager = go.AddComponent<FavourRarityManager>();
+        }
+
+        return favourRarityManager != null ? favourRarityManager.GetNextFavourRarity() : CardRarity.Common;
+    }
+
+    private static FavourRarityChanceTracker EnsureFavourRarityChanceTracker()
+    {
+        FavourRarityChanceTracker tracker = FavourRarityChanceTracker.Instance;
+        if (tracker == null)
+        {
+            tracker = FindObjectOfType<FavourRarityChanceTracker>();
+        }
+
+        if (tracker == null)
+        {
+            GameObject go = new GameObject("FavourRarityChanceTracker");
+            tracker = go.AddComponent<FavourRarityChanceTracker>();
+        }
+
+        return tracker;
+    }
     
     /// <summary>
     /// Show a single stage (core or projectile cards)
     /// </summary>
-    private IEnumerator ShowSingleLevelUpStage(bool isCoreStage)
+    private IEnumerator ShowSingleLevelUpStage(bool isCoreStage, bool skipCardDisplayDelay = false)
     {
         if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
         {
@@ -1012,16 +1550,17 @@ public class CardSelectionManager : MonoBehaviour
         isFirstStage = isCoreStage;
         waitingForSecondStage = false;
 
-        currentSelectionIsLevelUpStage = false;
-        currentSelectionIsCoreStage = false;
-        currentSelectionExcludeCommon = false;
+        ResetCurrentSelectionStageState();
 
         if (pauseGameOnSelection)
         {
             Time.timeScale = 0f;
         }
 
-        yield return new WaitForSecondsRealtime(cardDisplayDelay);
+        if (!skipCardDisplayDelay && isCoreStage)
+        {
+            yield return new WaitForSecondsRealtime(cardDisplayDelay);
+        }
 
         if (GameStateManager.Instance != null && GameStateManager.Instance.PlayerIsDead)
         {
@@ -1035,6 +1574,9 @@ public class CardSelectionManager : MonoBehaviour
         currentSelectionIsCoreStage = isCoreStage;
         currentSelectionExcludeCommon = excludeCommon;
         isRefreshingCurrentStage = false;
+        currentRefreshableSelectionType = isCoreStage
+            ? RefreshableSelectionType.Core
+            : RefreshableSelectionType.Projectile;
 
         refreshAwardPendingForThisStage = isCoreStage;
         if (refreshAwardPendingForThisStage && availableRefreshPerLevelUp > 0f)
@@ -1055,7 +1597,7 @@ public class CardSelectionManager : MonoBehaviour
 
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(true);
+            ShowCardSelectionUi();
             if (isCoreStage)
             {
                 DisplayCombinedCards(selectedCards);
@@ -1097,7 +1639,7 @@ public class CardSelectionManager : MonoBehaviour
 
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(true);
+            ShowCardSelectionUi();
             
             // Ensure the cards are visible
             CanvasGroup canvasGroup = cardSelectionUI.GetComponent<CanvasGroup>();
@@ -1133,11 +1675,7 @@ public class CardSelectionManager : MonoBehaviour
         isFirstStage = false;
         waitingForSecondStage = false;
 
-        currentSelectionIsLevelUpStage = false;
-        currentSelectionIsCoreStage = false;
-        currentSelectionExcludeCommon = false;
-        refreshAwardPendingForThisStage = false;
-        isRefreshingCurrentStage = false;
+        ResetCurrentSelectionStageState();
 
         if (pauseGameOnSelection)
         {
@@ -1165,7 +1703,7 @@ public class CardSelectionManager : MonoBehaviour
 
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(true);
+            ShowCardSelectionUi();
             DisplayCombinedCards(cards);
         }
 
@@ -2409,6 +2947,19 @@ public class CardSelectionManager : MonoBehaviour
         processingVariantQueue = false;
     }
 
+    private IEnumerator WaitForPendingVariantSelections()
+    {
+        if (!processingVariantQueue && pendingVariantSelections.Count > 0)
+        {
+            yield return StartCoroutine(ProcessVariantSelectionQueue());
+        }
+
+        while (processingVariantQueue || pendingVariantSelections.Count > 0)
+        {
+            yield return null;
+        }
+    }
+
     public ProjectileVariantSet GetVariantSetForCard(ProjectileCards card)
     {
         if (card == null || projectileVariantSets == null) return null;
@@ -2465,16 +3016,12 @@ public class CardSelectionManager : MonoBehaviour
             Destroy(child.gameObject);
         }
 
-        cardSelectionUI.SetActive(true);
+        ShowCardSelectionUi();
         isSelectionActive = true;
         isFirstStage = false;
         waitingForSecondStage = false;
 
-        currentSelectionIsLevelUpStage = false;
-        currentSelectionIsCoreStage = false;
-        currentSelectionExcludeCommon = false;
-        refreshAwardPendingForThisStage = false;
-        isRefreshingCurrentStage = false;
+        ResetCurrentSelectionStageState();
 
         bool isUltimateTier = false;
         if (ProjectileCardLevelSystem.Instance != null)
@@ -2535,7 +3082,12 @@ public class CardSelectionManager : MonoBehaviour
             // on later enhancement selections for that same card.
             if (ProjectileCardLevelSystem.Instance != null && info.variantIndex > 0)
             {
-                if (ProjectileCardLevelSystem.Instance.HasChosenVariant(card, info.variantIndex))
+                bool repeatableVariants = card != null &&
+                    (card.projectileType == ProjectileCards.ProjectileType.ThunderDisc ||
+                     card.projectileType == ProjectileCards.ProjectileType.Fireball ||
+                     card.projectileType == ProjectileCards.ProjectileType.IceLance);
+
+                if (!repeatableVariants && ProjectileCardLevelSystem.Instance.HasChosenVariant(card, info.variantIndex))
                 {
                     continue;
                 }
@@ -2557,7 +3109,7 @@ public class CardSelectionManager : MonoBehaviour
         {
             if (cardSelectionUI != null)
             {
-                cardSelectionUI.SetActive(false);
+                HideCardSelectionUi();
             }
 
             if (pauseGameOnSelection && !GameStateManager.ManualPauseActive)
@@ -2579,7 +3131,7 @@ public class CardSelectionManager : MonoBehaviour
     {
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(false);
+            HideCardSelectionUi();
         }
 
         if (pauseGameOnSelection && !GameStateManager.ManualPauseActive)
@@ -2634,7 +3186,7 @@ public class CardSelectionManager : MonoBehaviour
 
             if (cardSelectionUI != null)
             {
-                cardSelectionUI.SetActive(false);
+                HideCardSelectionUi();
             }
 
             if (pauseGameOnSelection && !GameStateManager.ManualPauseActive)
@@ -2675,7 +3227,7 @@ public class CardSelectionManager : MonoBehaviour
 
                 if (cardSelectionUI != null)
                 {
-                    cardSelectionUI.SetActive(false);
+                    HideCardSelectionUi();
                 }
 
                 isSelectionActive = false;
@@ -2695,7 +3247,7 @@ public class CardSelectionManager : MonoBehaviour
         // Just close UI and mark selection as complete
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(false);
+            HideCardSelectionUi();
         }
 
         // Only unpause if this is the last stage (projectile cards or two-stage disabled)
@@ -2710,11 +3262,7 @@ public class CardSelectionManager : MonoBehaviour
         isSelectionActive = false;
         waitingForSecondStage = false;
 
-        currentSelectionIsLevelUpStage = false;
-        currentSelectionIsCoreStage = false;
-        currentSelectionExcludeCommon = false;
-        refreshAwardPendingForThisStage = false;
-        isRefreshingCurrentStage = false;
+        ResetCurrentSelectionStageState();
     }
 
     /// <summary>
@@ -2734,7 +3282,7 @@ public class CardSelectionManager : MonoBehaviour
 
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(true);
+            ShowCardSelectionUi();
             DisplayCombinedCards(projectileCards);
         }
     }
@@ -2779,11 +3327,9 @@ public class CardSelectionManager : MonoBehaviour
             Time.timeScale = 0f;
         }
 
-        currentSelectionIsLevelUpStage = false;
-        currentSelectionIsCoreStage = false;
-        currentSelectionExcludeCommon = false;
+        ResetCurrentSelectionStageState();
 
-        cardSelectionUI.SetActive(true);
+        ShowCardSelectionUi();
         isSelectionActive = true;
 
         // FIRE option (base prefab)
@@ -3203,7 +3749,7 @@ public class CardSelectionManager : MonoBehaviour
         // Show UI with projectile cards
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(true);
+            ShowCardSelectionUi();
         }
         else
         {
@@ -3315,6 +3861,11 @@ public class CardSelectionManager : MonoBehaviour
 
     private void ShowCardsImmediate(List<BaseCard> cards)
     {
+        ShowCardsImmediate(cards, cardDisplayDelay);
+    }
+
+    private void ShowCardsImmediate(List<BaseCard> cards, float minimumDelayOverride)
+    {
         if (cards == null || cards.Count == 0)
         {
             return;
@@ -3341,19 +3892,21 @@ public class CardSelectionManager : MonoBehaviour
             Time.timeScale = 0f;
         }
 
-        currentSelectionIsLevelUpStage = false;
-        currentSelectionIsCoreStage = false;
-        currentSelectionExcludeCommon = false;
+        bool isRefreshableFavourStage = AreAllCardsFavourCards(cards) && currentFavourRefreshGenerator != null;
+        ResetCurrentSelectionStageState(!isRefreshableFavourStage);
+        currentRefreshableSelectionType = isRefreshableFavourStage
+            ? RefreshableSelectionType.Favour
+            : RefreshableSelectionType.None;
 
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(false);
+            HideCardSelectionUi();
         }
         isSelectionActive = true;
         isFirstStage = false;
         waitingForSecondStage = false;
 
-        float perCardDelay = Mathf.Max(0f, cardDisplayDelay);
+        float perCardDelay = Mathf.Max(0f, minimumDelayOverride);
         for (int i = 0; i < cards.Count; i++)
         {
             BaseCard c = cards[i];
@@ -3386,9 +3939,14 @@ public class CardSelectionManager : MonoBehaviour
 
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(true);
+            ShowCardSelectionUi();
         }
 
+        DisplayBaseCards(cards);
+    }
+
+    private void DisplayBaseCards(List<BaseCard> cards)
+    {
         for (int i = 0; i < cards.Count; i++)
         {
             BaseCard card = cards[i];
@@ -3462,11 +4020,9 @@ public class CardSelectionManager : MonoBehaviour
             Time.timeScale = 0f;
         }
 
-        currentSelectionIsLevelUpStage = false;
-        currentSelectionIsCoreStage = false;
-        currentSelectionExcludeCommon = false;
+        ResetCurrentSelectionStageState();
 
-        cardSelectionUI.SetActive(true);
+        ShowCardSelectionUi();
         isSelectionActive = true;
         isFirstStage = false;
         waitingForSecondStage = false;
@@ -3544,7 +4100,7 @@ public class CardSelectionManager : MonoBehaviour
 
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(false);
+            HideCardSelectionUi();
         }
 
         if (pauseGameOnSelection && !GameStateManager.ManualPauseActive)
@@ -3555,6 +4111,7 @@ public class CardSelectionManager : MonoBehaviour
         isSelectionActive = false;
         isFirstStage = false;
         waitingForSecondStage = false;
+        ResetCurrentSelectionStageState();
     }
 
     /// <summary>
@@ -3570,6 +4127,10 @@ public class CardSelectionManager : MonoBehaviour
             return;
         }
 
+        List<CardRarity> rarityHistoryCopy = enemyRarityHistory != null
+            ? new List<CardRarity>(enemyRarityHistory)
+            : new List<CardRarity>();
+        currentFavourRefreshGenerator = () => GenerateFavourCards(count, rarityHistoryCopy, forceBossRarity);
         ShowCards(favourCards);
     }
 
@@ -3755,50 +4316,61 @@ public class CardSelectionManager : MonoBehaviour
             return;
         }
 
-        int targetCount = Mathf.Max(1, count);
-
-        List<BaseCard> result = new List<BaseCard>();
-        HashSet<FavourCards> usedCards = new HashSet<FavourCards>();
-
-        CardRarity stageRarity = CardRarity.Common;
-
-        FavourRarityManager favourRarityManager = FavourRarityManager.Instance;
-        if (favourRarityManager == null)
-        {
-            favourRarityManager = FindObjectOfType<FavourRarityManager>();
-        }
-
-        if (favourRarityManager == null)
-        {
-            GameObject go = new GameObject("FavourRarityManager");
-            favourRarityManager = go.AddComponent<FavourRarityManager>();
-        }
-
-        if (favourRarityManager != null)
-        {
-            stageRarity = favourRarityManager.GetNextFavourRarity();
-        }
-
-        for (int i = 0; i < targetCount; i++)
-        {
-            FavourCards baseCard = GetRandomFavourCardOfRarity(stageRarity, usedCards);
-            if (baseCard == null)
-            {
-                break;
-            }
-
-            usedCards.Add(baseCard);
-
-            FavourCards instance = Instantiate(baseCard);
-            result.Add(instance);
-        }
-
+        List<BaseCard> result = GenerateSoulLevelFavourCards(soulLevel, count);
         if (result.Count == 0)
         {
             return;
         }
 
+        currentFavourRefreshGenerator = () => GenerateSoulLevelFavourCards(soulLevel, count);
         ShowCards(result);
+    }
+
+    private List<BaseCard> GenerateSoulLevelFavourCards(int soulLevel, int count)
+    {
+        if (soulLevel < 1 || favourCardPool == null || favourCardPool.Count == 0)
+        {
+            return new List<BaseCard>();
+        }
+
+        int targetCount = Mathf.Max(1, count);
+
+        List<BaseCard> result = new List<BaseCard>();
+        HashSet<FavourCards> usedCards = new HashSet<FavourCards>();
+
+        if (FavourLuckSystem)
+        {
+            FavourRarityChanceTracker tracker = EnsureFavourRarityChanceTracker();
+            for (int i = 0; i < targetCount; i++)
+            {
+                CardRarity rolled = RollFavourRarity(tracker);
+                FavourCards baseCard = GetRandomFavourCardOfRarityWithFallback(rolled, usedCards);
+                if (baseCard == null)
+                {
+                    break;
+                }
+
+                usedCards.Add(baseCard);
+                result.Add(Instantiate(baseCard));
+            }
+        }
+        else
+        {
+            CardRarity stageRarity = GetNextFavourStageRarity();
+            for (int i = 0; i < targetCount; i++)
+            {
+                FavourCards baseCard = GetRandomFavourCardOfRarity(stageRarity, usedCards);
+                if (baseCard == null)
+                {
+                    break;
+                }
+
+                usedCards.Add(baseCard);
+                result.Add(Instantiate(baseCard));
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -3819,7 +4391,7 @@ public class CardSelectionManager : MonoBehaviour
 
         if (cardSelectionUI != null)
         {
-            cardSelectionUI.SetActive(false);
+            HideCardSelectionUi();
         }
 
         if (pauseGameOnSelection && !GameStateManager.ManualPauseActive)
@@ -3828,6 +4400,9 @@ public class CardSelectionManager : MonoBehaviour
         }
 
         isSelectionActive = false;
+        isFirstStage = false;
+        waitingForSecondStage = false;
+        ResetCurrentSelectionStageState();
     }
 
     private void OnValidate()
@@ -3843,9 +4418,20 @@ public class CardSelectionManager : MonoBehaviour
             automaticLevelingFavourSystem = false;
         }
 
+        if (OnLevelUpFavourSystem)
+        {
+            timedLevelingFavourSystem = false;
+            automaticLevelingFavourSystem = false;
+        }
+
         if (favourCardInterval < 0f)
         {
             favourCardInterval = 0f;
         }
+    }
+
+    private bool IsOnLevelUpFavourSystemActive
+    {
+        get { return OnLevelUpFavourSystem && !timedLevelingFavourSystem && !automaticLevelingFavourSystem; }
     }
 }

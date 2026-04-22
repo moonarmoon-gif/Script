@@ -6,8 +6,24 @@ using System.Collections.Generic;
 [RequireComponent(typeof(Collider2D))]
 public class FireBall : MonoBehaviour
 {
+    [System.Serializable]
+    public sealed class MomentumRevampElement
+    {
+        [Tooltip("Speed threshold to target (e.g., 20).")]
+        public float SetSpeed = 20f;
+
+        [Tooltip("When speed reaches SetSpeed, FireBiteMomentumDuration becomes this (far momentum).")]
+        public float FarMomentumDuration = 0.215f;
+
+        [Tooltip("When speed reaches SetSpeed, MediumMomentumDuration becomes this (mid momentum).")]
+        public float MidMomentumDuration = 0.125f;
+    }
+
     [Header("Motion")]
     [SerializeField] private float speed = 15f;
+
+    [Header("Momentum Revamp")]
+    public List<MomentumRevampElement> MomentumRevamp = new List<MomentumRevampElement>();
 
     [Header("Offscreen Destruction")]
     [Tooltip("Bonus destroy boundary size (world units). If projectile goes outside the camera bounds plus this value, it is destroyed immediately.")]
@@ -36,7 +52,10 @@ public class FireBall : MonoBehaviour
     [Header("FireBite")]
     public bool EnableFireBite = false;
     public float FireBiteChance = 100f;
-    public float EnhancedFireBiteChance = 5f;
+    public float EnhancedFireBiteChance = 7f;
+    public float EnhancedDamage = 10f;
+    public float EnhancedAttackSpeed = 5f;
+    public float EnhancedBurnChance = 7f;
     public float ExecuteTimer = 0.75f;
     public float FireBiteAnimationTime = 0.75f;
     public float FireBiteMomentumDuration = 0.2f;
@@ -117,6 +136,10 @@ public class FireBall : MonoBehaviour
     private float baseDamageAfterCards;
 
     private float baseFireBiteChance;
+    private float baseFireBiteMomentumDuration;
+    private float baseMediumMomentumDuration;
+    private BurnEffect cachedBurnEffect;
+    private float baseBurnChance;
 
     private bool fireBiteHasLockedTarget = false;
     private EnemyHealth fireBiteTarget;
@@ -191,7 +214,11 @@ public class FireBall : MonoBehaviour
         _rigidbody2D = GetComponent<Rigidbody2D>();
         _collider2D = GetComponent<Collider2D>();
         cachedAnimator = GetComponent<Animator>();
+        cachedBurnEffect = GetComponent<BurnEffect>();
         baseFireBiteChance = FireBiteChance;
+        baseFireBiteMomentumDuration = FireBiteMomentumDuration;
+        baseMediumMomentumDuration = MediumMomentumDuration;
+        baseBurnChance = cachedBurnEffect != null ? cachedBurnEffect.burnChance : 0f;
 
         if (cachedAnimator != null)
         {
@@ -287,6 +314,7 @@ public class FireBall : MonoBehaviour
 
         if (_rigidbody2D != null)
         {
+            ApplyMomentumRevampForSpeed(_rigidbody2D.velocity.magnitude);
             fireBitePreservedVelocity = _rigidbody2D.velocity;
 
             float duration = Mathf.Max(0f, FireBiteMomentumDuration);
@@ -453,6 +481,12 @@ public class FireBall : MonoBehaviour
 
         // Reset per-instance values so enhanced logic doesn't accumulate on pooled reuse.
         FireBiteChance = baseFireBiteChance;
+        FireBiteMomentumDuration = baseFireBiteMomentumDuration;
+        MediumMomentumDuration = baseMediumMomentumDuration;
+        if (cachedBurnEffect != null)
+        {
+            cachedBurnEffect.burnChance = baseBurnChance;
+        }
     }
 
     private void OnDisable()
@@ -496,6 +530,32 @@ public class FireBall : MonoBehaviour
         float step = maxRotationDegreesPerSecond * GameStateManager.GetPauseSafeDeltaTime();
         float newAngle = Mathf.MoveTowardsAngle(current, desired, step);
         transform.rotation = Quaternion.Euler(0f, 0f, newAngle);
+    }
+
+    private int GetEnhancedVariantPickCount(ProjectileCards card, int variantIndex)
+    {
+        if (card == null || ProjectileCardLevelSystem.Instance == null)
+        {
+            return 0;
+        }
+
+        return ProjectileCardLevelSystem.Instance.GetEnhancedVariantPickCount(card, variantIndex);
+    }
+
+    private int GetCombinedEnhancedVariantPickCount(ProjectileCards card, params int[] variantIndices)
+    {
+        int total = 0;
+        if (variantIndices == null)
+        {
+            return total;
+        }
+
+        for (int i = 0; i < variantIndices.Length; i++)
+        {
+            total += GetEnhancedVariantPickCount(card, variantIndices[i]);
+        }
+
+        return total;
     }
 
     private bool IsOutsideCameraBounds()
@@ -587,43 +647,36 @@ public class FireBall : MonoBehaviour
             Debug.Log($"<color=cyan>PlayerProjectiles using modifiers from {card.cardName}</color>");
         }
 
-        // Enhanced FireBall (Variant 1): Increase FireBite chance when the card is enhanced.
-        // This mirrors ThunderDisc's "enhanced tier" behavior (per tier reached) and is driven
-        // by ProjectileCardLevelSystem + ProjectileVariantSet variantIndex == 1.
         FireBiteChance = baseFireBiteChance;
-        if (ProjectileCardLevelSystem.Instance != null && card != null)
+        int fireBiteStacks = GetCombinedEnhancedVariantPickCount(card, 1, 2, 3);
+        if (fireBiteStacks > 0)
         {
-            int selected = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
-            bool unlocked = ProjectileCardLevelSystem.Instance.IsEnhancedUnlocked(card);
-            bool hasVariant1History = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
-
-            // If enhanced is unlocked but no variant has been chosen yet, treat Variant 1 as the default
-            // so FireBall immediately behaves as "enhanced" at the unlock tier (same pattern as ElectroBall).
-            if (selected == 0 && unlocked)
-            {
-                selected = 1;
-            }
-
-            bool applyVariant1 = selected == 1 || hasVariant1History;
-            if (applyVariant1)
-            {
-                int unlockLevel = ProjectileCardLevelSystem.Instance.GetEnhancedUnlockLevel();
-                if (unlockLevel > 0)
-                {
-                    int level = ProjectileCardLevelSystem.Instance.GetLevel(card);
-                    int tiersReached = Mathf.Max(0, level / unlockLevel);
-                    if (tiersReached > 0)
-                    {
-                        FireBiteChance = baseFireBiteChance + Mathf.Max(0f, EnhancedFireBiteChance) * tiersReached;
-                    }
-                }
-            }
+            FireBiteChance = baseFireBiteChance + Mathf.Max(0f, EnhancedFireBiteChance) * fireBiteStacks;
         }
 
+        int burnStacks = GetEnhancedVariantPickCount(card, 3);
+        if (cachedBurnEffect != null)
+        {
+            cachedBurnEffect.burnChance = Mathf.Clamp(
+                baseBurnChance + Mathf.Max(0f, EnhancedBurnChance) * burnStacks,
+                0f,
+                100f);
+        }
+
+        bool useInternalCooldown = (card == null);
         float finalSpeed = speed + modifiers.speedIncrease;
-        float finalCooldown = Mathf.Max(0.1f, cooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         int finalManaCost = Mathf.Max(0, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
-        float finalDamage = damage + modifiers.damageFlat;
+
+        float enhancedDamageBonus = 0f;
+        int damageStacks = GetEnhancedVariantPickCount(card, 1);
+        if (damageStacks > 0)
+        {
+            enhancedDamageBonus = Mathf.Max(0f, EnhancedDamage) * damageStacks;
+        }
+
+        float finalDamage = damage + modifiers.damageFlat + enhancedDamageBonus;
+
+        ApplyMomentumRevampForSpeed(finalSpeed);
 
         if (modifiers.sizeMultiplier != 1f)
         {
@@ -644,20 +697,24 @@ public class FireBall : MonoBehaviour
             cachedPlayerStats = colliderToIgnore.GetComponent<PlayerStats>();
         }
 
-        float effectiveCooldown = finalCooldown;
-        if (cachedPlayerStats != null)
+        float effectiveCooldown = 0f;
+        if (useInternalCooldown)
         {
-            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
-            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown *= multiplier;
+            effectiveCooldown = Mathf.Max(0.1f, cooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
+            if (cachedPlayerStats != null)
+            {
+                effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
+                float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+                effectiveCooldown *= multiplier;
 
-            if (MinCooldownManager.Instance != null && card != null)
-            {
-                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
-            }
-            else
-            {
-                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+                if (MinCooldownManager.Instance != null && card != null)
+                {
+                    effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+                }
+                else
+                {
+                    effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+                }
             }
         }
 
@@ -665,7 +722,6 @@ public class FireBall : MonoBehaviour
         baseDamageAfterCards = damage;
 
         prefabKey = $"PlayerProjectile_{projectileType}";
-        bool useInternalCooldown = (card == null);
 
         if (!skipCooldownCheck)
         {
@@ -766,6 +822,102 @@ public class FireBall : MonoBehaviour
     public float GetProjectileSpeed()
     {
         return speed;
+    }
+
+    private void ApplyMomentumRevampForSpeed(float projectileSpeed)
+    {
+        if (MomentumRevamp == null || MomentumRevamp.Count == 0)
+        {
+            return;
+        }
+
+        // Only compute at 0.25 speed steps; if speed is e.g. 15.15, use the lowest nearest step (15.0).
+        float steppedSpeed = Mathf.Floor(projectileSpeed * 4f) / 4f;
+
+        float far;
+        float mid;
+        if (!TryEvaluateMomentumRevamp(steppedSpeed, out far, out mid))
+        {
+            return;
+        }
+
+        FireBiteMomentumDuration = Mathf.Max(0f, far);
+        MediumMomentumDuration = Mathf.Max(0f, mid);
+    }
+
+    private bool TryEvaluateMomentumRevamp(float steppedSpeed, out float farDuration, out float midDuration)
+    {
+        farDuration = 0f;
+        midDuration = 0f;
+
+        if (MomentumRevamp == null || MomentumRevamp.Count == 0)
+        {
+            return false;
+        }
+
+        // Find nearest lower/upper keyframes around steppedSpeed.
+        MomentumRevampElement lower = null;
+        MomentumRevampElement upper = null;
+
+        for (int i = 0; i < MomentumRevamp.Count; i++)
+        {
+            MomentumRevampElement e = MomentumRevamp[i];
+            if (e == null) continue;
+
+            float s = e.SetSpeed;
+
+            // Exact match
+            if (Mathf.Approximately(s, steppedSpeed))
+            {
+                farDuration = e.FarMomentumDuration;
+                midDuration = e.MidMomentumDuration;
+                return true;
+            }
+
+            if (s < steppedSpeed)
+            {
+                if (lower == null || s > lower.SetSpeed)
+                {
+                    lower = e;
+                }
+            }
+            else // s > steppedSpeed
+            {
+                if (upper == null || s < upper.SetSpeed)
+                {
+                    upper = e;
+                }
+            }
+        }
+
+        if (lower == null && upper == null)
+        {
+            return false;
+        }
+
+        // Outside bounds: clamp to nearest defined values
+        if (lower == null)
+        {
+            farDuration = upper.FarMomentumDuration;
+            midDuration = upper.MidMomentumDuration;
+            return true;
+        }
+
+        if (upper == null)
+        {
+            farDuration = lower.FarMomentumDuration;
+            midDuration = lower.MidMomentumDuration;
+            return true;
+        }
+
+        float a = lower.SetSpeed;
+        float b = upper.SetSpeed;
+        float denom = Mathf.Max(0.0001f, b - a);
+        float t = Mathf.Clamp01((steppedSpeed - a) / denom);
+
+        farDuration = Mathf.Lerp(lower.FarMomentumDuration, upper.FarMomentumDuration, t);
+        midDuration = Mathf.Lerp(lower.MidMomentumDuration, upper.MidMomentumDuration, t);
+        return true;
     }
 
     private void OnTriggerEnter2D(Collider2D other)

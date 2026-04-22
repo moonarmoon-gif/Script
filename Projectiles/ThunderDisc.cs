@@ -39,6 +39,9 @@ public class ThunderDisc : MonoBehaviour
     public float BounceChance = 100f;
     private float baseBounceChance;
     public float EnhancedBounceChance = 5f;
+    public float EnhancedDamage = 10f;
+    public float EnhancedAttackSpeed = 5f;
+    public float EnhancedStaticChance = 7f;
     public float BounceSpeedBoost = 5f;
     [Range(0f, 100f)] public float ReducedBounceChance = 50f;
 
@@ -120,6 +123,11 @@ public class ThunderDisc : MonoBehaviour
     private float bounceChanceMultiplierPerBounce = 0.5f;
     private float currentMoveSpeed = 15f;
     private readonly HashSet<GameObject> bouncedHitEnemies = new HashSet<GameObject>();
+    private StaticEffect cachedStaticEffect;
+    private float baseStaticChance;
+    private Component bounceLockedTargetComponent;
+    private Collider2D bounceLockedTargetCollider;
+    private IDamageable bounceLockedTargetDamageable;
 
     private static readonly Collider2D[] bounceOverlaps = new Collider2D[48];
 
@@ -147,6 +155,8 @@ public class ThunderDisc : MonoBehaviour
         // overwrite the visible fields (useful for pooled projectiles too).
         baseSpeed = speed;
         baseBounceChance = BounceChance;
+        cachedStaticEffect = GetComponent<StaticEffect>();
+        baseStaticChance = cachedStaticEffect != null ? cachedStaticEffect.staticChance : 0f;
     }
 
     private void OnEnable()
@@ -161,6 +171,12 @@ public class ThunderDisc : MonoBehaviour
         // Restore base values on reuse so Launch() always starts from the true base.
         speed = baseSpeed;
         BounceChance = baseBounceChance;
+        if (cachedStaticEffect != null)
+        {
+            cachedStaticEffect.staticChance = baseStaticChance;
+        }
+
+        ClearBounceTarget();
     }
 
     private void OnDisable()
@@ -170,7 +186,9 @@ public class ThunderDisc : MonoBehaviour
 
     private void Update()
     {
-        if (hasLaunched && IsOutsideCameraBounds())
+        UpdateBounceLock();
+
+        if (hasLaunched && !HasActiveBounceTarget() && IsOutsideCameraBounds())
         {
             Destroy(gameObject);
             return;
@@ -190,6 +208,83 @@ public class ThunderDisc : MonoBehaviour
         float step = maxRotationDegreesPerSecond * GameStateManager.GetPauseSafeDeltaTime();
         float newAngle = Mathf.MoveTowardsAngle(current, desired, step);
         transform.rotation = Quaternion.Euler(0f, 0f, newAngle);
+    }
+
+    private int GetEnhancedVariantPickCount(ProjectileCards card, int variantIndex)
+    {
+        if (card == null || ProjectileCardLevelSystem.Instance == null)
+        {
+            return 0;
+        }
+
+        return ProjectileCardLevelSystem.Instance.GetEnhancedVariantPickCount(card, variantIndex);
+    }
+
+    private int GetCombinedEnhancedVariantPickCount(ProjectileCards card, params int[] variantIndices)
+    {
+        int total = 0;
+        if (variantIndices == null)
+        {
+            return total;
+        }
+
+        for (int i = 0; i < variantIndices.Length; i++)
+        {
+            total += GetEnhancedVariantPickCount(card, variantIndices[i]);
+        }
+
+        return total;
+    }
+
+    private void ClearBounceTarget()
+    {
+        bounceLockedTargetComponent = null;
+        bounceLockedTargetCollider = null;
+        bounceLockedTargetDamageable = null;
+    }
+
+    private bool HasActiveBounceTarget()
+    {
+        if (bounceLockedTargetComponent == null || bounceLockedTargetDamageable == null)
+        {
+            return false;
+        }
+
+        return bounceLockedTargetDamageable.IsAlive;
+    }
+
+    private Vector2 GetBounceTargetPosition()
+    {
+        if (bounceLockedTargetCollider != null)
+        {
+            return bounceLockedTargetCollider.bounds.center;
+        }
+
+        return bounceLockedTargetComponent != null
+            ? (Vector2)bounceLockedTargetComponent.transform.position
+            : (Vector2)transform.position;
+    }
+
+    private void UpdateBounceLock()
+    {
+        if (_rigidbody2D == null)
+        {
+            return;
+        }
+
+        if (!HasActiveBounceTarget())
+        {
+            ClearBounceTarget();
+            return;
+        }
+
+        Vector2 toTarget = GetBounceTargetPosition() - (Vector2)transform.position;
+        if (toTarget.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        _rigidbody2D.velocity = toTarget.normalized * currentMoveSpeed;
     }
 
     private bool IsOutsideCameraBounds()
@@ -281,10 +376,17 @@ public class ThunderDisc : MonoBehaviour
             Debug.Log($"<color=cyan>PlayerProjectiles using modifiers from {card.cardName}</color>");
         }
 
+        bool useInternalCooldown = (card == null);
         float finalSpeed = baseSpeed + modifiers.speedIncrease;
-        float finalCooldown = Mathf.Max(0.1f, cooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
         int finalManaCost = Mathf.Max(0, Mathf.CeilToInt(manaCost * (1f - modifiers.manaCostReduction)));
-        float finalDamage = damage + modifiers.damageFlat;
+        float enhancedDamageBonus = 0f;
+        int damageStacks = GetEnhancedVariantPickCount(card, 1);
+        if (damageStacks > 0)
+        {
+            enhancedDamageBonus = Mathf.Max(0f, EnhancedDamage) * damageStacks;
+        }
+
+        float finalDamage = damage + modifiers.damageFlat + enhancedDamageBonus;
 
         if (modifiers.sizeMultiplier != 1f)
         {
@@ -305,20 +407,24 @@ public class ThunderDisc : MonoBehaviour
             cachedPlayerStats = colliderToIgnore.GetComponent<PlayerStats>();
         }
 
-        float effectiveCooldown = finalCooldown;
-        if (cachedPlayerStats != null)
+        float effectiveCooldown = 0f;
+        if (useInternalCooldown)
         {
-            effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
-            float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
-            effectiveCooldown *= multiplier;
+            effectiveCooldown = Mathf.Max(0.1f, cooldown - Mathf.Max(0f, modifiers.cooldownReductionSeconds));
+            if (cachedPlayerStats != null)
+            {
+                effectiveCooldown = Mathf.Max(0.01f, effectiveCooldown - Mathf.Max(0f, cachedPlayerStats.projectileCooldownReduction));
+                float multiplier = Mathf.Max(0f, cachedPlayerStats.Cooldown) / 100f;
+                effectiveCooldown *= multiplier;
 
-            if (MinCooldownManager.Instance != null && card != null)
-            {
-                effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
-            }
-            else
-            {
-                effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+                if (MinCooldownManager.Instance != null && card != null)
+                {
+                    effectiveCooldown = MinCooldownManager.Instance.ClampCooldown(card, effectiveCooldown);
+                }
+                else
+                {
+                    effectiveCooldown = Mathf.Max(0.1f, effectiveCooldown);
+                }
             }
         }
 
@@ -326,7 +432,6 @@ public class ThunderDisc : MonoBehaviour
         baseDamageAfterCards = damage;
 
         prefabKey = $"PlayerProjectile_{projectileType}";
-        bool useInternalCooldown = (card == null);
 
         if (!skipCooldownCheck)
         {
@@ -365,30 +470,24 @@ public class ThunderDisc : MonoBehaviour
         {
             pre = gameObject.AddComponent<PredeterminedStatusRoll>();
         }
+
+        int staticStacks = GetEnhancedVariantPickCount(card, 3);
+        if (cachedStaticEffect != null)
+        {
+            cachedStaticEffect.staticChance = Mathf.Clamp(
+                baseStaticChance + Mathf.Max(0f, EnhancedStaticChance) * staticStacks,
+                0f,
+                100f);
+        }
+
         pre.EnsureRolled();
 
         float effectiveBounceChance = Mathf.Max(0f, baseBounceChance);
         float specialBonus = Mathf.Max(0f, modifiers.specialChanceBonusPercent);
-
-        if (ProjectileCardLevelSystem.Instance != null && card != null)
+        int bounceStacks = GetCombinedEnhancedVariantPickCount(card, 1, 2, 3);
+        if (bounceStacks > 0)
         {
-            int enhancedVariant = ProjectileCardLevelSystem.Instance.GetEnhancedVariant(card);
-            bool hasVariant1 = ProjectileCardLevelSystem.Instance.HasChosenVariant(card, 1);
-
-            bool applyVariant1 = enhancedVariant == 1 || hasVariant1;
-            if (applyVariant1)
-            {
-                int unlockLevel = ProjectileCardLevelSystem.Instance.GetEnhancedUnlockLevel();
-                if (unlockLevel > 0)
-                {
-                    int level = ProjectileCardLevelSystem.Instance.GetLevel(card);
-                    int tiersReached = Mathf.Max(0, level / unlockLevel);
-                    if (tiersReached > 0)
-                    {
-                        effectiveBounceChance += Mathf.Max(0f, EnhancedBounceChance) * tiersReached;
-                    }
-                }
-            }
+            effectiveBounceChance += Mathf.Max(0f, EnhancedBounceChance) * bounceStacks;
         }
 
         effectiveBounceChance += specialBonus;
@@ -401,6 +500,7 @@ public class ThunderDisc : MonoBehaviour
 
         bouncedHitEnemies.Clear();
         hasHitEnemy = false;
+        ClearBounceTarget();
 
         if (_collider2D != null && colliderToIgnore != null)
         {
@@ -490,7 +590,9 @@ public class ThunderDisc : MonoBehaviour
         }
 
         float bestDistSq = float.MaxValue;
-        Vector2 bestDir = Vector2.zero;
+        Component bestTargetComponent = null;
+        Collider2D bestTargetCollider = null;
+        IDamageable bestTargetDamageable = null;
         bool found = false;
 
         Vector2 origin = transform.position;
@@ -524,7 +626,9 @@ public class ThunderDisc : MonoBehaviour
             if (distSq < bestDistSq)
             {
                 bestDistSq = distSq;
-                bestDir = delta.normalized;
+                bestTargetComponent = damageableComponent != null ? damageableComponent : hit;
+                bestTargetCollider = hit;
+                bestTargetDamageable = damageable;
                 found = true;
             }
         }
@@ -540,15 +644,24 @@ public class ThunderDisc : MonoBehaviour
         }
 
         currentMoveSpeed += Mathf.Max(0f, BounceSpeedBoost);
+        bounceLockedTargetComponent = bestTargetComponent;
+        bounceLockedTargetCollider = bestTargetCollider;
+        bounceLockedTargetDamageable = bestTargetDamageable;
 
         if (_rigidbody2D != null)
         {
-            _rigidbody2D.velocity = bestDir * currentMoveSpeed;
+            UpdateBounceLock();
         }
 
         if (!keepInitialRotation)
         {
-            float baseAngle = Mathf.Atan2(bestDir.y, bestDir.x) * Mathf.Rad2Deg;
+            Vector2 bounceDirection = _rigidbody2D != null ? _rigidbody2D.velocity : Vector2.zero;
+            if (bounceDirection.sqrMagnitude < 0.0001f)
+            {
+                bounceDirection = (GetBounceTargetPosition() - (Vector2)transform.position).normalized;
+            }
+
+            float baseAngle = Mathf.Atan2(bounceDirection.y, bounceDirection.x) * Mathf.Rad2Deg;
             float facingCorrection = (int)spriteFacing;
             float finalAngle = baseAngle + facingCorrection + additionalRotationOffsetDeg;
             transform.rotation = Quaternion.Euler(0f, 0f, finalAngle);

@@ -36,6 +36,7 @@ public class CoreCards : BaseCard
         CritChance,
         CritDamage,
         Luck,
+        FavourLuck,
         ExperienceGain,
         SoulGain,
         HealthRegeneration,
@@ -69,6 +70,9 @@ public class CoreCards : BaseCard
                 break;
             case CoreStatType.Luck:
                 ApplyLuckIncrease(player, finalValue);
+                break;
+            case CoreStatType.FavourLuck:
+                ApplyFavourLuckIncrease(player, finalValue);
                 break;
             case CoreStatType.ExperienceGain:
                 ApplyExperienceGainIncrease(player, finalValue);
@@ -238,6 +242,21 @@ public class CoreCards : BaseCard
         }
     }
 
+    private void ApplyFavourLuckIncrease(GameObject player, float amount)
+    {
+        PlayerStats stats = player.GetComponent<PlayerStats>();
+        if (stats != null)
+        {
+            int increase = Mathf.RoundToInt(amount);
+            stats.favourLuck += increase;
+            Debug.Log($"FavourLuck increased by {increase}. New: {stats.favourLuck}");
+        }
+        else
+        {
+            Debug.LogWarning("PlayerStats component not found!");
+        }
+    }
+
     private void ApplyExperienceGainIncrease(GameObject player, float amount)
     {
         PlayerStats stats = player.GetComponent<PlayerStats>();
@@ -325,6 +344,8 @@ public class CoreCards : BaseCard
                 return $"+{valueStr2}% Crit Damage";
             case CoreStatType.Luck:
                 return $"+{valueStr2} Luck";
+            case CoreStatType.FavourLuck:
+                return $"+{Mathf.RoundToInt(finalValue2)} Favour Luck";
             case CoreStatType.ExperienceGain:
                 return $"+{valueStr2}% Experience Gain";
             case CoreStatType.SoulGain:

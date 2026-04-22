@@ -204,6 +204,11 @@ public class StatusControllerManager : MonoBehaviour
 
     public float BurnTickDamageMultiplier => Mathf.Max(0f, burnTickDamageMultiplier);
 
+    public void AddBurnTickDamageMultiplier(float delta)
+    {
+        burnTickDamageMultiplier = Mathf.Max(0f, burnTickDamageMultiplier + delta);
+    }
+
     public float DamageRoundingThreshold => Mathf.Clamp(damageRoundingThreshold, 0f, 10f);
 
     public float VulnerableDamageMultiplier

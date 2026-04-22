@@ -948,7 +948,11 @@ public class ElementalBeam : MonoBehaviour, IInstantModifiable
 
         if (card != null && enhancedVariant == 2 && !isVariant12Stacked)
         {
-            card.runtimeSpawnInterval = finalCooldown + finalLifetime + finalBeamEndDuration;
+            // IMPORTANT: runtimeSpawnInterval should encode the "cycle time" baseline
+            // (so ProjectileSpawner doesn't overlap beams), but it must NOT already
+            // include cooldown-reduction modifiers because ProjectileSpawner will
+            // apply them when scheduling.
+            card.runtimeSpawnInterval = Mathf.Max(0.0001f, baseCooldown + finalLifetime + finalBeamEndDuration);
         }
 
         // STACKED Variant 1+2: compute when rotation should begin. We treat the

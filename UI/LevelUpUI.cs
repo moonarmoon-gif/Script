@@ -63,7 +63,7 @@ public class LevelUpUI : MonoBehaviour
             {
                 const string intelligenceReworkKey = "LevelUpUI.Intelligence.ReworkVersion";
                 int version = PlayerPrefs.GetInt(intelligenceReworkKey, 0);
-                if (version < 1)
+                if (version < 2)
                 {
                     if (Mathf.Approximately(row.NormalStatValue, 0.25f) || Mathf.Approximately(row.NormalStatValue, 0f))
                     {
@@ -71,12 +71,20 @@ public class LevelUpUI : MonoBehaviour
                     }
 
                     string prefsNormalKey = $"LevelUpUI.{key}.NormalStatValue";
-                    if (!PlayerPrefs.HasKey(prefsNormalKey) || Mathf.Approximately(PlayerPrefs.GetFloat(prefsNormalKey, row.NormalStatValue), 0.25f))
+                    if (!PlayerPrefs.HasKey(prefsNormalKey))
                     {
                         PlayerPrefs.SetFloat(prefsNormalKey, 0.2f);
                     }
+                    else
+                    {
+                        float current = PlayerPrefs.GetFloat(prefsNormalKey, row.NormalStatValue);
+                        if (Mathf.Approximately(current, 0.25f) || Mathf.Approximately(current, 0f))
+                        {
+                            PlayerPrefs.SetFloat(prefsNormalKey, 0.2f);
+                        }
+                    }
 
-                    PlayerPrefs.SetInt(intelligenceReworkKey, 1);
+                    PlayerPrefs.SetInt(intelligenceReworkKey, 2);
                 }
             }
 

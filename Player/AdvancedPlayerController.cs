@@ -1707,6 +1707,50 @@ public class AdvancedPlayerController : MonoBehaviour
         float attackSpeedFromCard = modifiers.attackSpeedPercent;
         float attackSpeedFromStats = playerStats != null ? playerStats.AttackSpeedBonus : 0f;
 
+        float attackSpeedFromEnhancedVariant = 0f;
+        if (ProjectileCardLevelSystem.Instance != null && activeProjectileCard != null)
+        {
+            bool isRepeatableEnhancedAttackSpeedCard =
+                activeProjectileCard.projectileType == ProjectileCards.ProjectileType.Fireball ||
+                activeProjectileCard.projectileType == ProjectileCards.ProjectileType.ThunderDisc ||
+                activeProjectileCard.projectileType == ProjectileCards.ProjectileType.IceLance;
+
+            if (isRepeatableEnhancedAttackSpeedCard)
+            {
+                int stacks = ProjectileCardLevelSystem.Instance.GetEnhancedVariantPickCount(activeProjectileCard, 2);
+                if (stacks > 0)
+                {
+                    float perStack = 0f;
+                    if (activeProjectileCard.projectilePrefab != null)
+                    {
+                        FireBall fb = activeProjectileCard.projectilePrefab.GetComponent<FireBall>();
+                        if (fb != null)
+                        {
+                            perStack = fb.EnhancedAttackSpeed;
+                        }
+                        else
+                        {
+                            ThunderDisc td = activeProjectileCard.projectilePrefab.GetComponent<ThunderDisc>();
+                            if (td != null)
+                            {
+                                perStack = td.EnhancedAttackSpeed;
+                            }
+                            else
+                            {
+                                PlayerProjectiles pp = activeProjectileCard.projectilePrefab.GetComponent<PlayerProjectiles>();
+                                if (pp != null)
+                                {
+                                    perStack = pp.EnhancedAttackSpeed;
+                                }
+                            }
+                        }
+                    }
+
+                    attackSpeedFromEnhancedVariant = Mathf.Max(0f, perStack) * stacks;
+                }
+            }
+        }
+
         float attackSpeedFromAcceleration = 0f;
         StatusController statusController = GetComponent<StatusController>();
         if (statusController != null)
@@ -1723,7 +1767,7 @@ public class AdvancedPlayerController : MonoBehaviour
             }
         }
 
-        float totalAttackSpeedPercent = attackSpeedFromCard + attackSpeedFromStats + attackSpeedFromAcceleration;
+        float totalAttackSpeedPercent = attackSpeedFromCard + attackSpeedFromStats + attackSpeedFromAcceleration + attackSpeedFromEnhancedVariant;
         float denominator = 1f + (totalAttackSpeedPercent / 100f);
         denominator = Mathf.Max(0.0001f, denominator);
         float interval = reducedBaseInterval / denominator;
@@ -1810,6 +1854,35 @@ public class AdvancedPlayerController : MonoBehaviour
         lastAutoFireTime = -999f;
     }
 
+    private static bool CardsShareActiveProjectileIdentity(ProjectileCards a, ProjectileCards b)
+    {
+        if (a == null || b == null)
+        {
+            return false;
+        }
+
+        if (a == b)
+        {
+            return true;
+        }
+
+        return a.projectileType == b.projectileType &&
+               a.projectileSystem == b.projectileSystem &&
+               a.projectilePrefab == b.projectilePrefab;
+    }
+
+    public ProjectileCards GetRegisteredActiveProjectileCard(ProjectileCards card)
+    {
+        if (card == null || activeProjectileCard == null)
+        {
+            return null;
+        }
+
+        return CardsShareActiveProjectileIdentity(activeProjectileCard, card)
+            ? activeProjectileCard
+            : null;
+    }
+
     public void RegisterActiveProjectileCard(ProjectileCards card)
     {
         if (card == null) return;
@@ -1821,7 +1894,7 @@ public class AdvancedPlayerController : MonoBehaviour
             return;
         }
 
-        if (activeProjectileCard.cardName == card.cardName)
+        if (CardsShareActiveProjectileIdentity(activeProjectileCard, card))
         {
             activeProjectileCard = card;
             Debug.Log($"<color=cyan>AdvancedPlayerController: Active projectile card {card.cardName} updated</color>");

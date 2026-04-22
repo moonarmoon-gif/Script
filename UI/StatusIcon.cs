@@ -120,7 +120,7 @@ public class StatusIcon : MonoBehaviour
             {
                 bool showText = active && binding.showStackText && (showStackTextAtOneStack || stacks > 1);
                 if (binding.stackText.enabled != showText) binding.stackText.enabled = showText;
-                if (showText) binding.stackText.text = "x " + stacks;
+                if (showText) binding.stackText.text = "x" + stacks;
             }
 
             if (active)

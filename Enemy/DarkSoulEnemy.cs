@@ -321,6 +321,7 @@ public class DarkSoulEnemy : MonoBehaviour
             {
                 Vector3 hitPoint = AdvancedPlayerController.Instance.transform.position; // Use PLAYER position for damage number
                 Vector3 hitNormal = (AdvancedPlayerController.Instance.transform.position - transform.position).normalized;
+                PlayerHealth.RegisterPendingAttacker(gameObject);
                 playerDamageable.TakeDamage(attackDamageV2, hitPoint, hitNormal);
                 Debug.Log($"<color=cyan>DarkSoulEnemy dealt {attackDamageV2} damage (instance {i + 1}/{instances})</color>");
                 

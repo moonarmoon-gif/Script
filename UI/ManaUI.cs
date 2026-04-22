@@ -64,7 +64,7 @@ public class ManaUI : MonoBehaviour
             manaSlider.value = currentMana;
         }
 
-        // Update text (show fractional mana with two decimal places)
+        // Keep the UI at two decimals while mana continues using float math internally.
         if (manaText != null)
         {
             manaText.text = $"{currentMana:F2} / {maxMana:F2}";

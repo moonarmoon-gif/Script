@@ -16,6 +16,7 @@ public class PlayerStats : MonoBehaviour
     public float critChance = 1f; // Base 1% crit chance
     public float critDamage = 25f; // Base 25% crit damage (125% total)
     public float luck = 0f;
+    public int favourLuck = 0;
     public float experienceMultiplier = 100f;
     [HideInInspector]
     public float soulGainMultiplier = 1f;
@@ -31,9 +32,6 @@ public class PlayerStats : MonoBehaviour
 
     public float Cooldown = 100f;
 
-    public float FavourInterval = 30f;
-
-    
 
     [HideInInspector]
     public float moveSpeedMultiplier = 1f;
@@ -351,11 +349,6 @@ public class PlayerStats : MonoBehaviour
             currentLevel = cachedPlayerLevel.CurrentLevel;
             currentExperience = cachedPlayerLevel.CurrentExp;
             experienceToNextLevel = cachedPlayerLevel.ExpToNextLevel;
-        }
-
-        if (CardSelectionManager.Instance != null)
-        {
-            FavourInterval = CardSelectionManager.Instance.FavourCardInterval;
         }
     }
 

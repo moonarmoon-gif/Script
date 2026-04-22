@@ -10,6 +10,7 @@ public class AgisEnemy : MonoBehaviour
     public float TeleportInDuration = 1f;
 
     public float Attack1Duration = 1f;
+    public float Attack1Timer = 30f;
     public float Attack2Duration = 1f;
     public float Attack3Duration = 1f;
     public float Attack4Duration = 1f;
@@ -85,6 +86,8 @@ public class AgisEnemy : MonoBehaviour
     private bool threshold75Triggered;
     private bool threshold50Triggered;
     private bool threshold25Triggered;
+
+    private Coroutine attack1TimerRoutine;
 
     private bool HasAttackAnimatorParam(string attackParam)
     {
@@ -266,6 +269,12 @@ public class AgisEnemy : MonoBehaviour
             yield return PlayAttack1SequenceRoutine();
         }
 
+        if (attack1TimerRoutine != null)
+        {
+            StopCoroutine(attack1TimerRoutine);
+        }
+        attack1TimerRoutine = StartCoroutine(Attack1TimerRoutine());
+
         if (buffDebuffRoutine != null)
         {
             StopCoroutine(buffDebuffRoutine);
@@ -310,11 +319,7 @@ public class AgisEnemy : MonoBehaviour
 
             // Only roll attacks that actually exist in this animator, otherwise it can
             // look like the boss "never attacks" even though the timer is firing.
-            List<int> rolls = new List<int>(4);
-            if (GetAttack1RepeatCount() > 0 && HasAttackAnimatorParam("attack1"))
-            {
-                rolls.Add(0);
-            }
+            List<int> rolls = new List<int>(3);
             if (HasAttackAnimatorParam("attack2"))
             {
                 rolls.Add(1);
@@ -338,9 +343,6 @@ public class AgisEnemy : MonoBehaviour
             int pick = rolls[UnityEngine.Random.Range(0, rolls.Count)];
             switch (pick)
             {
-                case 0:
-                    yield return PlayAttack1SequenceRoutine();
-                    break;
                 case 1:
                     yield return PlayAttackRoutine("attack2", Mathf.Max(0f, Attack2Duration));
                     break;
@@ -352,6 +354,58 @@ public class AgisEnemy : MonoBehaviour
                     break;
             }
         }
+    }
+
+    private IEnumerator Attack1TimerRoutine()
+    {
+        while (enemyHealth != null && enemyHealth.IsAlive)
+        {
+            if (Attack1Timer <= 0f)
+            {
+                yield return null;
+                continue;
+            }
+
+            float remaining = Mathf.Max(0f, Attack1Timer);
+            while (remaining > 0f && enemyHealth != null && enemyHealth.IsAlive)
+            {
+                if (Attack1Timer <= 0f)
+                {
+                    break;
+                }
+
+                remaining -= GameStateManager.GetPauseSafeDeltaTime();
+                yield return null;
+            }
+
+            if (Attack1Timer <= 0f)
+            {
+                yield return null;
+                continue;
+            }
+
+            // Give queued threshold attacks priority over timed portal spawns.
+            while ((attackInProgress || attack3InProgress || queuedAttack3Count > 0) && enemyHealth != null && enemyHealth.IsAlive)
+            {
+                yield return null;
+            }
+
+            if (enemyHealth == null || !enemyHealth.IsAlive)
+            {
+                break;
+            }
+
+            if (GetAttack1RepeatCount() > 0 && HasAttackAnimatorParam("attack1"))
+            {
+                yield return PlayAttack1SequenceRoutine();
+            }
+            else
+            {
+                yield return null;
+            }
+        }
+
+        attack1TimerRoutine = null;
     }
 
     private IEnumerator PlayAttackRoutine(string attackParam, float duration)

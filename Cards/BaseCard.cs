@@ -17,10 +17,6 @@ public abstract class BaseCard : ScriptableObject
     public float cardNameFontSize = 24f;
     [Tooltip("Font color for card name")]
     public Color cardNameColor = Color.white;
-    [Tooltip("Font size for description")]
-    public float descriptionFontSize = 18f;
-    [Tooltip("Font color for description")]
-    public Color descriptionColor = new Color(0.9f, 0.9f, 0.9f, 1f);
     
     [Header("Text Outline")]
     [Tooltip("Enable text outline for card name")]
